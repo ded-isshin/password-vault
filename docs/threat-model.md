@@ -68,6 +68,10 @@ Forgotten master password or unlock material should be treated as unrecoverable 
 recovery design explicitly preserves zero-knowledge properties. MFA recovery codes recover login
 factor access, not vault decryption.
 
+The MVP should assume that item existence, item count, ciphertext size, and update timing are
+observable to the server. The recommended MVP boundary encrypts titles, URLs, usernames, notes,
+tags, and custom fields, which means the server cannot provide content search.
+
 ## Open Questions
 
 - Exact login protocol and key derivation.
@@ -78,3 +82,6 @@ factor access, not vault decryption.
 - Backup destination and retention.
 - Browser bundle integrity controls.
 - WebAuthn/passkey timing.
+- Single-device or multi-device MVP.
+- Recovery key strategy.
+- Lock and unlock timeout policy.

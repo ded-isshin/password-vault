@@ -13,6 +13,8 @@ Recommended MVP stack:
 - GitHub Actions for CI.
 - GHCR for images.
 - Helm and Argo CD for future GitOps deployment.
+- Existing infrastructure runtime-secret path first; Vault/OpenBao evaluated later as a platform
+  layer.
 
 ## Why Rust
 
@@ -40,6 +42,8 @@ zero-knowledge.
 - TOTP seed custody is not selected.
 - PostgreSQL synchronous vs asynchronous replication is not selected.
 - Backup target is not selected.
+- Browser KDF implementation is not selected.
+- GitHub Project creation is blocked by missing full `project` scope.
 
 ## Sources
 
@@ -49,5 +53,9 @@ zero-knowledge.
 - https://www.w3.org/TR/webcrypto/
 - https://www.rfc-editor.org/info/rfc6238/
 - https://cloudnative-pg.io/docs/1.29/architecture/
+- https://cloudnative-pg.io/docs/1.29/replication/
+- https://cloudnative-pg.io/docs/1.29/backup/
+- https://cloudnative-pg.io/docs/1.29/recovery/
 - https://developer.hashicorp.com/vault/docs/about-vault/how-vault-works
 - https://developer.hashicorp.com/vault/docs/secrets/transit
+- https://docs.github.com/en/issues/planning-and-tracking-with-projects

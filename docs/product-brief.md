@@ -13,6 +13,7 @@ organizations and sharing.
 - Client-side encryption by default.
 - Server stores ciphertext and synchronization metadata.
 - Kubernetes-native deployment.
+- Public-facing deployment path, with private routing details kept out of the public product repo.
 - GitHub is the control plane for issues, PRs, CI, docs, and release evidence.
 - Argo CD is the future deployment controller.
 - Documentation and threat modeling come before product code.
@@ -45,10 +46,16 @@ item contents.
 - browser-delivered JavaScript residual risk
 - TOTP seed key custody
 - off-node backup target
+- GitHub Project creation is blocked until the active token has the full `project` scope
+- single-device vs multi-device MVP
+- plaintext metadata boundary
+- recovery key vs account recovery codes
+- item revision and delta-sync protocol
 
 ## Planned Post-MVP
 
 - WebAuthn/passkeys
+- zero-knowledge-compatible vault recovery key if not included in MVP
 - KeePass/KDBX import
 - organizations
 - shared vaults

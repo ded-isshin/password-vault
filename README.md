@@ -20,6 +20,8 @@ documentation, logs, and CI output as public.
 - MFA direction: TOTP first, WebAuthn/passkeys later.
 - Secret-management direction: Vault/OpenBao may help platform secrets later, but it is not the
   user-vault core.
+- Public routing direction: edge reverse proxy to Kubernetes ingress/service; exact host, port,
+  TLS, and network details belong in the infrastructure repository.
 - Current blocker: login/key-derivation and cryptographic design are not finalized.
 
 ## MVP Scope
@@ -69,8 +71,24 @@ Use placeholders such as `<redacted-secret>`, `<redacted-domain>`, and
 
 - [AGENTS.md](AGENTS.md)
 - [docs/product-brief.md](docs/product-brief.md)
+- [docs/whitepaper.md](docs/whitepaper.md)
+- [docs/feature-map.md](docs/feature-map.md)
 - [docs/architecture.md](docs/architecture.md)
+- [docs/diagrams.md](docs/diagrams.md)
+- [docs/data-model.md](docs/data-model.md)
+- [docs/sync-protocol.md](docs/sync-protocol.md)
+- [docs/auth-mfa-lifecycle.md](docs/auth-mfa-lifecycle.md)
+- [docs/lock-unlock-state.md](docs/lock-unlock-state.md)
 - [docs/threat-model.md](docs/threat-model.md)
 - [docs/security/crypto-design-draft.md](docs/security/crypto-design-draft.md)
 - [docs/adr/0001-initial-product-direction.md](docs/adr/0001-initial-product-direction.md)
+- [docs/adr/0002-backend-stack-rust.md](docs/adr/0002-backend-stack-rust.md)
+- [docs/adr/0003-auth-and-crypto-direction.md](docs/adr/0003-auth-and-crypto-direction.md)
+- [docs/adr/0004-kubernetes-data-platform-direction.md](docs/adr/0004-kubernetes-data-platform-direction.md)
 - [docs/research/initial-stack-analysis.md](docs/research/initial-stack-analysis.md)
+- [docs/research/auth-crypto-v1-analysis.md](docs/research/auth-crypto-v1-analysis.md)
+- [docs/research/vault-openbao-platform-secrets.md](docs/research/vault-openbao-platform-secrets.md)
+- [docs/research/cloudnativepg-platform-analysis.md](docs/research/cloudnativepg-platform-analysis.md)
+- [docs/research/github-control-plane.md](docs/research/github-control-plane.md)
+- [docs/research/source-baseline-2026-06-06.md](docs/research/source-baseline-2026-06-06.md)
+- [docs/research/product-architecture-ux-subagent-2026-06-06.md](docs/research/product-architecture-ux-subagent-2026-06-06.md)
