@@ -78,10 +78,15 @@ Working direction:
 
 - KDF target: Argon2id in the browser through a reviewed, pinned WASM dependency.
 - KDF fallback: PBKDF2-HMAC-SHA-256 through WebCrypto only if Argon2id/WASM review is not ready.
-- Key separation: derive separate authentication and vault-unlock material.
+- Key separation: run one expensive password KDF, then use HKDF domain separation for
+  authentication and vault-unlock material.
+- Server auth storage: any client-derived auth secret received by the server is treated as a
+  password-equivalent secret and stored only as a slow server-side hash, never as a raw replayable
+  value.
 - Key wrapping: wrap vault keys client-side; do not send unwrapped vault keys to the server.
 - AEAD for web MVP: AES-256-GCM through WebCrypto.
-- Nonce: 96-bit random nonce per encryption under a key.
+- Nonce: 96-bit nonce per encryption under a key, with an explicit per-key encryption budget and
+  rekey trigger before implementation.
 - Associated data: bind ciphertext to version, vault, item, revision, and key context.
 - Versioning: store crypto version, KDF algorithm, KDF parameters, key ID, nonce, and payload format
   version with every encrypted artifact.
@@ -98,8 +103,14 @@ If a WebCrypto-native KDF is selected, the tradeoff against Argon2id must be exp
 
 ```text
 user password
-  -> KDF(auth context, auth salt, params) -> auth secret
-  -> KDF(unlock context, unlock salt, params) -> account unlock key
+  -> Argon2id(password, salt, params) -> master secret
+
+master secret
+  -> HKDF("password-vault/auth/v1") -> client auth secret
+  -> HKDF("password-vault/unlock/v1") -> account unlock key
+
+client auth secret
+  -> server-side slow hash before storage
 
 account unlock key
   -> unwrap user key material
@@ -123,6 +134,8 @@ Each encrypted item revision should carry:
 - AEAD algorithm
 - KDF version and parameters when relevant
 - key ID
+- nonce generation mode
+- per-key encryption budget metadata or key epoch
 - vault ID
 - item ID
 - revision ID
@@ -170,7 +183,9 @@ Proposed, not final:
 
 - Argon2id or PBKDF2 known-answer tests.
 - HKDF domain separation tests.
+- Server stores only a slow hash of received auth secret, not the raw auth secret.
 - AES-GCM round-trip and tamper rejection.
+- AES-GCM nonce uniqueness and rekey-budget tests.
 - Associated-data tamper rejection.
 - Wrong-password unwrap failure.
 - Cross-user and cross-vault denial.

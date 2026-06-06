@@ -239,6 +239,9 @@ TOTP seed encryption. It must not be the database or decrypt service for user va
 10. Recovery key vs account recovery codes.
 11. Item revision and delta-sync protocol.
 
+The auth and crypto decision must explicitly define server storage of client-derived auth material,
+AES-GCM nonce budgets, and the one-pass KDF plus HKDF domain-separation model.
+
 ## Sources
 
 - https://agilebits.github.io/security-design/

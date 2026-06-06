@@ -31,6 +31,7 @@ The practical MVP fallback is a derived-auth-key flow:
 - derive authentication material client-side;
 - derive vault unlock/wrapping material separately;
 - never send the raw unlock password to the backend;
+- store only a slow server-side hash of any received client-derived auth secret;
 - avoid storing a database value that enables cheap offline guessing after DB compromise;
 - document and test every protocol step.
 
@@ -51,11 +52,11 @@ documented as a tradeoff and not represented as the final security target.
 For the browser MVP, AES-GCM is the likely first AEAD candidate because it is available through
 WebCrypto. The final crypto ADR must define:
 
-- key hierarchy;
+- key hierarchy, preferably one expensive Argon2id pass followed by HKDF domain separation;
 - vault key wrapping;
 - item payload format;
 - AEAD algorithm;
-- nonce generation and uniqueness guarantees;
+- nonce generation, uniqueness guarantees, per-key encryption budget, and rekey trigger;
 - associated data;
 - version fields;
 - migration strategy.

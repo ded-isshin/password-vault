@@ -27,13 +27,15 @@ and recovery behavior. See [ADR 0003](../adr/0003-auth-and-crypto-direction.md).
 
 ### Browser KDF
 
-Working candidate: Argon2id through reviewed, pinned WASM.
+Working candidate: one Argon2id pass through reviewed, pinned WASM, followed by HKDF domain
+separation.
 
 WebCrypto does not provide Argon2id. If the client uses Argon2id, the product needs a reviewed WASM
 implementation, deterministic test vectors, supply-chain controls, and bundle-integrity review.
 
 Fallback candidate: PBKDF2-HMAC-SHA-256 through WebCrypto, explicitly documented as weaker and
-migration-ready.
+migration-ready. If used, the fallback must set a concrete minimum iteration count and require
+explicit downgrade approval.
 
 ### Key Hierarchy
 
@@ -41,8 +43,14 @@ Working hierarchy:
 
 ```text
 user password
-  -> auth KDF context -> auth secret
-  -> unlock KDF context -> account unlock key
+  -> Argon2id(password, salt, params) -> master secret
+
+master secret
+  -> HKDF("password-vault/auth/v1") -> client auth secret
+  -> HKDF("password-vault/unlock/v1") -> account unlock key
+
+client auth secret
+  -> server-side slow hash before storage
 
 account unlock key
   -> unwrap user key material
@@ -61,7 +69,9 @@ Open: whether the MVP uses per-item keys or a single vault key for item payloads
 Working candidate:
 
 - AEAD: AES-256-GCM through WebCrypto.
-- Nonce: 96-bit random nonce per encryption under a key.
+- Nonce: 96-bit nonce per encryption under a key.
+- Budget: the crypto v1 spec must define a per-key encryption budget and rekey trigger before using
+  long-lived vault keys with AES-GCM.
 - Associated data: bind record type, crypto version, vault ID, item ID, revision ID, and key ID.
 - Payload: versioned encrypted item revision.
 - Migration: every encrypted artifact carries version and algorithm metadata.
@@ -114,6 +124,8 @@ Open, but the recommended MVP default is conservative:
 - replayed TOTP denial
 - crypto-version migration tests after more than one version exists
 - AEAD associated-data tamper rejection
+- AES-GCM nonce uniqueness and rekey-budget tests
+- server-side test proving raw client auth secret is not stored
 - negative test that backend code cannot decrypt a stored item payload
 
 ## Sources
