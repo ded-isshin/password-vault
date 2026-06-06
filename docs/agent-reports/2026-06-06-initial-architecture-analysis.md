@@ -107,6 +107,9 @@ Yes.
   backup/restore, public routing, and Vault/OpenBao platform usage.
 - Sidecar research outputs from earlier planning were incorporated for Vault/OpenBao, GitHub
   workflow, and Rust vs Go stack direction.
+- Additional subagents were started in this session for auth/crypto, Kubernetes/PostgreSQL platform,
+  and product/UX architecture. They did not return final outputs before this report was finalized,
+  so no unreviewed new subagent recommendation is treated as accepted.
 
 ## Claude Code Used?
 
