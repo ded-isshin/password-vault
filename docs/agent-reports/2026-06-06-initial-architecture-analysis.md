@@ -19,6 +19,7 @@ prepare GitHub Project tracking.
 - Verified GitHub CLI initially had `read:project` scope.
 - Confirmed GitHub CLI later received full `project` scope.
 - Created GitHub Project `Password Vault MVP`.
+- Made the GitHub Project public and added a public-safe description/readme.
 - Added Project fields: Priority, Area, Risk, Phase, Decision.
 - Continued on branch `docs/architecture-stack-baseline`.
 - Drafted product whitepaper.
@@ -74,6 +75,7 @@ prepare GitHub Project tracking.
 - `gh project item-add 2 --owner @me --url ...`
 - `gh project view 2 --owner @me --format json`
 - `gh project field-create 2 --owner @me ...`
+- `gh project edit 2 --owner @me --visibility PUBLIC ...`
 - `gh issue comment 6 --repo ded-isshin/password-vault ...`
 - `gh issue close 6 --repo ded-isshin/password-vault ...`
 - `git switch -c docs/architecture-stack-baseline`
@@ -183,7 +185,8 @@ Rejected or qualified suggestions:
 - Browser Argon2id/WASM dependency risk is not yet resolved.
 - Browser-delivered JavaScript remains an accepted residual risk.
 - Backup target is unknown.
-- GitHub Project exists and custom fields are configured. Project views may still need UI tuning.
+- GitHub Project exists, is public, and custom fields are configured. Project views may still need UI
+  tuning.
 - CloudNativePG `required` versus `preferred` synchronous durability mode is not selected.
 - Public routing details are intentionally not documented in this public repository.
 - Multi-device support is not decided.
