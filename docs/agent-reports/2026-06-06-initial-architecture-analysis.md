@@ -19,6 +19,7 @@ prepare GitHub Project tracking.
 - Verified GitHub CLI initially had `read:project` scope.
 - Confirmed GitHub CLI later received full `project` scope.
 - Created GitHub Project `Password Vault MVP`.
+- Added Project fields: Priority, Area, Risk, Phase, Decision.
 - Continued on branch `docs/architecture-stack-baseline`.
 - Drafted product whitepaper.
 - Drafted architecture diagrams.
@@ -72,6 +73,7 @@ prepare GitHub Project tracking.
 - `gh project create --owner @me --title "Password Vault MVP" --format json`
 - `gh project item-add 2 --owner @me --url ...`
 - `gh project view 2 --owner @me --format json`
+- `gh project field-create 2 --owner @me ...`
 - `gh issue comment 6 --repo ded-isshin/password-vault ...`
 - `gh issue close 6 --repo ded-isshin/password-vault ...`
 - `git switch -c docs/architecture-stack-baseline`
@@ -181,7 +183,7 @@ Rejected or qualified suggestions:
 - Browser Argon2id/WASM dependency risk is not yet resolved.
 - Browser-delivered JavaScript remains an accepted residual risk.
 - Backup target is unknown.
-- GitHub Project exists, but custom fields and views still need setup.
+- GitHub Project exists and custom fields are configured. Project views may still need UI tuning.
 - CloudNativePG `required` versus `preferred` synchronous durability mode is not selected.
 - Public routing details are intentionally not documented in this public repository.
 - Multi-device support is not decided.
@@ -200,8 +202,8 @@ Rejected or qualified suggestions:
 
 ## Next Steps
 
-1. Configure GitHub Project fields and views.
-2. Review draft PR #8.
+1. Review draft PR #8.
+2. Tune GitHub Project views in the UI if needed.
 3. Create ADR for single-device vs multi-device MVP.
 4. Create ADR/spec for auth/login and key-derivation protocol.
 5. Create ADR/spec for crypto v1 payload, key hierarchy, and recovery-key decision.
