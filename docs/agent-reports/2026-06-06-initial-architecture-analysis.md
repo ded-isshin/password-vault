@@ -16,8 +16,9 @@ prepare GitHub Project tracking.
 
 ## Work Completed
 
-- Verified GitHub CLI has `read:project` scope.
-- Confirmed `project` write scope is still needed for GitHub Project creation.
+- Verified GitHub CLI initially had `read:project` scope.
+- Confirmed GitHub CLI later received full `project` scope.
+- Created GitHub Project `Password Vault MVP`.
 - Continued on branch `docs/architecture-stack-baseline`.
 - Drafted product whitepaper.
 - Drafted architecture diagrams.
@@ -69,6 +70,10 @@ prepare GitHub Project tracking.
 - `gh project list --format json`
 - `gh issue list --repo ded-isshin/password-vault --limit 20`
 - `gh project create --owner @me --title "Password Vault MVP" --format json`
+- `gh project item-add 2 --owner @me --url ...`
+- `gh project view 2 --owner @me --format json`
+- `gh issue comment 6 --repo ded-isshin/password-vault ...`
+- `gh issue close 6 --repo ded-isshin/password-vault ...`
 - `git switch -c docs/architecture-stack-baseline`
 - `claude -p --permission-mode plan --tools Read --no-session-persistence --model opus --effort high ...`
 - `gh repo view ded-isshin/password-vault --json nameWithOwner,visibility,url,defaultBranchRef,hasIssuesEnabled,hasProjectsEnabled,hasWikiEnabled,viewerPermission,securityPolicyUrl`
@@ -176,7 +181,7 @@ Rejected or qualified suggestions:
 - Browser Argon2id/WASM dependency risk is not yet resolved.
 - Browser-delivered JavaScript remains an accepted residual risk.
 - Backup target is unknown.
-- GitHub Project write scope is not yet confirmed; current token still reports `read:project`.
+- GitHub Project exists, but custom fields and views still need setup.
 - CloudNativePG `required` versus `preferred` synchronous durability mode is not selected.
 - Public routing details are intentionally not documented in this public repository.
 - Multi-device support is not decided.
@@ -195,8 +200,8 @@ Rejected or qualified suggestions:
 
 ## Next Steps
 
-1. Complete GitHub Project creation after `project` scope is confirmed.
-2. Commit this documentation branch and open a draft PR.
+1. Configure GitHub Project fields and views.
+2. Review draft PR #8.
 3. Create ADR for single-device vs multi-device MVP.
 4. Create ADR/spec for auth/login and key-derivation protocol.
 5. Create ADR/spec for crypto v1 payload, key hierarchy, and recovery-key decision.
