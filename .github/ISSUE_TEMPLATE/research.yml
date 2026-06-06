@@ -1,0 +1,25 @@
+name: Research
+description: Research an external tool, standard, or design option.
+title: "[Research]: "
+labels: ["type:research", "needs-triage"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Research question
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Required or preferred sources
+      description: Prefer official documentation and primary sources.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected output
+      placeholder: Research note, ADR input, implementation recommendation, risk list.
+    validations:
+      required: true

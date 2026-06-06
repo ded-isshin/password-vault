@@ -1,0 +1,30 @@
+name: Security Review
+description: Review a security-sensitive design or implementation.
+title: "[Security Review]: "
+labels: ["type:security", "needs-triage"]
+body:
+  - type: textarea
+    id: subject
+    attributes:
+      label: Subject
+    validations:
+      required: true
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threats or abuse cases to check
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence to inspect
+      placeholder: PR, ADR, docs, code paths, tests.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Expected review output
+    validations:
+      required: true

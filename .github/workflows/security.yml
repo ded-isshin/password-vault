@@ -1,0 +1,30 @@
+name: public-safety
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  public-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for unsafe public placeholders
+        run: |
+          set -euo pipefail
+          forbidden='(BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{20,}|github_pat_|xox[baprs]-|client-key-data|client-certificate-data)'
+          if grep -RInE "$forbidden" . \
+            --exclude-dir=.git \
+            --exclude-dir=node_modules \
+            --exclude-dir=target \
+            --exclude=security.yml; then
+            echo "Potential secret or private infrastructure artifact found."
+            exit 1
+          fi

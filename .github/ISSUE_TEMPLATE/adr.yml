@@ -1,0 +1,23 @@
+name: ADR
+description: Record a long-lived architecture decision.
+title: "[ADR]: "
+labels: ["type:adr", "needs-triage"]
+body:
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision to make
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options to compare
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks
+    validations:
+      required: true

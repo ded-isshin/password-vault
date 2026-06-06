@@ -1,0 +1,6 @@
+# Bootstrap draft. Refine after the first implementation layout exists.
+
+/.github/ @ded-isshin
+/docs/security/ @ded-isshin
+/docs/threat-model.md @ded-isshin
+/docs/adr/ @ded-isshin
