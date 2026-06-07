@@ -49,7 +49,8 @@ Breaking product API changes require a versioning or migration decision before i
   metadata only and must not contain secrets or free-form secret-bearing text.
 - Sensitive values must not be logged: passwords, account secret keys, raw client auth secrets,
   TOTP seeds, TOTP codes, recovery codes, unwrapped vault keys, plaintext item fields.
-- Auth start endpoints use a maximum request body size of 16 KiB for the MVP.
+- Current auth router requests are capped at 128 KiB for the MVP. Auth start payloads should remain
+  small, but a tighter per-route 16 KiB limit is planned rather than currently enforced.
 
 ### Error Envelope
 
@@ -243,10 +244,11 @@ Implementation status:
   hash over the vault id because the request does not yet carry a client-supplied genesis hash.
 - The client-supplied `initial_vault.vault_id` remains part of the contract for now; collisions are
   handled as a generic registration failure.
-- The setup session is created with `mfa_enrollment_required`. CSRF issuance and TOTP enrollment are
-  implemented; vault item APIs are not implemented yet.
-- The `__Host-pv_session` cookie is intentionally `Secure`; a plain-HTTP browser preview will not
-  behave like the final HTTPS deployment for cookie persistence.
+- The setup session is created with `mfa_enrollment_required`. CSRF issuance, TOTP enrollment,
+  login finish, and login-time TOTP verification are implemented. Vault item APIs are not
+  implemented yet.
+- The `__Host-pv_session` cookie is intentionally `Secure`; browser testing should use the
+  mini-PC HTTPS edge route or another HTTPS route for realistic cookie persistence.
 
 ## Login
 
@@ -311,7 +313,10 @@ Request:
   "client_proof": "<base64url-32-bytes>",
   "device": {
     "label": "Firefox on laptop",
-    "client_type": "browser"
+    "client_type": "browser",
+    "public_metadata": {
+      "platform_hint": "web"
+    }
   }
 }
 ```
@@ -322,7 +327,7 @@ Response `200` when TOTP is required:
 {
   "result": "mfa_required",
   "mfa_challenge_id": "00000000-0000-4000-8000-000000000021",
-  "available_methods": ["totp", "recovery_code"],
+  "available_methods": ["totp"],
   "expires_at": "2026-06-07T00:05:00Z"
 }
 ```
@@ -347,6 +352,8 @@ confirmed and the session is upgraded.
 
 Wrong proof, expired challenge, unknown account, or unsupported protocol returns a generic auth
 failure. The server must not log `client_proof`.
+
+The login challenge is one-shot: success, proof failure, or metadata mismatch consumes it.
 
 ## MFA
 
@@ -382,7 +389,8 @@ TOTP verification policy:
 - SHA1, 6 digits, 30 second period;
 - accept current step and one adjacent step on either side;
 - reject any step less than or equal to `last_accepted_step`;
-- generic failure for invalid, replayed, expired, or rate-limited attempts.
+- generic failure for invalid, malformed, replayed, expired, or rate-limited attempts;
+- consume the MFA challenge after the fifth failed attempt.
 
 ### `POST /v1/auth/mfa/recovery-code/verify`
 
@@ -412,6 +420,10 @@ Response `200`:
 
 Recovery-code verification consumes the code permanently and does not reveal or change vault
 decryption material.
+
+Implementation status: recovery codes are generated during TOTP enrollment, but
+`/v1/auth/mfa/recovery-code/verify` is not implemented yet. `login/finish` therefore advertises
+only `totp` in `available_methods` until recovery-code verification is implemented.
 
 ## TOTP Enrollment And Recovery Codes
 
@@ -496,6 +508,8 @@ Implementation status:
   `X-PV-CSRF` token.
 - Decrypts the pending TOTP seed with XChaCha20Poly1305 and verifies the submitted code with the
   RFC 6238 adjacent-step window.
+- A failed or malformed code consumes the pending factor; the user must start enrollment again.
+  This avoids a reusable pending seed/factor without adding schema state for enrollment attempts.
 - Marks the factor active, stores `last_accepted_step`, generates 10 one-time recovery codes, and
   stores only salted SHA-256 recovery-code hashes.
 - Rotates the session token, clears the session CSRF verifier, upgrades the session to
@@ -875,6 +889,9 @@ or decrypting sync responses.
 
 ### `GET /v1/audit-events`
 
+Status: planned. The database audit log exists for implemented auth/MFA/session flows, but this
+read endpoint is not implemented yet.
+
 Response `200`:
 
 ```json
@@ -882,7 +899,7 @@ Response `200`:
   "events": [
     {
       "event_id": "00000000-0000-4000-8000-000000000500",
-      "event_type": "auth.login_succeeded",
+      "event_type": "mfa_totp_login_verified",
       "created_at": "2026-06-07T00:00:00Z",
       "actor_device_id": "00000000-0000-4000-8000-000000000200",
       "metadata": {

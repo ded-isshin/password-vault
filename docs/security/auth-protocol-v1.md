@@ -60,12 +60,16 @@ The master password and account secret key are never sent to the backend.
 ```text
 master password
   + account secret key
-  -> Argon2id(combined input, account salt, params) -> master secret
+  -> browser KDF(combined input, account salt, params) -> master secret
 
 master secret
   -> HKDF("password-vault/auth/v1") -> client auth secret
   -> HKDF("password-vault/unlock/v1") -> account unlock key
 ```
+
+The first browser MVP profile is `pbkdf2-sha256-browser-v1` through WebCrypto with
+PBKDF2-HMAC-SHA-256 and 600,000 iterations. Argon2id through reviewed pinned WASM remains the future
+hardening target, not a silent runtime fallback.
 
 `client auth secret` is password-equivalent. It must not be sent to the backend raw and must never
 be logged or stored raw.
@@ -172,6 +176,7 @@ POST /v1/auth/login/finish
   server_nonce
   client_final_without_proof
   client_proof
+  device metadata
 
 server verifies auth material
 server returns one of:
@@ -203,9 +208,9 @@ client submits a `pv-scram-sha-256-v1` proof derived from:
 - login handle;
 - canonical request fields.
 
-The implementation must define exact canonical encoding and include proof test vectors before #16 is
-merged. TLS exporter/channel-binding input is deferred until browser support and deployment behavior
-are reviewed.
+The implementation defines exact canonical encoding in the transcript helper and includes stability
+tests for the login auth message. TLS exporter/channel-binding input is deferred until browser
+support and deployment behavior are reviewed.
 
 For `derived-auth-v1`, `combined_nonce` is `base64url_no_pad(client_nonce || server_nonce)`, where
 both nonces are decoded 32-byte values and `||` is byte concatenation in that order. The
@@ -220,10 +225,10 @@ full session.
 
 ```text
 POST /v1/auth/mfa/totp/verify
-  login_challenge_id
+  mfa_challenge_id
   totp_code
 
-server verifies TOTP, replay window, and rate limits
+server verifies the pre-MFA challenge, TOTP replay window, and attempt limit
 server creates post-MFA server session
 ```
 
@@ -233,7 +238,11 @@ TOTP seed protection is server-owned secret management and is defined by
 Implementation note: setup-session TOTP enrollment endpoints are implemented. Enrollment start
 creates a pending encrypted seed under `PV_TOTP_SEED_KEY_B64`; confirmation verifies the submitted
 code, returns one-time recovery codes, rotates the session token, and upgrades the session to
-`mfa_verified`. Login-finish and login-time TOTP verification remain planned.
+`mfa_verified`. A failed enrollment confirmation consumes the pending factor and requires enrollment
+restart. Login-finish and login-time TOTP verification are implemented locally on the current
+feature branch: successful password proof either creates a setup session when no verified TOTP
+factor exists, or creates a one-shot pre-MFA challenge; successful TOTP verification consumes that
+challenge and creates an `mfa_verified` session.
 
 ## Session Flow
 

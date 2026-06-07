@@ -62,8 +62,9 @@ Implemented:
 - Live cluster review on 2026-06-07 found the password-vault preview database running as one
   `postgres:17-bookworm` StatefulSet replica with a `local-path` PVC. This is bootstrap/demo
   infrastructure, not HA.
-- Live infrastructure values currently set startup migrations on for the password-vault preview.
-  That should be treated as a bootstrap exception and changed before real-user data is accepted.
+- Live infrastructure values currently set startup migrations off for the password-vault preview.
+  That should stay true for real-user data; future schema-changing releases need a controlled
+  migration job or another reviewed operator step.
 
 Planned:
 
