@@ -1,6 +1,7 @@
 # ADR 0003: Auth And Crypto Direction
 
-Status: proposed. This is the current recommended direction for the MVP, pending human acceptance.
+Status: accepted for MVP planning. The implementation details still require issue-specific specs and
+tests before product code.
 
 ## Context
 
@@ -85,16 +86,15 @@ Cons:
 
 Do not implement simple password-over-TLS for the public MVP.
 
-Use a derived-auth-key design as the working MVP candidate, while keeping the key hierarchy
-independent enough that OPAQUE can replace the authentication layer later.
+Use `derived-auth-v1` as the MVP authentication protocol, while keeping the key hierarchy independent
+enough that OPAQUE can replace the authentication layer later.
 
-Use a high-entropy account secret key as the recommended second input to the browser KDF for the
-MVP. It follows the same security idea as 1Password-style two-secret key derivation, but it changes
-UX, device onboarding, and recovery. The first MVP must define that behavior in a dedicated
-human-approved ADR before implementation.
+Use a high-entropy account secret key as the second input to the browser KDF for the MVP. It follows
+the same security idea as 1Password-style two-secret key derivation, but it changes UX, device
+onboarding, and recovery. The first MVP must define that behavior before implementation.
 
-OPAQUE remains the preferred long-term authentication protocol, but it should not be implemented
-until Rust and browser library maturity, interoperability, and test strategy are reviewed.
+OPAQUE remains the preferred long-term authentication protocol. Issue #24 found enough evidence to
+justify a future PoC, but not enough evidence to make OPAQUE the MVP default.
 
 WebAuthn/passkeys should be designed as a post-MVP phishing-resistant MFA and login path. They do not
 replace the vault unlock design by themselves.
@@ -216,7 +216,13 @@ TOTP design must include:
 
 ## Decision
 
-Proposed, not final:
+Accepted for MVP planning:
+
+- Use `derived-auth-v1`.
+- Do not use password-over-TLS.
+- Keep OPAQUE as a future preferred migration path.
+- Require protocol-neutral auth start/finish endpoints.
+- Keep vault unlock and key wrapping separate from auth migration.
 
 - Derived-auth-key flow is the MVP recommended login candidate.
 - Account secret key / two-secret key derivation is the recommended MVP baseline, pending final UX,

@@ -17,8 +17,8 @@ The target security model is zero-knowledge for vault item contents:
 - the server stores ciphertext and synchronization metadata;
 - the server does not receive plaintext vault item contents;
 - the server does not receive or persist unwrapped user vault keys;
-- a future account secret key may be added as a second KDF input so a stolen database is less useful
-  for password-only offline guessing, but it is not required for the first MVP;
+- the MVP uses an account secret key as a second KDF input so a stolen database is less useful for
+  password-only offline guessing;
 - TOTP protects account login, not vault decryption;
 - forgotten vault unlock material is unrecoverable unless a future zero-knowledge recovery design is
   approved.
