@@ -39,6 +39,9 @@ deployment.
 
 - Docker's documented GitHub Actions flow uses Buildx, Docker metadata, registry login, image push,
   and optional SBOM/provenance.
+- Docker-hosted GitHub runner images already include current Docker Buildx/BuildKit. The separate
+  Docker setup-buildx action creates a containerized builder by default, which can introduce an extra
+  Docker Hub pull for the BuildKit daemon image before the product image build even starts.
 - GitHub's image publishing docs include GHCR publishing and artifact attestation examples.
 - BuildKit cache can use GitHub Actions cache through `docker/build-push-action`.
 - Docker Build provenance can expose build args, so build args must not carry secrets.
@@ -61,6 +64,8 @@ deployment.
   `id-token`, and `attestations` permissions.
 - Add BuildKit SBOM/provenance for pushed images and GitHub artifact attestation bound to the image
   digest.
+- Prefer the default GitHub-hosted runner Buildx/BuildKit path for single-platform MVP builds instead
+  of a separate containerized BuildKit builder. This reduces Docker Hub dependency during CI setup.
 - Use k6 as the first load-test tool. Locust and wrk/Vegeta are deferred.
 - Add low-cardinality Prometheus HTTP metrics through `/metrics`; do not label metrics with login
   handles, user IDs, device IDs, item IDs, or secret-bearing values.
