@@ -132,10 +132,11 @@ server stores:
 The registration response must not cause the raw password, account secret key, account unlock key, or
 unwrapped vault key to reach the backend.
 
-Registration must not become a login-handle enumeration endpoint. Duplicate-handle handling must use
-generic responses and defer user-visible conflict details until a point where enumeration risk is
-explicitly accepted or mitigated. The implementation contract must define exact duplicate behavior
-before code.
+Registration must not become a login-handle enumeration endpoint. In the MVP, duplicate
+`register/start` requests return the same `200` response shape as new-handle requests and create a
+short-lived registration challenge with generated metadata. The server does not create an account at
+`register/start`. Duplicate-handle conflict is enforced later at `register/finish` by the unique
+`accounts.login_handle_normalized` constraint and returns a generic registration failure.
 
 ## Login Flow
 
@@ -174,7 +175,13 @@ server returns one of:
 
 `login/start` must use constant-shape responses for existing and unknown accounts. Unknown-account
 responses use deterministic synthetic metadata so account existence is not trivially exposed by the
-response shape.
+response shape. Synthetic metadata must be derived with a server-side secret,
+`PV_SYNTHETIC_METADATA_KEY_B64`, encoded as a 32-byte base64url-no-padding value. The key is a runtime
+secret and must never be committed to the repository or printed in logs. Synthetic account and
+auth-verifier salts use HMAC-SHA-256 with separate domain strings and the normalized login handle.
+For the MVP, stored `auth_verifier_iterations` must remain pinned to the synthetic metadata default
+of `150000`; allowing per-account iteration values would make `login/start` an account-existence
+oracle even if the JSON key shape stays constant.
 
 `login/start` must not return a pre-authenticated `mfa_required_hint`. MFA requirement is revealed
 only after `login/finish` succeeds.
@@ -193,6 +200,12 @@ client submits a `pv-scram-sha-256-v1` proof derived from:
 The implementation must define exact canonical encoding and include proof test vectors before #16 is
 merged. TLS exporter/channel-binding input is deferred until browser support and deployment behavior
 are reviewed.
+
+For `derived-auth-v1`, `combined_nonce` is `base64url_no_pad(client_nonce || server_nonce)`, where
+both nonces are decoded 32-byte values and `||` is byte concatenation in that order. The
+`auth_challenges.public_metadata` JSON stores the decoded client nonce re-encoded as base64url, the
+server nonce, the combined nonce, verifier profile metadata, and whether the challenge used synthetic
+metadata.
 
 ## MFA Flow
 
