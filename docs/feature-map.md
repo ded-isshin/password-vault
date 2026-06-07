@@ -20,6 +20,7 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 | Items | Item revisions | Immutable encrypted revisions. |
 | Sync | Delta pull by cursor | Server-visible cursor, encrypted payloads. |
 | Sync | Optimistic concurrency | Stale base revision returns conflict. |
+| API | Versioned `/v1` product API | Contracts documented before security-sensitive implementation. |
 | Clients | Multi-device protocol support | Browser web app only, but sync/key model must support multiple user devices. |
 | Devices | Soft device records | Audit/revocation foundation, not a strong authenticator by itself. |
 | Audit | Security/product events | No secret values in audit events. |

@@ -25,6 +25,7 @@ Recommended baseline:
   keys derived from the vault key.
 - TOTP: login MFA only; not part of user vault decryption.
 - Server auth storage: slow server-side hash of any client-derived auth secret.
+- API direction: API-first with versioned `/v1` contracts before frontend-dependent implementation.
 - Database: PostgreSQL.
 - Kubernetes database: CloudNativePG with three instances.
 - Replication: quorum synchronous replication with one synchronous standby for real vault data.
@@ -234,6 +235,18 @@ unlock material from the user's password, account secret key, and KDF metadata. 
 cryptographic enrollment can wait until WebAuthn/passkeys or native clients are designed.
 
 This avoids redesigning the product when the Chrome extension arrives.
+
+## API-First Direction
+
+The web MVP must be API-first. The browser UI should consume documented `/v1` APIs rather than
+special backend behavior that only works for one page flow.
+
+Future browser extension, iOS, desktop, and CLI/integration clients should reuse these contracts.
+Security-sensitive API specs must include generic error behavior, rate-limit expectations, and what
+data is plaintext metadata versus encrypted payload.
+
+The canonical initial API surface and contract-strength rule are documented in
+[API Contract Draft](api-contract.md).
 
 ```mermaid
 flowchart LR

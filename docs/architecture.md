@@ -22,6 +22,7 @@ API service
   - encrypted vault sync endpoints
   - authorization checks
   - audit events without secret values
+  - versioned API contracts for web, extension, mobile, and future CLI clients
 
 PostgreSQL
   - users
@@ -56,10 +57,25 @@ Future clients
 - Deployment controller: Argo CD.
 - Platform secrets: existing infrastructure secret path first; Vault/OpenBao platform ADR later.
 
+## API-First Direction
+
+`password-vault` should be designed API-first.
+
+The browser web app is the first client, not the only client. Chrome extension, mobile apps, desktop
+apps, and future CLI/integration clients should use the same versioned product API instead of
+separate backend behavior.
+
+The canonical initial API surface and contract-strength rule are documented in
+[API Contract Draft](api-contract.md).
+
+API-first does not mean public unauthenticated APIs. It means stable, documented contracts for
+authorized product clients.
+
 ## Functional Documents
 
 - [Product whitepaper](whitepaper.md)
 - [Foundational decisions](foundational-decisions.md)
+- [API contract draft](api-contract.md)
 - [Feature map](feature-map.md)
 - [Architecture diagrams](diagrams.md)
 - [Data model draft](data-model.md)

@@ -16,6 +16,9 @@ approved login and unlock flow.
 
 The Chrome extension and iOS client are post-MVP clients, not separate product lines.
 
+The product is API-first: the browser web app is the first client of the versioned product API, not a
+reason to bake browser-only assumptions into backend behavior.
+
 ## MVP Client Scope
 
 MVP includes:
@@ -28,6 +31,7 @@ MVP includes:
 - encrypted item create/update/delete;
 - delta sync by cursor;
 - optimistic conflict rejection;
+- documented `/v1` API contracts for security-sensitive flows;
 - multiple browser sessions/devices using the same account and vault.
 
 MVP does not include:
@@ -62,9 +66,12 @@ The Chrome extension should reuse:
 
 - the same auth protocol;
 - the same local unlock model;
-- the same sync API;
+- the same versioned sync API;
 - the same encrypted payload format;
 - the same item revision model.
+
+The canonical initial API surface and contract-strength rule are documented in
+[API Contract Draft](../api-contract.md).
 
 Extension-specific work should be added later:
 

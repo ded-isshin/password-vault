@@ -76,6 +76,7 @@ Use placeholders such as `<redacted-secret>`, `<redacted-domain>`, and
 - [docs/decision-briefs/README.md](docs/decision-briefs/README.md)
 - [docs/feature-map.md](docs/feature-map.md)
 - [docs/architecture.md](docs/architecture.md)
+- [docs/api-contract.md](docs/api-contract.md)
 - [docs/diagrams.md](docs/diagrams.md)
 - [docs/data-model.md](docs/data-model.md)
 - [docs/sync-protocol.md](docs/sync-protocol.md)

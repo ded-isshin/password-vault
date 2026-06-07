@@ -43,6 +43,21 @@ For meaningful work, update durable documentation:
 - runbook updates for operational changes
 - implementation report after non-trivial work
 
+## Agent Coordination
+
+Use a single-writer model for this repository:
+
+- Codex owns final integration into shared docs and PRs.
+- Subagents are report-only by default.
+- If a subagent is allowed to edit files, assign a disjoint write scope before it starts.
+- Do not let two agents edit the same ADR, research note, report, or architecture document in
+  parallel.
+- For architecture, security, auth, crypto, Kubernetes/GitOps, database, CI/CD including GitHub
+  Actions, frontend/design, and public-repository exposure work, let delegated reviewers complete
+  within the agreed maximum runtime unless they are clearly blocked or unsafe.
+- Set the maximum runtime and result recording location before spawning an agent.
+- Record accepted, rejected, and deferred agent recommendations in the task report or PR notes.
+
 ## Official Sources
 
 Use official documentation first for:
@@ -74,6 +89,22 @@ Use Claude Code as an auxiliary advisor for:
 - large or risky diffs
 
 Summarize Claude Code output and decide what to accept or reject. Do not blindly apply it.
+
+For high-risk architecture, security, authentication, cryptography, database, Kubernetes/GitOps,
+CI/CD including GitHub Actions, frontend/design, or public exposure work, run Claude Code as an
+independent advisor before marking a PR review-ready. Use read-only or plan mode by default. If
+Claude Code cannot complete, record the command, elapsed time, failure mode, and retry result.
+
+## API-First Product Rule
+
+`password-vault` is API-first.
+
+- Define API contracts before frontend implementation depends on them.
+- Version public product APIs, starting with `/v1`.
+- Keep the browser web app, future Chrome extension, mobile apps, and future CLI/integrations as
+  clients of the same account, auth, device, sync, and vault APIs.
+- Do not create browser-only backend behavior that cannot be represented as a stable API contract.
+- Document API request/response shapes before implementing security-sensitive endpoints.
 
 ## Infrastructure Boundaries
 

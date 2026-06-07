@@ -30,6 +30,10 @@ Clarify the initial architecture discussion for `password-vault` before product 
 - Recommended CloudNativePG quorum synchronous replication with `dataDurability: required` as the
   initial real-data recommendation.
 - Clarified GitHub Project views and GitHub Flow usage.
+- Added API-first as an explicit product architecture requirement.
+- Added single-writer agent coordination rules to avoid subagent/Claude/Codex documentation
+  collisions.
+- Added a canonical API contract draft for the initial `/v1` surface.
 - Created GitHub issue #9 for multi-device client and browser-extension roadmap.
 - Added issue #9 to the public GitHub Project.
 - Moved closed issue #6 to `Done` in the public GitHub Project.
@@ -38,8 +42,11 @@ Clarify the initial architecture discussion for `password-vault` before product 
 
 ## Files Changed
 
+- `AGENTS.md`
 - `README.md`
 - `docs/architecture.md`
+- `docs/api-contract.md`
+- `docs/product-brief.md`
 - `docs/foundational-decisions.md`
 - `docs/research/github-control-plane.md`
 - `docs/adr/0004-kubernetes-data-platform-direction.md`
@@ -146,7 +153,7 @@ Not tested:
 ## Open Questions
 
 - Which Argon2id browser dependency, if any, is acceptable?
-- Should account secret key / two-secret key derivation be accepted later as optional hardening?
+- How should account secret key UX, recovery, emergency-kit, and new-device onboarding work?
 - Should OPAQUE be delayed until after MVP or implemented earlier if libraries look strong enough?
 - Which object storage target will be used for backups?
 - Should Vault/OpenBao be adopted for app/TOTP secrets before or after MVP?
@@ -155,9 +162,10 @@ Not tested:
 ## Next Steps
 
 1. Finish PR #8 review and merge after human approval.
-2. Create or update issue for multi-device and browser-extension roadmap.
-3. Write threat model v1.
-4. Write auth/login protocol ADR with exact message shapes.
+2. Write threat model v1.
+3. Write auth/login protocol ADR with exact message shapes.
+4. Write API contract draft for `/v1` registration, auth, TOTP, devices, vault sync, and item
+   revisions.
 5. Write crypto v1 spec.
 6. Write PostgreSQL HA/backup/restore ADR.
 
