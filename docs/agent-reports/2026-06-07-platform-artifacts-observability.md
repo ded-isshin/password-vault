@@ -17,6 +17,8 @@ Helm rollout defaults, load-test scaffolding, and metrics exposure.
 
 - Added `rust-toolchain.toml` pinned to Rust `1.96.0`.
 - Updated Rust CI containers to `rust:1.96-bookworm`.
+- Updated GitHub workflow checkout steps to `actions/checkout@v6` after GitHub CI warned that
+  Node.js 20 actions are deprecated.
 - Added `/metrics` endpoint using `axum-prometheus` with route/method/status HTTP metrics.
 - Collapsed unmatched-route metric labels into `/<unmatched>` to avoid unbounded 404 cardinality.
 - Added a multi-stage `Dockerfile` and `.dockerignore`.

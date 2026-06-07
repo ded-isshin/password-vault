@@ -41,7 +41,7 @@ jobs:
           --health-retries 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build local image
         run: docker build -t password-vault-api:load-smoke .

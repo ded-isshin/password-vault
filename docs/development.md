@@ -74,7 +74,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: |
           export PATH=/usr/local/cargo/bin:$PATH
           cargo test --locked --workspace
