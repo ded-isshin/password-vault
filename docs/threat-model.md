@@ -42,6 +42,11 @@ Status: bootstrap draft.
 - node or pod failure
 - replayed TOTP code within an accepted time window
 - loss of master password or unlock secret
+- loss of account secret key if two-secret key derivation is accepted
+- local exposure of account secret key on a compromised device
+- user enumeration through pre-login KDF metadata lookup
+- unauthenticated denial of service through expensive login verification
+- silent KDF downgrade from Argon2id to weaker browser-native fallback
 
 ## Initial Mitigations
 
@@ -54,6 +59,10 @@ Status: bootstrap draft.
 - HttpOnly SameSite cookies for sessions
 - MFA recovery codes
 - TOTP replay protection and rate limiting
+- constant-shape pre-login metadata responses
+- rate limits before expensive auth verification
+- explicit approval requirement for any KDF downgrade or fallback
+- account secret key is not stored server-side in plaintext
 - off-node backups before real use
 - GitOps deployment with human approval
 
@@ -68,9 +77,15 @@ Forgotten master password or unlock material should be treated as unrecoverable 
 recovery design explicitly preserves zero-knowledge properties. MFA recovery codes recover login
 factor access, not vault decryption.
 
+The MVP should assume that item existence, item count, ciphertext size, and update timing are
+observable to the server. The recommended MVP boundary encrypts titles, URLs, usernames, notes,
+tags, and custom fields, which means the server cannot provide content search.
+
 ## Open Questions
 
 - Exact login protocol and key derivation.
+- Account secret key UX, storage, and recovery behavior.
+- Pre-login KDF metadata flow without user enumeration.
 - Exact client-side encryption format.
 - Metadata encryption boundaries.
 - TOTP seed encryption strategy.
@@ -78,3 +93,6 @@ factor access, not vault decryption.
 - Backup destination and retention.
 - Browser bundle integrity controls.
 - WebAuthn/passkey timing.
+- Multi-device client and browser extension roadmap.
+- Recovery key strategy.
+- Lock and unlock timeout policy.
