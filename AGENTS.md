@@ -48,8 +48,11 @@ For meaningful work, update durable documentation:
 Use a single-writer model for this repository:
 
 - Codex owns final integration into shared docs and PRs.
-- Subagents are report-only by default.
+- Reviewer/advisor subagents are report-only by default.
+- Analyst, documentation, engineer, tester, CI, and platform worker subagents may create docs, code,
+  tests, scripts, workflows, and reports when they are assigned as writer agents.
 - If a subagent is allowed to edit files, assign a disjoint write scope before it starts.
+- Use a separate branch or worktree when a writer agent may collide with Codex or another writer.
 - Do not let two agents edit the same ADR, research note, report, or architecture document in
   parallel.
 - For architecture, security, auth, crypto, Kubernetes/GitOps, database, CI/CD including GitHub
