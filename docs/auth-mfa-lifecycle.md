@@ -66,7 +66,9 @@ The provisioning URI follows the Google Authenticator `otpauth://totp/...` forma
 browser flow.
 
 Pending enrollment is bound to the setup/recovery session and its idle/absolute expiry. A pending
-factor is not usable for login until confirmation succeeds.
+factor is not usable for login until confirmation succeeds. A failed or malformed confirmation code
+consumes the pending factor and requires the user to start enrollment again, so one pending seed is
+not reusable for repeated guesses.
 
 ## Login Flow
 

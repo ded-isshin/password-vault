@@ -16,10 +16,11 @@ Current implementation status, 2026-06-07:
 - TOTP enrollment starts a pending factor, encrypts the server-owned seed with the runtime
   `PV_TOTP_SEED_KEY_B64` key, and confirmation upgrades the setup session to `mfa_verified` while
   returning one-time recovery codes.
-- Login finish, recovery-code verification, vault item CRUD/sync, and browser-side crypto/unlock
-  remain unimplemented.
-- The live preview is plain HTTP, so the secure session cookie contract is not a complete browser
-  login UX until HTTPS ingress/LB behavior is added.
+- Login finish and login-time TOTP verification are implemented locally on a feature branch and are
+  not yet merged or deployed. Recovery-code verification, vault item CRUD/sync, and browser-side
+  crypto/unlock remain unimplemented.
+- The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
+  The in-cluster app service remains plain HTTP behind the edge proxy.
 
 ## Stabilization-First Queue
 
@@ -30,15 +31,17 @@ MVP dependable:
    can return after registration.
 2. Add browser vault unlock plus encrypted item create/read/update/delete with revision conflict
    checks.
-3. Turn production startup migrations off and introduce a controlled migration job/runbook before
-   schema-changing releases.
+3. Keep production startup migrations off and introduce a controlled migration job/runbook before
+   schema-changing real-user releases.
 4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
-6. Expand observability from HTTP Golden Signals to auth/MFA, vault writes/sync, database health,
+6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
+   listener before real-user use.
+7. Expand observability from HTTP Golden Signals to auth/MFA, vault writes/sync, database health,
    backup freshness, and security aggregate metrics.
-7. Add SLO and burn-rate alerts after the relevant metrics return live data.
-8. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
+8. Add SLO and burn-rate alerts after the relevant metrics return live data.
+9. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
    from inside the Kubernetes/LXD network.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.
@@ -101,7 +104,6 @@ Existing blockers:
 - #5 PostgreSQL HA, backup, and restore ADR.
 - #7 Branch ruleset and public repository safety gates.
 - #9 Multi-device client and browser extension roadmap.
-- #24 OPAQUE browser/Rust library compatibility spike.
 
 Delivery issues:
 

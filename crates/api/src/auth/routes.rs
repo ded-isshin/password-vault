@@ -26,9 +26,10 @@ use crate::{
     AppState,
     auth::{
         encoding::{decode_base64url, decode_base64url_array, encode_base64url},
-        scram::{DEFAULT_ITERATIONS, DEFAULT_SALT_BYTES, PROFILE_ID},
+        scram::{self, DEFAULT_ITERATIONS, DEFAULT_SALT_BYTES, PROFILE_ID},
         tokens,
         totp::{self, TotpAlgorithm, TotpProfile},
+        transcript::{self, LoginAuthMessage},
     },
 };
 
@@ -45,6 +46,7 @@ const MAX_LOGIN_HANDLE_BYTES: usize = 320;
 const MAX_DEVICE_LABEL_BYTES: usize = 128;
 const MAX_DEVICE_PUBLIC_METADATA_BYTES: usize = 2048;
 const AUTH_CHALLENGE_RATE_LIMIT: i64 = 20;
+const MFA_CHALLENGE_MAX_ATTEMPTS: i32 = 5;
 const AUTH_CHALLENGE_RATE_LIMIT_WINDOW: Duration = Duration::minutes(5);
 const REGISTER_CHALLENGE_TTL: Duration = Duration::minutes(10);
 const LOGIN_CHALLENGE_TTL: Duration = Duration::minutes(5);
@@ -69,6 +71,8 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/v1/auth/register/start", post(register_start))
         .route("/v1/auth/register/finish", post(register_finish))
         .route("/v1/auth/login/start", post(login_start))
+        .route("/v1/auth/login/finish", post(login_finish))
+        .route("/v1/auth/mfa/totp/verify", post(totp_verify))
         .route("/v1/auth/logout", post(logout))
         .route("/v1/mfa/totp/enroll/start", post(totp_enroll_start))
         .route("/v1/mfa/totp/enroll/confirm", post(totp_enroll_confirm))
@@ -232,6 +236,46 @@ struct LoginStartResponse {
     expires_at: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LoginFinishRequest {
+    login_challenge_id: Uuid,
+    auth_protocol: String,
+    client_nonce: String,
+    server_nonce: String,
+    client_final_without_proof: String,
+    client_proof: String,
+    device: DeviceRequest,
+}
+
+#[derive(Serialize)]
+struct LoginFinishMfaRequiredResponse {
+    result: &'static str,
+    mfa_challenge_id: Uuid,
+    available_methods: Vec<&'static str>,
+    expires_at: String,
+}
+
+#[derive(Serialize)]
+struct LoginFinishSessionCreatedResponse {
+    result: &'static str,
+    session: SessionResponse,
+    next_step: &'static str,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TotpVerifyRequest {
+    mfa_challenge_id: Uuid,
+    code: String,
+}
+
+#[derive(Serialize)]
+struct TotpVerifyResponse {
+    result: &'static str,
+    session: SessionResponse,
+}
+
 #[derive(Serialize)]
 struct ErrorEnvelope {
     error: ErrorObject,
@@ -312,6 +356,14 @@ impl ApiError {
             status: StatusCode::FORBIDDEN,
             code: "mfa_verification_failed",
             message: "MFA verification failed.",
+        }
+    }
+
+    fn auth_failed() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "auth_failed",
+            message: "Authentication failed.",
         }
     }
 }
@@ -701,7 +753,7 @@ async fn login_start(
         client_nonce: encode_base64url(&client_nonce),
         server_nonce: encode_base64url(&server_nonce),
         combined_nonce: encode_base64url(&combined_nonce),
-        auth_verifier_profile: PROFILE_ID,
+        auth_verifier_profile: PROFILE_ID.to_string(),
         auth_verifier_iterations: metadata.auth_verifier_iterations,
         synthetic: metadata.account_id.is_none(),
     };
@@ -734,6 +786,460 @@ async fn login_start(
             expires_at: format_rfc3339(expires_at)?,
         },
     ))
+}
+
+async fn login_finish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    StrictJson(request): StrictJson<LoginFinishRequest>,
+) -> Result<Response, ApiError> {
+    ensure_unsafe_request_context(&headers)?;
+    let pool = database_pool(&state)?;
+    if request.auth_protocol != AUTH_PROTOCOL {
+        return Err(ApiError::auth_failed());
+    }
+    let client_nonce = decode_base64url_array::<CLIENT_NONCE_BYTES>(&request.client_nonce)
+        .map_err(|_| ApiError::bad_request())?;
+    let server_nonce = decode_base64url_array::<SERVER_NONCE_BYTES>(&request.server_nonce)
+        .map_err(|_| ApiError::bad_request())?;
+    let client_final_without_proof = decode_base64url(&request.client_final_without_proof)
+        .map_err(|_| ApiError::bad_request())?;
+    if client_final_without_proof.is_empty()
+        || client_final_without_proof.len() > MAX_DEVICE_PUBLIC_METADATA_BYTES
+    {
+        return Err(ApiError::bad_request());
+    }
+    let client_proof = decode_base64url_array::<AUTH_KEY_BYTES>(&request.client_proof)
+        .map_err(|_| ApiError::bad_request())?;
+    let device = ValidatedDevice::from_request(&request.device)?;
+    let now = now_utc_second()?;
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let challenge = sqlx::query(
+        "
+        SELECT
+            id,
+            account_id,
+            login_handle_normalized,
+            server_nonce,
+            public_metadata
+        FROM auth_challenges
+        WHERE id = $1
+          AND challenge_type = 'login'
+          AND auth_protocol = $2
+          AND consumed_at IS NULL
+          AND expires_at >= $3
+        FOR UPDATE
+        ",
+    )
+    .bind(request.login_challenge_id)
+    .bind(AUTH_PROTOCOL)
+    .bind(now)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(challenge) = challenge else {
+        return Err(ApiError::auth_failed());
+    };
+
+    let challenge_id = challenge
+        .try_get::<Uuid, _>("id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let account_id = challenge
+        .try_get::<Option<Uuid>, _>("account_id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let login_handle_normalized = challenge
+        .try_get::<String, _>("login_handle_normalized")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let stored_server_nonce = challenge
+        .try_get::<Vec<u8>, _>("server_nonce")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let public_metadata = challenge
+        .try_get::<SqlJson<Value>, _>("public_metadata")
+        .map_err(|_| ApiError::service_unavailable())?
+        .0;
+    let challenge_metadata = decode_login_challenge_metadata(public_metadata)?;
+
+    let metadata_matches = challenge_metadata.client_nonce == encode_base64url(&client_nonce)
+        && challenge_metadata.server_nonce == encode_base64url(&server_nonce)
+        && stored_server_nonce == server_nonce
+        && challenge_metadata.auth_verifier_profile == PROFILE_ID
+        && challenge_metadata.auth_verifier_iterations == DEFAULT_ITERATIONS;
+    if !metadata_matches {
+        consume_auth_challenge(&mut transaction, challenge_id, now).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+        return Err(ApiError::auth_failed());
+    }
+
+    let auth_message = transcript::login_auth_message(LoginAuthMessage {
+        challenge_id,
+        auth_protocol: AUTH_PROTOCOL,
+        login_handle_normalized: &login_handle_normalized,
+        client_nonce: &client_nonce,
+        server_nonce: &server_nonce,
+        client_final_without_proof: &client_final_without_proof,
+    });
+
+    let mut proof_ok = false;
+    if let Some(account_id) = account_id.filter(|_| !challenge_metadata.synthetic) {
+        let account = sqlx::query(
+            "
+            SELECT auth_stored_key
+            FROM accounts
+            WHERE id = $1
+              AND login_handle_normalized = $2
+              AND auth_protocol = $3
+            ",
+        )
+        .bind(account_id)
+        .bind(&login_handle_normalized)
+        .bind(AUTH_PROTOCOL)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+        if let Some(account) = account {
+            let stored_key = auth_key_from_vec(
+                account
+                    .try_get::<Vec<u8>, _>("auth_stored_key")
+                    .map_err(|_| ApiError::service_unavailable())?,
+            )?;
+            proof_ok = scram::verify_client_proof(&stored_key, &auth_message, &client_proof)
+                .map_err(|_| ApiError::auth_failed())?;
+        }
+
+        if !proof_ok {
+            insert_audit_event(
+                &mut transaction,
+                account_id,
+                None,
+                "auth_login_failed",
+                json!({ "reason": "proof_failed" }),
+            )
+            .await?;
+        }
+    } else {
+        let _ = scram::verify_client_proof(&[0u8; AUTH_KEY_BYTES], &auth_message, &client_proof);
+    }
+
+    if !proof_ok {
+        consume_auth_challenge(&mut transaction, challenge_id, now).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+        return Err(ApiError::auth_failed());
+    }
+
+    let account_id = account_id.ok_or_else(ApiError::service_unavailable)?;
+    consume_auth_challenge(&mut transaction, challenge_id, now).await?;
+
+    let active_totp_factor = sqlx::query_scalar::<_, Uuid>(
+        "
+        SELECT id
+        FROM totp_factors
+        WHERE account_id = $1
+          AND verified_at IS NOT NULL
+        LIMIT 1
+        ",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    if active_totp_factor.is_some() {
+        let mfa_challenge_id = Uuid::new_v4();
+        let mfa_server_nonce = random_bytes::<SERVER_NONCE_BYTES>();
+        let expires_at = now + LOGIN_CHALLENGE_TTL;
+        insert_auth_challenge_tx(
+            &mut transaction,
+            InsertChallengeTx {
+                id: mfa_challenge_id,
+                account_id: Some(account_id),
+                login_handle_normalized: &login_handle_normalized,
+                challenge_type: "pre_mfa",
+                server_nonce: &mfa_server_nonce,
+                public_metadata: serde_json::to_value(PreMfaChallengeMetadata {
+                    login_challenge_id: challenge_id,
+                    device: DeviceChallengeMetadata::from_validated(&device),
+                })
+                .map_err(|_| ApiError::service_unavailable())?,
+                expires_at,
+            },
+        )
+        .await?;
+        insert_audit_event(
+            &mut transaction,
+            account_id,
+            None,
+            "auth_login_password_verified",
+            json!({ "mfa_required": true }),
+        )
+        .await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+
+        return Ok(no_store_json(
+            StatusCode::OK,
+            LoginFinishMfaRequiredResponse {
+                result: "mfa_required",
+                mfa_challenge_id,
+                available_methods: vec!["totp"],
+                expires_at: format_rfc3339(expires_at)?,
+            },
+        ));
+    }
+
+    let (_device_id, session_token, idle_expires_at, absolute_expires_at) =
+        create_session_with_device(
+            &mut transaction,
+            account_id,
+            &device,
+            "mfa_enrollment_required",
+            now,
+        )
+        .await?;
+    insert_audit_event(
+        &mut transaction,
+        account_id,
+        None,
+        "auth_login_setup_session_created",
+        json!({ "mfa_required": false }),
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let mut response = no_store_json(
+        StatusCode::OK,
+        LoginFinishSessionCreatedResponse {
+            result: "session_created",
+            session: SessionResponse {
+                state: "mfa_enrollment_required",
+                vault_access: false,
+                idle_expires_at: format_rfc3339(idle_expires_at)?,
+                absolute_expires_at: format_rfc3339(absolute_expires_at)?,
+            },
+            next_step: "enroll_totp",
+        },
+    );
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&session_cookie(&session_token))
+            .map_err(|_| ApiError::service_unavailable())?,
+    );
+    Ok(response)
+}
+
+async fn totp_verify(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    StrictJson(request): StrictJson<TotpVerifyRequest>,
+) -> Result<Response, ApiError> {
+    ensure_unsafe_request_context(&headers)?;
+    let pool = database_pool(&state)?;
+    let totp_seed_key = state
+        .config
+        .totp_seed_key()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let now = now_utc_second()?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let challenge = sqlx::query(
+        "
+        SELECT
+            id,
+            account_id,
+            public_metadata,
+            attempts
+        FROM auth_challenges
+        WHERE id = $1
+          AND challenge_type = 'pre_mfa'
+          AND auth_protocol = $2
+          AND consumed_at IS NULL
+          AND expires_at >= $3
+        FOR UPDATE
+        ",
+    )
+    .bind(request.mfa_challenge_id)
+    .bind(AUTH_PROTOCOL)
+    .bind(now)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(challenge) = challenge else {
+        return Err(ApiError::mfa_verification_failed());
+    };
+    let challenge_id = challenge
+        .try_get::<Uuid, _>("id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let account_id = challenge
+        .try_get::<Option<Uuid>, _>("account_id")
+        .map_err(|_| ApiError::service_unavailable())?
+        .ok_or_else(ApiError::service_unavailable)?;
+    let attempts = challenge
+        .try_get::<i32, _>("attempts")
+        .map_err(|_| ApiError::service_unavailable())?;
+    if attempts >= MFA_CHALLENGE_MAX_ATTEMPTS {
+        return Err(ApiError::mfa_verification_failed());
+    }
+    let public_metadata = challenge
+        .try_get::<SqlJson<Value>, _>("public_metadata")
+        .map_err(|_| ApiError::service_unavailable())?
+        .0;
+    let pre_mfa_metadata = decode_pre_mfa_challenge_metadata(public_metadata)?;
+    let device = pre_mfa_metadata.device.into_validated()?;
+
+    let factor = sqlx::query(
+        "
+        SELECT
+            id,
+            account_id,
+            seed_ciphertext,
+            seed_nonce,
+            seed_key_id,
+            seed_aead,
+            algorithm,
+            digits,
+            period_seconds,
+            last_accepted_step,
+            verified_at
+        FROM totp_factors
+        WHERE account_id = $1
+          AND verified_at IS NOT NULL
+        FOR UPDATE
+        ",
+    )
+    .bind(account_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(factor) = factor else {
+        return Err(ApiError::mfa_verification_failed());
+    };
+    let factor_id = factor
+        .try_get::<Uuid, _>("id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let profile = totp_profile_from_row(&factor)?;
+    let seed_key_id = factor
+        .try_get::<String, _>("seed_key_id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let seed_aead = factor
+        .try_get::<String, _>("seed_aead")
+        .map_err(|_| ApiError::service_unavailable())?;
+    if seed_key_id != TOTP_SEED_KEY_ID || seed_aead != TOTP_SEED_AEAD {
+        return Err(ApiError::service_unavailable());
+    }
+    let seed_ciphertext = factor
+        .try_get::<Vec<u8>, _>("seed_ciphertext")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let seed_nonce = factor
+        .try_get::<Vec<u8>, _>("seed_nonce")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let last_accepted_step = factor
+        .try_get::<Option<i64>, _>("last_accepted_step")
+        .map_err(|_| ApiError::service_unavailable())?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|_| ApiError::service_unavailable())?;
+    let aad = totp_seed_aad(account_id, factor_id, profile);
+    let seed = decrypt_totp_seed(totp_seed_key, &seed_nonce, &aad, &seed_ciphertext)?;
+    let accepted_step = totp::verify(
+        &seed,
+        unix_time_seconds(now)?,
+        &request.code,
+        profile,
+        last_accepted_step,
+    )
+    .ok()
+    .flatten();
+
+    let Some(accepted_step) = accepted_step else {
+        increment_challenge_attempts(&mut transaction, challenge_id, now).await?;
+        insert_audit_event(
+            &mut transaction,
+            account_id,
+            None,
+            "mfa_totp_login_failed",
+            json!({ "factor_id": factor_id }),
+        )
+        .await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+        return Err(ApiError::mfa_verification_failed());
+    };
+
+    let (device_id, session_token, idle_expires_at, absolute_expires_at) =
+        create_session_with_device(&mut transaction, account_id, &device, "mfa_verified", now)
+            .await?;
+
+    sqlx::query(
+        "
+        UPDATE totp_factors
+        SET last_accepted_step = $1,
+            updated_at = $2
+        WHERE id = $3
+        ",
+    )
+    .bind(i64::try_from(accepted_step).map_err(|_| ApiError::service_unavailable())?)
+    .bind(now)
+    .bind(factor_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    consume_auth_challenge(&mut transaction, challenge_id, now).await?;
+    insert_audit_event(
+        &mut transaction,
+        account_id,
+        Some(device_id),
+        "mfa_totp_login_verified",
+        json!({ "factor_id": factor_id }),
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let mut response = no_store_json(
+        StatusCode::OK,
+        TotpVerifyResponse {
+            result: "session_created",
+            session: SessionResponse {
+                state: "mfa_verified",
+                vault_access: true,
+                idle_expires_at: format_rfc3339(idle_expires_at)?,
+                absolute_expires_at: format_rfc3339(absolute_expires_at)?,
+            },
+        },
+    );
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&session_cookie(&session_token))
+            .map_err(|_| ApiError::service_unavailable())?,
+    );
+    Ok(response)
 }
 
 async fn session_status(
@@ -1021,9 +1527,23 @@ async fn totp_enroll_confirm(
         profile,
         last_accepted_step,
     )
-    .map_err(|_| ApiError::mfa_verification_failed())?;
+    .ok()
+    .flatten();
 
     let Some(accepted_step) = accepted_step else {
+        sqlx::query(
+            "
+            DELETE FROM totp_factors
+            WHERE id = $1
+              AND account_id = $2
+              AND verified_at IS NULL
+            ",
+        )
+        .bind(request.factor_id)
+        .bind(session.account_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
         insert_audit_event(
             &mut transaction,
             session.account_id,
@@ -1165,14 +1685,27 @@ struct RegisterChallengeMetadata {
     auth_verifier_iterations: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct LoginChallengeMetadata {
     client_nonce: String,
     server_nonce: String,
     combined_nonce: String,
-    auth_verifier_profile: &'static str,
+    auth_verifier_profile: String,
     auth_verifier_iterations: u32,
     synthetic: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+struct PreMfaChallengeMetadata {
+    login_challenge_id: Uuid,
+    device: DeviceChallengeMetadata,
+}
+
+#[derive(Deserialize, Serialize)]
+struct DeviceChallengeMetadata {
+    label: String,
+    client_type: String,
+    public_metadata: Value,
 }
 
 struct CurrentSession {
@@ -1192,6 +1725,16 @@ impl CurrentSession {
 
 struct InsertChallenge<'a> {
     pool: &'a PgPool,
+    id: Uuid,
+    account_id: Option<Uuid>,
+    login_handle_normalized: &'a str,
+    challenge_type: &'static str,
+    server_nonce: &'a [u8],
+    public_metadata: Value,
+    expires_at: OffsetDateTime,
+}
+
+struct InsertChallengeTx<'a> {
     id: Uuid,
     account_id: Option<Uuid>,
     login_handle_normalized: &'a str,
@@ -1225,6 +1768,80 @@ async fn insert_auth_challenge(input: InsertChallenge<'_>) -> Result<(), ApiErro
     .bind(SqlJson(input.public_metadata))
     .bind(input.expires_at)
     .execute(input.pool)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(())
+}
+
+async fn insert_auth_challenge_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    input: InsertChallengeTx<'_>,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        "
+        INSERT INTO auth_challenges (
+            id,
+            account_id,
+            login_handle_normalized,
+            challenge_type,
+            auth_protocol,
+            server_nonce,
+            public_metadata,
+            expires_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ",
+    )
+    .bind(input.id)
+    .bind(input.account_id)
+    .bind(input.login_handle_normalized)
+    .bind(input.challenge_type)
+    .bind(AUTH_PROTOCOL)
+    .bind(input.server_nonce)
+    .bind(SqlJson(input.public_metadata))
+    .bind(input.expires_at)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(())
+}
+
+async fn consume_auth_challenge(
+    transaction: &mut Transaction<'_, Postgres>,
+    challenge_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE auth_challenges SET consumed_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(challenge_id)
+        .execute(&mut **transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(())
+}
+
+async fn increment_challenge_attempts(
+    transaction: &mut Transaction<'_, Postgres>,
+    challenge_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        "
+        UPDATE auth_challenges
+        SET attempts = attempts + 1,
+            consumed_at = CASE
+                WHEN attempts + 1 >= $1 THEN $2
+                ELSE consumed_at
+            END
+        WHERE id = $3
+        ",
+    )
+    .bind(MFA_CHALLENGE_MAX_ATTEMPTS)
+    .bind(now)
+    .bind(challenge_id)
+    .execute(&mut **transaction)
     .await
     .map_err(|_| ApiError::service_unavailable())?;
 
@@ -1279,19 +1896,45 @@ struct ValidatedDevice {
     public_metadata: Value,
 }
 
+impl DeviceChallengeMetadata {
+    fn from_validated(device: &ValidatedDevice) -> Self {
+        Self {
+            label: device.label.clone(),
+            client_type: device.client_type.clone(),
+            public_metadata: device.public_metadata.clone(),
+        }
+    }
+
+    fn into_validated(self) -> Result<ValidatedDevice, ApiError> {
+        ValidatedDevice::from_parts(self.label, self.client_type, self.public_metadata)
+    }
+}
+
 impl ValidatedDevice {
     fn from_request(request: &DeviceRequest) -> Result<Self, ApiError> {
-        let label = validate_short_text(&request.label, MAX_DEVICE_LABEL_BYTES)?;
+        Self::from_parts(
+            request.label.clone(),
+            request.client_type.clone(),
+            request.public_metadata.clone(),
+        )
+    }
+
+    fn from_parts(
+        label: String,
+        client_type: String,
+        public_metadata: Value,
+    ) -> Result<Self, ApiError> {
+        let label = validate_short_text(&label, MAX_DEVICE_LABEL_BYTES)?;
         if !matches!(
-            request.client_type.as_str(),
+            client_type.as_str(),
             "browser" | "browser-extension" | "ios" | "android" | "cli"
         ) {
             return Err(ApiError::bad_request());
         }
-        if !request.public_metadata.is_object() {
+        if !public_metadata.is_object() {
             return Err(ApiError::bad_request());
         }
-        let metadata_len = serde_json::to_vec(&request.public_metadata)
+        let metadata_len = serde_json::to_vec(&public_metadata)
             .map_err(|_| ApiError::bad_request())?
             .len();
         if metadata_len > MAX_DEVICE_PUBLIC_METADATA_BYTES {
@@ -1300,8 +1943,8 @@ impl ValidatedDevice {
 
         Ok(Self {
             label,
-            client_type: request.client_type.clone(),
-            public_metadata: request.public_metadata.clone(),
+            client_type,
+            public_metadata,
         })
     }
 }
@@ -1316,6 +1959,22 @@ fn decode_register_challenge_metadata(value: Value) -> Result<RegisterChallengeM
         return Err(ApiError::service_unavailable());
     }
     Ok(metadata)
+}
+
+fn decode_login_challenge_metadata(value: Value) -> Result<LoginChallengeMetadata, ApiError> {
+    let metadata = serde_json::from_value::<LoginChallengeMetadata>(value)
+        .map_err(|_| ApiError::service_unavailable())?;
+    if metadata.auth_verifier_profile != PROFILE_ID
+        || metadata.auth_verifier_iterations != DEFAULT_ITERATIONS
+    {
+        return Err(ApiError::service_unavailable());
+    }
+    Ok(metadata)
+}
+
+fn decode_pre_mfa_challenge_metadata(value: Value) -> Result<PreMfaChallengeMetadata, ApiError> {
+    serde_json::from_value::<PreMfaChallengeMetadata>(value)
+        .map_err(|_| ApiError::service_unavailable())
 }
 
 fn ensure_totp_enrollment_session(session: &CurrentSession) -> Result<(), ApiError> {
@@ -1489,6 +2148,95 @@ async fn insert_audit_event(
     Ok(())
 }
 
+async fn create_session_with_device(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    device: &ValidatedDevice,
+    session_state: &'static str,
+    now: OffsetDateTime,
+) -> Result<
+    (
+        Uuid,
+        [u8; tokens::TOKEN_LEN],
+        OffsetDateTime,
+        OffsetDateTime,
+    ),
+    ApiError,
+> {
+    let device_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    let session_token = tokens::random_token();
+    let session_token_hash = tokens::sha256_verifier(&session_token);
+    let idle_expires_at = now + SESSION_IDLE_TTL;
+    let absolute_expires_at = now + SESSION_ABSOLUTE_TTL;
+
+    sqlx::query(
+        "
+        INSERT INTO devices (
+            id,
+            account_id,
+            display_name,
+            user_agent_hash,
+            client_type,
+            public_metadata,
+            last_seen_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ",
+    )
+    .bind(device_id)
+    .bind(account_id)
+    .bind(&device.label)
+    .bind(Option::<Vec<u8>>::None)
+    .bind(&device.client_type)
+    .bind(SqlJson(device.public_metadata.clone()))
+    .bind(now)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO sessions (
+            id,
+            account_id,
+            device_id,
+            session_token_hash,
+            csrf_token_hash,
+            session_state,
+            expires_at,
+            idle_expires_at,
+            absolute_expires_at,
+            last_seen_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
+        ",
+    )
+    .bind(session_id)
+    .bind(account_id)
+    .bind(device_id)
+    .bind(session_token_hash.as_slice())
+    .bind(Option::<&[u8]>::None)
+    .bind(session_state)
+    .bind(idle_expires_at)
+    .bind(absolute_expires_at)
+    .bind(now)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok((
+        device_id,
+        session_token,
+        idle_expires_at,
+        absolute_expires_at,
+    ))
+}
+
+fn auth_key_from_vec(value: Vec<u8>) -> Result<[u8; AUTH_KEY_BYTES], ApiError> {
+    value
+        .try_into()
+        .map_err(|_| ApiError::service_unavailable())
+}
+
 fn validate_short_text(value: &str, max_bytes: usize) -> Result<String, ApiError> {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed.len() > max_bytes || trimmed.chars().any(char::is_control) {
@@ -1597,9 +2345,7 @@ fn ensure_unsafe_request_context(headers: &HeaderMap) -> Result<(), ApiError> {
 }
 
 fn origin_host(origin: &str) -> Option<&str> {
-    let without_scheme = origin
-        .strip_prefix("https://")
-        .or_else(|| origin.strip_prefix("http://"))?;
+    let without_scheme = origin.strip_prefix("https://")?;
     without_scheme
         .split('/')
         .next()

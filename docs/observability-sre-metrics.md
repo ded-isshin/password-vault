@@ -169,6 +169,40 @@ These are product-health and abuse-detection signals, not vanity metrics. They s
 choices only after the underlying event counters are implemented and verified against synthetic
 journeys.
 
+## Password-Manager Reliability Scorecard
+
+The dashboard should answer a password-manager-specific question: can a person safely get back to
+their secrets when they need them? Golden Signals are the base layer, but the product scorecard must
+also cover durability, cryptographic workflow health, and abuse resistance.
+
+| Scorecard area | Good state | MVP measurement |
+| --- | --- | --- |
+| Access | A returning user can complete login, MFA, and vault unlock. | Login start, proof verify, MFA verify, session creation, unlock metadata fetch, and synthetic journey success. |
+| Write durability | A saved secret remains available after rollout, pod restart, and database failover. | Vault write success, revision-chain continuity, PostgreSQL HA state, backup age, restore drill age, and failover drill result. |
+| Sync correctness | Multi-device clients do not silently lose or overwrite item revisions. | Sync pull/push success, stale revision rejection, conflict rate, head hash continuity, and client-visible conflict responses. |
+| Security posture | Abuse is visible without leaking user data. | Rate-limit hits, CSRF failures, invalid-origin rejections, MFA failures, recovery-code attempts, and lockout events. |
+| Operational confidence | Operators can see the current release, dependency health, and rollback target. | Build/revision metric, rollout annotations, target health, PDB state, pod restarts, DB pool pressure, and alert delivery. |
+
+The first useful business metric is not revenue. It is protected activation: a registration that
+finishes with MFA enabled and at least one encrypted vault item saved. Until that journey works, the
+business dashboard should stay focused on product readiness rather than marketing-style growth.
+
+## Dashboard Maturity Levels
+
+Use these levels to avoid calling a dashboard "done" when it only proves that scraping works:
+
+| Level | Meaning | Required evidence |
+| --- | --- | --- |
+| L0 scrape | Targets are scraped. | `up{job="password-vault-api"}` returns expected replicas. |
+| L1 Golden Signals | Basic API health is visible. | Request rate, 5xx ratio, p95/p99 latency, and pending requests return data. |
+| L2 actionable alerts | A human or ticket receives useful failures. | Target-down and fast error-budget burn alerts are deployed and tested. |
+| L3 product journey | Synthetic user journeys are measured. | Register, login, MFA, unlock, write, read, and sync probes publish pass/fail metrics. |
+| L4 durability | Data survival is measured. | DB replication, backup age, WAL archive health, restore drill age, and failover drill results are visible. |
+| L5 security/product | Aggregate abuse and activation signals are visible. | Low-cardinality auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented. |
+
+The live preview is currently between L1 and L2: basic Golden Signal dashboard data exists, but
+product-specific alerts and journey metrics are not complete.
+
 ## Current Dashboard Gaps
 
 - The current infrastructure dashboard is useful but still basic; it is not yet a full SLO
@@ -178,7 +212,10 @@ journeys.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
 - No deploy/version annotation panel because `password_vault_build_info` is not implemented yet.
 - No auth funnel or security-event panels because product/security metrics are not implemented yet.
-- No dashboard check proving `/metrics` is inaccessible from public ingress.
+- Edge access to `/metrics` is blocked in the current preview, but internal application
+  `LoadBalancer` access still reaches `/metrics`; restrictive NetworkPolicy or a separate
+  internal-only metrics listener is still needed.
+- No dashboard check proving `/metrics` is inaccessible from the wrong network path.
 - No synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
 
 Minimum MVP dashboard rows:

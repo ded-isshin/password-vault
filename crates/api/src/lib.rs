@@ -430,8 +430,10 @@ mod tests {
     use crate::{
         auth::{
             encoding::{decode_base64url, encode_base64url},
+            scram::{self, DEFAULT_ITERATIONS},
             tokens,
             totp::{self, TotpProfile},
+            transcript::{self, LoginAuthMessage},
         },
         db,
     };
@@ -1404,7 +1406,32 @@ mod tests {
         assert_eq!(bad_confirm_response.status(), http::StatusCode::FORBIDDEN);
         let bad_confirm_body = response_json(bad_confirm_response).await;
         assert_eq!(bad_confirm_body["error"]["code"], "mfa_verification_failed");
-        assert_totp_factor_is_pending(&pool, "totp-enroll@example.com").await;
+        assert_eq!(
+            totp_factor_count_for_login(&pool, "totp-enroll@example.com").await,
+            0
+        );
+
+        let restart_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("totp enroll restart returns a response");
+        assert_eq!(restart_response.status(), http::StatusCode::OK);
+        let restart_body = response_json(restart_response).await;
+        let factor_id = restart_body["factor_id"]
+            .as_str()
+            .expect("restarted factor id is present");
+        let manual_secret = restart_body["manual_secret"]
+            .as_str()
+            .expect("restarted manual secret is present");
+        let seed = decode_base32_no_padding(manual_secret).expect("restarted secret decodes");
+        assert_eq!(seed.len(), 20);
+        assert_pending_totp_factor_is_encrypted(&pool, "totp-enroll@example.com", &seed).await;
 
         let code = totp::generate(
             &seed,
@@ -1727,6 +1754,266 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn login_finish_and_totp_verify_complete_auth_round_trip() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping login finish database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let auth_secret = [0x77u8; 32];
+        register_account_with_auth_secret_and_return_set_cookie(
+            &router,
+            "login-no-mfa@example.com",
+            "00000000-0000-4000-8000-000000000790",
+            &auth_secret,
+        )
+        .await;
+
+        let no_mfa_payload =
+            build_login_finish_payload(&router, "login-no-mfa@example.com", &auth_secret, false)
+                .await;
+        let cross_site_no_mfa_finish = router
+            .clone()
+            .oneshot(json_request_with_fetch_site(
+                "/v1/auth/login/finish",
+                &no_mfa_payload,
+                "cross-site",
+            ))
+            .await
+            .expect("cross-site login finish returns a response");
+        assert_eq!(
+            cross_site_no_mfa_finish.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            response_json(cross_site_no_mfa_finish).await["error"]["code"],
+            "csrf_required"
+        );
+        let no_mfa_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &no_mfa_payload))
+            .await
+            .expect("login finish returns a response");
+        assert_eq!(no_mfa_response.status(), http::StatusCode::OK);
+        let no_mfa_cookie = no_mfa_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("no-MFA login sets setup session cookie")
+            .to_string();
+        assert!(no_mfa_cookie.starts_with("__Host-pv_session="));
+        let no_mfa_body = response_json(no_mfa_response).await;
+        assert_eq!(no_mfa_body["result"], "session_created");
+        assert_eq!(no_mfa_body["session"]["state"], "mfa_enrollment_required");
+        assert_eq!(no_mfa_body["session"]["vault_access"], false);
+        assert_eq!(no_mfa_body["next_step"], "enroll_totp");
+
+        let no_mfa_replay = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &no_mfa_payload))
+            .await
+            .expect("login finish replay returns a response");
+        assert_eq!(no_mfa_replay.status(), http::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response_json(no_mfa_replay).await["error"]["code"],
+            "auth_failed"
+        );
+
+        let wrong_payload =
+            build_login_finish_payload(&router, "login-no-mfa@example.com", &auth_secret, true)
+                .await;
+        let wrong_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &wrong_payload))
+            .await
+            .expect("wrong proof returns a response");
+        assert_eq!(wrong_response.status(), http::StatusCode::UNAUTHORIZED);
+        let wrong_body = response_json(wrong_response).await;
+        assert_eq!(wrong_body["error"]["code"], "auth_failed");
+
+        let missing_payload =
+            build_login_finish_payload(&router, "missing-login@example.com", &auth_secret, false)
+                .await;
+        let missing_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &missing_payload))
+            .await
+            .expect("unknown account finish returns a response");
+        assert_eq!(missing_response.status(), http::StatusCode::UNAUTHORIZED);
+        let missing_body = response_json(missing_response).await;
+        assert_eq!(missing_body, wrong_body);
+
+        let setup_cookie = cookie_pair(
+            &register_account_with_auth_secret_and_return_set_cookie(
+                &router,
+                "login-mfa@example.com",
+                "00000000-0000-4000-8000-000000000791",
+                &auth_secret,
+            )
+            .await,
+        );
+        let seed = enroll_totp_and_reset_last_accepted_step(
+            &router,
+            &pool,
+            "login-mfa@example.com",
+            &setup_cookie,
+        )
+        .await;
+
+        let mfa_payload =
+            build_login_finish_payload(&router, "login-mfa@example.com", &auth_secret, false).await;
+        let mfa_finish = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &mfa_payload))
+            .await
+            .expect("MFA login finish returns a response");
+        assert_eq!(mfa_finish.status(), http::StatusCode::OK);
+        assert!(mfa_finish.headers().get("set-cookie").is_none());
+        let mfa_finish_body = response_json(mfa_finish).await;
+        assert_eq!(mfa_finish_body["result"], "mfa_required");
+        assert_eq!(
+            mfa_finish_body["available_methods"],
+            serde_json::json!(["totp"])
+        );
+        let mfa_challenge_id = mfa_finish_body["mfa_challenge_id"]
+            .as_str()
+            .expect("mfa challenge id is present");
+
+        let code = totp::generate(
+            &seed,
+            current_unix_seconds(),
+            TotpProfile::google_authenticator_default(),
+        )
+        .expect("totp code generates");
+        let verify_payload =
+            format!(r#"{{"mfa_challenge_id":"{mfa_challenge_id}","code":"{code}"}}"#);
+        let cross_site_verify = router
+            .clone()
+            .oneshot(json_request_with_fetch_site(
+                "/v1/auth/mfa/totp/verify",
+                &verify_payload,
+                "cross-site",
+            ))
+            .await
+            .expect("cross-site totp verify returns a response");
+        assert_eq!(cross_site_verify.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(cross_site_verify).await["error"]["code"],
+            "csrf_required"
+        );
+
+        let exhaustion_payload =
+            build_login_finish_payload(&router, "login-mfa@example.com", &auth_secret, false).await;
+        let exhaustion_finish = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &exhaustion_payload))
+            .await
+            .expect("MFA exhaustion login finish returns a response");
+        assert_eq!(exhaustion_finish.status(), http::StatusCode::OK);
+        let exhaustion_finish_body = response_json(exhaustion_finish).await;
+        let exhaustion_challenge_id = exhaustion_finish_body["mfa_challenge_id"]
+            .as_str()
+            .expect("exhaustion mfa challenge id is present");
+        let wrong_code = if code == "000000" { "000001" } else { "000000" };
+        let wrong_verify_payload =
+            format!(r#"{{"mfa_challenge_id":"{exhaustion_challenge_id}","code":"{wrong_code}"}}"#);
+        for _ in 0..5 {
+            let wrong_verify = router
+                .clone()
+                .oneshot(json_request(
+                    "/v1/auth/mfa/totp/verify",
+                    &wrong_verify_payload,
+                ))
+                .await
+                .expect("wrong TOTP verify returns a response");
+            assert_eq!(wrong_verify.status(), http::StatusCode::FORBIDDEN);
+            assert_eq!(
+                response_json(wrong_verify).await["error"]["code"],
+                "mfa_verification_failed"
+            );
+        }
+        let exhausted_correct_payload =
+            format!(r#"{{"mfa_challenge_id":"{exhaustion_challenge_id}","code":"{code}"}}"#);
+        let exhausted_correct = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/mfa/totp/verify",
+                &exhausted_correct_payload,
+            ))
+            .await
+            .expect("exhausted TOTP verify returns a response");
+        assert_eq!(exhausted_correct.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(exhausted_correct).await["error"]["code"],
+            "mfa_verification_failed"
+        );
+
+        let verify_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/mfa/totp/verify", &verify_payload))
+            .await
+            .expect("totp verify returns a response");
+        assert_eq!(verify_response.status(), http::StatusCode::OK);
+        let verified_cookie = verify_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("totp verify sets a session cookie")
+            .to_string();
+        let verified_cookie = cookie_pair(&verified_cookie);
+        let verify_body = response_json(verify_response).await;
+        assert_eq!(verify_body["result"], "session_created");
+        assert_eq!(verify_body["session"]["state"], "mfa_verified");
+        assert_eq!(verify_body["session"]["vault_access"], true);
+
+        let replay_verify = router
+            .clone()
+            .oneshot(json_request("/v1/auth/mfa/totp/verify", &verify_payload))
+            .await
+            .expect("totp verify replay returns a response");
+        assert_eq!(replay_verify.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(replay_verify).await["error"]["code"],
+            "mfa_verification_failed"
+        );
+
+        let verified_session = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/session", &verified_cookie))
+            .await
+            .expect("verified session returns a response");
+        assert_eq!(verified_session.status(), http::StatusCode::OK);
+        let verified_session_body = response_json(verified_session).await;
+        assert_eq!(verified_session_body["authenticated"], true);
+        assert_eq!(verified_session_body["session_state"], "mfa_verified");
+        assert_eq!(verified_session_body["vault_access"], true);
+    }
+
     fn json_request(uri: &str, body: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
@@ -1734,6 +2021,16 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .expect("test request builds")
+    }
+
+    fn json_request_with_fetch_site(uri: &str, body: &str, fetch_site: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("sec-fetch-site", fetch_site)
+            .body(Body::from(body.to_string()))
+            .expect("test request with fetch site builds")
     }
 
     fn json_request_with_cookie(uri: &str, body: &str, cookie: &str) -> Request<Body> {
@@ -2110,6 +2407,240 @@ mod tests {
             .to_string()
     }
 
+    async fn register_account_with_auth_secret_and_return_set_cookie(
+        router: &axum::Router,
+        login_handle: &str,
+        vault_id: &str,
+        auth_secret: &[u8],
+    ) -> String {
+        let start_response = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/register/start",
+                &format!(
+                    r#"{{
+                    "login_handle":"{login_handle}",
+                    "auth_protocol":"derived-auth-v1"
+                }}"#
+                ),
+            ))
+            .await
+            .expect("register start returns a response");
+        assert_eq!(start_response.status(), http::StatusCode::OK);
+        let start_body = response_json(start_response).await;
+        let registration_id = start_body["registration_id"]
+            .as_str()
+            .expect("registration id is present");
+        let auth_verifier_salt = decode_base64url(
+            start_body["auth_verifier_salt"]
+                .as_str()
+                .expect("auth verifier salt is present"),
+        )
+        .expect("auth verifier salt decodes");
+        let verifier = scram::derive_verifier(auth_secret, &auth_verifier_salt, DEFAULT_ITERATIONS)
+            .expect("test verifier derives");
+
+        let finish_request = format!(
+            r#"{{
+                "registration_id":"{registration_id}",
+                "auth_protocol":"derived-auth-v1",
+                "auth_stored_key":"{auth_stored_key}",
+                "auth_server_key":"{auth_server_key}",
+                "encrypted_account_keyset":{{
+                    "crypto_version":"account-keyset-v1",
+                    "key_id":"user-key-v1",
+                    "nonce":"{account_keyset_nonce}",
+                    "ciphertext":"{account_keyset_ciphertext}"
+                }},
+                "initial_vault":{{
+                    "vault_id":"{vault_id}",
+                    "encrypted_vault_key":{{
+                        "crypto_version":"vault-key-wrap-v1",
+                        "key_id":"user-key-v1",
+                        "nonce":"{vault_key_nonce}",
+                        "ciphertext":"{vault_key_ciphertext}"
+                    }}
+                }},
+                "device":{{
+                    "label":"Firefox on laptop",
+                    "client_type":"browser",
+                    "public_metadata":{{"platform_hint":"web"}}
+                }}
+            }}"#,
+            account_keyset_nonce = encode_base64url(&[0x11; 12]),
+            account_keyset_ciphertext = encode_base64url(&[0x22; 48]),
+            vault_key_nonce = encode_base64url(&[0x33; 12]),
+            vault_key_ciphertext = encode_base64url(&[0x44; 48]),
+            auth_stored_key = encode_base64url(verifier.stored_key()),
+            auth_server_key = encode_base64url(verifier.server_key())
+        );
+
+        let finish_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/register/finish", &finish_request))
+            .await
+            .expect("register finish returns a response");
+        assert_eq!(finish_response.status(), http::StatusCode::CREATED);
+        finish_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("register finish sets a session cookie")
+            .to_string()
+    }
+
+    async fn build_login_finish_payload(
+        router: &axum::Router,
+        login_handle: &str,
+        auth_secret: &[u8],
+        wrong_proof: bool,
+    ) -> String {
+        let client_nonce = [0x44u8; 32];
+        let client_nonce_b64 = encode_base64url(&client_nonce);
+        let start_response = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/login/start",
+                &format!(
+                    r#"{{
+                    "login_handle":"{login_handle}",
+                    "auth_protocol":"derived-auth-v1",
+                    "client_nonce":"{client_nonce_b64}"
+                }}"#
+                ),
+            ))
+            .await
+            .expect("login start returns a response");
+        assert_eq!(start_response.status(), http::StatusCode::OK);
+        let start_body = response_json(start_response).await;
+        let login_challenge_id = start_body["login_challenge_id"]
+            .as_str()
+            .expect("login challenge id is present");
+        let challenge_id =
+            uuid::Uuid::parse_str(login_challenge_id).expect("login challenge id parses");
+        let server_nonce = decode_base64url(
+            start_body["server_nonce"]
+                .as_str()
+                .expect("server nonce is present"),
+        )
+        .expect("server nonce decodes");
+        let auth_verifier_salt = decode_base64url(
+            start_body["auth_verifier_salt"]
+                .as_str()
+                .expect("auth verifier salt is present"),
+        )
+        .expect("auth verifier salt decodes");
+        let iterations = start_body["auth_verifier_iterations"]
+            .as_u64()
+            .expect("auth verifier iterations is present") as u32;
+        let client_final_without_proof = b"c=biws";
+        let login_handle_normalized = login_handle.trim().to_ascii_lowercase();
+        let auth_message = transcript::login_auth_message(LoginAuthMessage {
+            challenge_id,
+            auth_protocol: "derived-auth-v1",
+            login_handle_normalized: &login_handle_normalized,
+            client_nonce: &client_nonce,
+            server_nonce: &server_nonce,
+            client_final_without_proof,
+        });
+        let mut proof =
+            scram::client_proof(auth_secret, &auth_verifier_salt, iterations, &auth_message)
+                .expect("client proof derives");
+        if wrong_proof {
+            proof[0] ^= 0xff;
+        }
+
+        format!(
+            r#"{{
+                "login_challenge_id":"{login_challenge_id}",
+                "auth_protocol":"derived-auth-v1",
+                "client_nonce":"{client_nonce_b64}",
+                "server_nonce":"{server_nonce_b64}",
+                "client_final_without_proof":"{client_final_without_proof_b64}",
+                "client_proof":"{client_proof}",
+                "device":{{
+                    "label":"Firefox on laptop",
+                    "client_type":"browser",
+                    "public_metadata":{{"platform_hint":"web"}}
+                }}
+            }}"#,
+            server_nonce_b64 = encode_base64url(&server_nonce),
+            client_final_without_proof_b64 = encode_base64url(client_final_without_proof),
+            client_proof = encode_base64url(&proof)
+        )
+    }
+
+    async fn enroll_totp_and_reset_last_accepted_step(
+        router: &axum::Router,
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        setup_cookie: &str,
+    ) -> Vec<u8> {
+        let csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", setup_cookie))
+            .await
+            .expect("csrf request returns a response");
+        assert_eq!(csrf_response.status(), http::StatusCode::OK);
+        let csrf_body = response_json(csrf_response).await;
+        let csrf_token = csrf_body["csrf_token"]
+            .as_str()
+            .expect("csrf token is present");
+
+        let start_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("totp enroll start returns a response");
+        assert_eq!(start_response.status(), http::StatusCode::OK);
+        let start_body = response_json(start_response).await;
+        let factor_id = start_body["factor_id"]
+            .as_str()
+            .expect("factor id is present");
+        let manual_secret = start_body["manual_secret"]
+            .as_str()
+            .expect("manual secret is present");
+        let seed = decode_base32_no_padding(manual_secret).expect("manual secret decodes");
+        let code = totp::generate(
+            &seed,
+            current_unix_seconds(),
+            TotpProfile::google_authenticator_default(),
+        )
+        .expect("totp code generates");
+        let confirm_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/confirm",
+                &format!(r#"{{"factor_id":"{factor_id}","code":"{code}"}}"#),
+                setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("totp enroll confirm returns a response");
+        assert_eq!(confirm_response.status(), http::StatusCode::OK);
+
+        sqlx::query(
+            "
+            UPDATE totp_factors t
+            SET last_accepted_step = NULL
+            FROM accounts a
+            WHERE a.id = t.account_id
+              AND a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .execute(pool)
+        .await
+        .expect("test can reset TOTP replay state");
+
+        seed
+    }
+
     async fn assert_csrf_hash_persisted(
         pool: &sqlx::PgPool,
         login_handle: &str,
@@ -2166,22 +2697,6 @@ mod tests {
         assert_eq!(row.2, "app-totp-seed-key-v1");
         assert_eq!(row.3, "xchacha20poly1305-v1");
         assert!(row.4.is_none());
-    }
-
-    async fn assert_totp_factor_is_pending(pool: &sqlx::PgPool, login_handle: &str) {
-        let verified_at: Option<time::OffsetDateTime> = sqlx::query_scalar(
-            "
-            SELECT t.verified_at
-            FROM totp_factors t
-            JOIN accounts a ON a.id = t.account_id
-            WHERE a.login_handle_normalized = $1
-            ",
-        )
-        .bind(login_handle)
-        .fetch_one(pool)
-        .await
-        .expect("totp factor query succeeds");
-        assert!(verified_at.is_none());
     }
 
     async fn assert_totp_factor_is_verified_and_recovery_codes_are_hashed(

@@ -1,10 +1,12 @@
 # Data Model Draft
 
 Status: bootstrap implementation draft. The PostgreSQL migrations live in `migrations/`.
-The first migration creates the base account/auth/session/vault schema, and the second migration
+The first migration creates the base account/auth/session/MFA/vault schema, the second migration
 adds the registration-finish key-material tables and session/device metadata required by the first
-runtime auth slice. Login, MFA enrollment, sync, and vault-item runtime flows are not implemented
-yet.
+runtime auth slice, and the third migration records the browser-native PBKDF2 MVP KDF profile.
+Registration, session, TOTP enrollment, login finish, and login-time TOTP verification now have
+local implementation coverage. Recovery-code verification, sync, and vault-item runtime flows are
+not implemented yet.
 
 This document records the product data boundaries and the first implemented schema direction. The
 schema can still change while the auth, key-derivation, recovery, and sync implementation is built.
