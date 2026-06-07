@@ -9,8 +9,14 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 axum = "0.8.9"
+base64 = "0.22.1"
+hmac = "0.12.1"
 http = "1.4.0"
+rand = "0.8.6"
 serde = { version = "1.0.228", features = ["derive"] }
+sha1 = "0.10.6"
+sha2 = "0.10.9"
+subtle = "2.6.1"
 tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tower = { version = "0.5.2", features = ["util"] }
 tracing = "0.1.44"

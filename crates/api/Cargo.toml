@@ -7,12 +7,18 @@ rust-version.workspace = true
 
 [dependencies]
 axum.workspace = true
+hmac.workspace = true
+rand.workspace = true
 serde.workspace = true
+sha1.workspace = true
+sha2.workspace = true
 sqlx.workspace = true
+subtle.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+base64.workspace = true
 http.workspace = true
 tower.workspace = true

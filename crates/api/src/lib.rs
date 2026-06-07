@@ -4,6 +4,7 @@ use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Serialize;
 use sqlx::PgPool;
 
+pub mod auth;
 pub mod db;
 
 #[derive(Clone, Debug)]
