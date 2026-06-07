@@ -57,6 +57,13 @@ Implemented:
   `hiringtrace`, scoped to that product's namespace and secret contract.
 - Infrastructure read-only review found no shared data operator currently enabled from the platform
   data bootstrap directory.
+- Live cluster review on 2026-06-07 found CloudNativePG CRDs installed, but no active
+  `clusters.postgresql.cnpg.io` resources.
+- Live cluster review on 2026-06-07 found the password-vault preview database running as one
+  `postgres:17-bookworm` StatefulSet replica with a `local-path` PVC. This is bootstrap/demo
+  infrastructure, not HA.
+- Live infrastructure values currently set startup migrations on for the password-vault preview.
+  That should be treated as a bootstrap exception and changed before real-user data is accepted.
 
 Planned:
 
@@ -104,6 +111,10 @@ The real risk is not direct conflict; it is copying a temporary single-`Stateful
 password manager and treating it as production-ready. The `hiringtrace` database can remain an
 app-specific implementation detail. Password-vault should use a separate CloudNativePG-managed
 cluster for production-like operation.
+
+CloudNativePG itself can be a shared platform operator. The password-vault database should still be a
+separate product-owned cluster resource with its own credentials, services, backup target prefix, and
+restore drills. Sharing the operator is normal; sharing another product's database is not.
 
 ## Recommended HA Direction
 

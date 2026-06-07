@@ -21,6 +21,28 @@ Current implementation status, 2026-06-07:
 - The live preview is plain HTTP, so the secure session cookie contract is not a complete browser
   login UX until HTTPS ingress/LB behavior is added.
 
+## Stabilization-First Queue
+
+The current goal is not to add broad feature volume. The next slices should make the smallest useful
+MVP dependable:
+
+1. Complete login finish and login-time TOTP verification. Vault CRUD is not meaningful until a user
+   can return after registration.
+2. Add browser vault unlock plus encrypted item create/read/update/delete with revision conflict
+   checks.
+3. Turn production startup migrations off and introduce a controlled migration job/runbook before
+   schema-changing releases.
+4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
+   before accepting real secrets.
+5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
+6. Expand observability from HTTP Golden Signals to auth/MFA, vault writes/sync, database health,
+   backup freshness, and security aggregate metrics.
+7. Add SLO and burn-rate alerts after the relevant metrics return live data.
+8. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
+   from inside the Kubernetes/LXD network.
+
+Anything outside this queue should be deferred unless it directly reduces risk for these gates.
+
 ## Active Context
 
 Task: deliver a working browser-first MVP and prepare deployment through GitHub, GHCR, Helm, and

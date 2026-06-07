@@ -37,6 +37,17 @@ down. Treat that as safer than making unavailable pods serve traffic.
 
 Production app pods should not run migrations automatically by default.
 
+The current public preview used startup migrations as a bootstrap shortcut while no real user data
+was accepted. Treat that as an exception, not the target operating model. Before real-user use,
+production values must keep `PV_RUN_MIGRATIONS_ON_STARTUP=false` and schema changes must run through
+an explicit migration job or another reviewed operator step.
+
+Stable PostgreSQL versions do not remove application schema migrations. PostgreSQL stability means
+the engine behavior is supported and predictable; it does not create password-vault tables,
+constraints, indexes, auth fields, MFA state, or encrypted revision metadata for us. The goal is not
+"no migrations." The goal is few, deliberate, backward-compatible migrations with clear rollout and
+rollback behavior.
+
 Use expand/contract migrations:
 
 1. Expand: add backward-compatible columns/tables/indexes.
@@ -46,6 +57,16 @@ Use expand/contract migrations:
 5. Contract: remove old columns/paths in a later release only after verification.
 
 Do not drop/rename columns in the same release that first requires the new shape.
+
+Before a schema-changing production release, record:
+
+- migration files to apply;
+- whether the change is expand, backfill, or contract;
+- expected lock behavior and rough runtime;
+- latest backup/WAL status;
+- rollback compatibility with the previous app image;
+- validation query or application smoke that proves the new schema works;
+- operator who reviewed the migration output.
 
 ## Smoke Verification
 
