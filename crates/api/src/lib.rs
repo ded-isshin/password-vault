@@ -2503,7 +2503,7 @@ mod tests {
         )
         .bind(id)
         .bind(login_handle)
-        .bind(r#"{"id":"argon2id-browser-v1","algorithm":"argon2id","memory_kib":19456,"iterations":2,"parallelism":1}"#)
+        .bind(r#"{"id":"pbkdf2-sha256-browser-v1","algorithm":"PBKDF2-HMAC-SHA-256","iterations":600000,"hash":"SHA-256"}"#)
         .bind(vec![0xaau8; 32])
         .bind(vec![0xbbu8; 32])
         .bind(vec![0xccu8; 32])

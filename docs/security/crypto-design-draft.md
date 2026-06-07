@@ -44,10 +44,10 @@ parallelism: 1
 
 The final values must be tuned on representative browsers and devices before implementation.
 
-Fallback candidate: PBKDF2-HMAC-SHA-256 through WebCrypto, explicitly documented as weaker and
-migration-ready. PBKDF2 must not be a silent runtime fallback. If used, it must be an explicitly
-approved prototype or degraded-mode decision with a concrete minimum iteration count and migration
-plan.
+First browser MVP profile: PBKDF2-HMAC-SHA-256 through WebCrypto with 600,000 iterations,
+explicitly documented as weaker than the Argon2id target and migration-ready. PBKDF2 must not be a
+silent runtime fallback; it is the current explicitly approved browser-MVP profile because Argon2id
+requires a reviewed WASM dependency.
 
 ### Pre-Login KDF Metadata
 
