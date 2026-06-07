@@ -170,11 +170,10 @@ async fn assert_duplicate_login_handle_is_rejected(pool: &sqlx::PgPool) {
             'alice',
             'derived-auth-v1',
             jsonb_build_object(
-                'id', 'argon2id-browser-v1',
-                'algorithm', 'argon2id',
-                'memory_kib', 19456,
-                'iterations', 2,
-                'parallelism', 1
+                'id', 'pbkdf2-sha256-browser-v1',
+                'algorithm', 'PBKDF2-HMAC-SHA-256',
+                'iterations', 600000,
+                'hash', 'SHA-256'
             ),
             decode(repeat('aa', 32), 'hex'),
             'pv-scram-sha-256-v1',
@@ -504,11 +503,10 @@ async fn insert_account(pool: &sqlx::PgPool, id: &str, login_handle: &str) {
             '{login_handle}',
             'derived-auth-v1',
             jsonb_build_object(
-                'id', 'argon2id-browser-v1',
-                'algorithm', 'argon2id',
-                'memory_kib', 19456,
-                'iterations', 2,
-                'parallelism', 1
+                'id', 'pbkdf2-sha256-browser-v1',
+                'algorithm', 'PBKDF2-HMAC-SHA-256',
+                'iterations', 600000,
+                'hash', 'SHA-256'
             ),
             decode(repeat('aa', 32), 'hex'),
             'pv-scram-sha-256-v1',

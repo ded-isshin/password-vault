@@ -104,8 +104,11 @@ replace the vault unlock design by themselves.
 Working direction:
 
 - KDF target: Argon2id in the browser through a reviewed, pinned WASM dependency.
-- KDF fallback: PBKDF2-HMAC-SHA-256 through WebCrypto only as an explicitly approved prototype or
-  degraded-mode decision; not as a silent production fallback.
+- First browser MVP KDF: `pbkdf2-sha256-browser-v1`, PBKDF2-HMAC-SHA-256 with 600,000 iterations,
+  through WebCrypto. This is an explicit MVP implementation decision so the browser flow can ship
+  without an unreviewed WASM dependency.
+- KDF fallback rule: PBKDF2 must not be a silent runtime fallback. Future KDF changes require an
+  explicit migration/version decision.
 - KDF input target: user password plus high-entropy account secret key.
 - Key separation: run one expensive password KDF, then use HKDF domain separation for
   authentication and vault-unlock material.
@@ -231,7 +234,8 @@ Accepted for MVP planning:
 - OPAQUE is the preferred long-term authentication candidate after library review.
 - Simple password-over-TLS is not acceptable for the public MVP.
 - WebAuthn/passkeys are post-MVP authentication and MFA candidates, not the first MVP blocker.
-- Argon2id/WASM is the KDF target; PBKDF2 is only an explicitly approved prototype/degraded mode.
+- Argon2id/WASM remains the KDF hardening target; PBKDF2 is the explicitly approved first browser
+  MVP profile.
 - AES-256-GCM is the web MVP AEAD target.
 - The MVP must be multi-device-capable in data model and protocol even if the first client is only
   the browser web app.

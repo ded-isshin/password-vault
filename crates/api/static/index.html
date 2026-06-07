@@ -7,8 +7,8 @@
     <link rel="stylesheet" href="/assets/app.css" />
   </head>
   <body>
-    <main class="shell">
-      <section class="intro" aria-label="Product status">
+    <main class="app-shell">
+      <header class="topbar" aria-label="Password Vault">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">
             <svg viewBox="0 0 32 32" role="img">
@@ -17,76 +17,160 @@
             </svg>
           </div>
           <div>
-            <p class="eyebrow">Password Vault</p>
-            <h1>Secure challenge preview</h1>
+            <p>Password Vault</p>
+            <h1>Account setup</h1>
           </div>
         </div>
-        <p class="intro-copy">
-          This MVP establishes real authentication challenges with the API. Browser-side key
-          derivation, full sign-in, MFA, and vault item storage are the next implementation steps.
-        </p>
-        <div class="status-grid">
-          <div>
-            <span class="status-label">API</span>
-            <strong id="healthStatus">Checking...</strong>
-          </div>
-          <div>
-            <span class="status-label">Database</span>
-            <strong id="readyStatus">Checking...</strong>
-          </div>
+
+        <div class="service-status" aria-label="Service status">
+          <span>API <strong id="healthStatus">Checking...</strong></span>
+          <span>DB <strong id="readyStatus">Checking...</strong></span>
         </div>
+      </header>
+
+      <div class="workspace">
+        <section class="panel register-panel" aria-labelledby="registrationTitle">
+          <div class="panel-heading">
+            <p class="eyebrow">Registration</p>
+            <h2 id="registrationTitle">Create vault</h2>
+          </div>
+
+          <form id="registrationForm" class="stack">
+            <label for="loginHandle">Login handle</label>
+            <input
+              id="loginHandle"
+              name="loginHandle"
+              type="text"
+              autocomplete="username"
+              spellcheck="false"
+              placeholder="you@example.com"
+              required
+            />
+
+            <label for="masterPassword">Master password</label>
+            <input
+              id="masterPassword"
+              name="masterPassword"
+              type="password"
+              autocomplete="new-password"
+              minlength="12"
+              required
+            />
+
+            <label for="confirmPassword">Confirm password</label>
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              minlength="12"
+              required
+            />
+
+            <button id="registerButton" class="primary-action" type="submit">
+              Create account
+            </button>
+
+            <p id="statusMessage" class="status-message" role="status" aria-live="polite">
+              Ready.
+            </p>
+          </form>
+        </section>
+
+        <section class="panel flow-panel" aria-labelledby="flowTitle">
+          <div class="panel-heading">
+            <p class="eyebrow">Flow</p>
+            <h2 id="flowTitle">Enrollment state</h2>
+          </div>
+
+          <ol id="flowSteps" class="flow-steps">
+            <li data-step="register-start">Register start</li>
+            <li data-step="derive-keys">Browser keys</li>
+            <li data-step="register-finish">Register finish</li>
+            <li data-step="totp-start">TOTP start</li>
+            <li data-step="totp-confirm">TOTP confirm</li>
+            <li data-step="session">Session</li>
+          </ol>
+        </section>
+      </div>
+
+      <section id="accountSecretPanel" class="output-band" hidden aria-labelledby="accountSecretTitle">
+        <div class="section-heading">
+          <p class="eyebrow">Local secret</p>
+          <h2 id="accountSecretTitle">Account secret key</h2>
+        </div>
+        <output id="accountSecretKey" class="secret-output"></output>
+        <div class="secret-actions">
+          <button id="copySecretButton" class="secondary-action" type="button">Copy</button>
+          <button id="downloadSecretButton" class="secondary-action" type="button">Download</button>
+        </div>
+        <label class="confirm-row" for="secretSavedCheckbox">
+          <input id="secretSavedCheckbox" type="checkbox" />
+          <span>I saved this account secret key.</span>
+        </label>
+        <button id="continueEnrollmentButton" class="primary-action secondary-size" type="button" disabled>
+          Continue enrollment
+        </button>
       </section>
 
-      <section class="auth-surface" aria-label="Authentication preview">
-        <div class="mode-tabs" role="tablist" aria-label="Authentication mode">
-          <button id="registerTab" class="mode-tab active" type="button" role="tab" aria-selected="true">
-            Create account
-          </button>
-          <button id="loginTab" class="mode-tab" type="button" role="tab" aria-selected="false">
-            Unlock
-          </button>
+      <section id="totpPanel" class="output-band" hidden aria-labelledby="totpTitle">
+        <div class="section-heading">
+          <p class="eyebrow">MFA</p>
+          <h2 id="totpTitle">TOTP enrollment</h2>
         </div>
 
-        <form id="challengeForm" class="challenge-form">
-          <div class="form-heading">
-            <h2 id="formTitle">Create your vault</h2>
-            <p id="formCopy">
-              Start a server challenge and receive the KDF profile needed for client-side
-              key derivation.
-            </p>
+        <div class="totp-grid">
+          <div class="field-block">
+            <span>Manual secret</span>
+            <output id="manualSecret" class="mono-output"></output>
           </div>
+          <div class="field-block uri-block">
+            <span>otpauth URI</span>
+            <textarea id="otpauthUri" class="mono-output" rows="4" readonly></textarea>
+          </div>
+          <div class="field-block">
+            <span>Profile</span>
+            <output id="totpProfile" class="mono-output"></output>
+          </div>
+          <div class="field-block">
+            <span>Factor</span>
+            <output id="factorId" class="mono-output"></output>
+          </div>
+        </div>
 
-          <label for="loginHandle">Login handle</label>
+        <form id="totpForm" class="totp-form">
+          <label for="totpCode">TOTP code</label>
           <input
-            id="loginHandle"
-            name="loginHandle"
+            id="totpCode"
+            name="totpCode"
             type="text"
-            autocomplete="username"
-            spellcheck="false"
-            placeholder="you@example.com"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            placeholder="123456"
             required
           />
-
-          <button id="submitButton" class="primary-action" type="submit">
-            Continue
+          <button id="confirmTotpButton" class="primary-action secondary-size" type="submit">
+            Verify
           </button>
-
-          <p id="statusMessage" class="status-message" role="status" aria-live="polite">
-            Your master password is never sent by this preview screen.
-          </p>
         </form>
+      </section>
 
-        <section id="resultPanel" class="result-panel" hidden>
-          <div class="result-heading">
-            <h3>Challenge established</h3>
-            <span id="resultMode" class="result-pill">register/start</span>
-          </div>
-          <p>
-            The server returned public challenge metadata. The missing finish step is not
-            implemented yet, so this preview stops here.
-          </p>
-          <dl id="resultList" class="result-list"></dl>
-        </section>
+      <section id="recoveryPanel" class="output-band" hidden aria-labelledby="recoveryTitle">
+        <div class="section-heading">
+          <p class="eyebrow">One-time</p>
+          <h2 id="recoveryTitle">Recovery codes</h2>
+        </div>
+        <ul id="recoveryCodes" class="recovery-list"></ul>
+      </section>
+
+      <section id="sessionPanel" class="output-band compact" hidden aria-labelledby="sessionTitle">
+        <div class="section-heading">
+          <p class="eyebrow">Session</p>
+          <h2 id="sessionTitle">Current state</h2>
+        </div>
+        <dl id="sessionList" class="session-list"></dl>
       </section>
     </main>
 

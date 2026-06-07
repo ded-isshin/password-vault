@@ -160,11 +160,10 @@ Response `200`:
   "registration_id": "00000000-0000-4000-8000-000000000001",
   "auth_protocol": "derived-auth-v1",
   "kdf_profile": {
-    "id": "argon2id-browser-v1",
-    "algorithm": "argon2id",
-    "memory_kib": 19456,
-    "iterations": 2,
-    "parallelism": 1
+    "id": "pbkdf2-sha256-browser-v1",
+    "algorithm": "PBKDF2-HMAC-SHA-256",
+    "iterations": 600000,
+    "hash": "SHA-256"
   },
   "account_salt": "<base64url-32-bytes>",
   "auth_verifier_profile": "pv-scram-sha-256-v1",
@@ -234,13 +233,18 @@ The implementation must rate-limit registration attempts by source and normalize
 Implementation status:
 
 - `register/start` and `register/finish` are implemented as the first registration foundation slice.
+- The browser MVP uses WebCrypto-native `pbkdf2-sha256-browser-v1` so registration can run without
+  an unreviewed Argon2id WASM dependency. Argon2id remains the future hardening target after a
+  pinned dependency and test-vector review. Pre-MVP `argon2id-browser-v1` rows are migrated to the
+  PBKDF2 profile instead of being served as legacy login metadata because mixed login profiles would
+  make legacy accounts distinguishable from unknown login handles.
 - `register/finish` stores only encrypted account keyset and vault key-wrap ciphertext metadata.
 - The initial vault `genesis_head_hash` is currently a deterministic server-side SHA-256 domain
   hash over the vault id because the request does not yet carry a client-supplied genesis hash.
 - The client-supplied `initial_vault.vault_id` remains part of the contract for now; collisions are
   handled as a generic registration failure.
-- The setup session is created with `mfa_enrollment_required`, but TOTP enrollment, CSRF issuance,
-  and vault item APIs are not implemented yet.
+- The setup session is created with `mfa_enrollment_required`. CSRF issuance and TOTP enrollment are
+  implemented; vault item APIs are not implemented yet.
 - The `__Host-pv_session` cookie is intentionally `Secure`; a plain-HTTP browser preview will not
   behave like the final HTTPS deployment for cookie persistence.
 
@@ -265,11 +269,10 @@ Response `200`:
   "login_challenge_id": "00000000-0000-4000-8000-000000000020",
   "auth_protocol": "derived-auth-v1",
   "kdf_profile": {
-    "id": "argon2id-browser-v1",
-    "algorithm": "argon2id",
-    "memory_kib": 19456,
-    "iterations": 2,
-    "parallelism": 1
+    "id": "pbkdf2-sha256-browser-v1",
+    "algorithm": "PBKDF2-HMAC-SHA-256",
+    "iterations": 600000,
+    "hash": "SHA-256"
   },
   "account_salt": "<base64url-32-bytes>",
   "auth_verifier_profile": "pv-scram-sha-256-v1",

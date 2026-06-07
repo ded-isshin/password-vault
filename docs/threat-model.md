@@ -208,8 +208,8 @@ Threat focus:
 | Raw master password reaches backend | Breaks zero-knowledge boundary | Reject password-over-TLS design; tests prove backend never receives raw password | #2, #3 |
 | Account secret key stored server-side in plaintext | Enables password-only database attacks | Generate client-side, show/save through UX, never persist plaintext server-side | #2 |
 | Pre-login metadata reveals account existence | Account enumeration | Constant-shape responses, synthetic metadata for unknown accounts, generic errors, rate limits | #2 |
-| Copied auth database enables guessing | Vault/account compromise risk | Argon2id target, account secret key, SCRAM-like verifier material, rate limits | Auth protocol, #3 |
-| Silent KDF downgrade | Weakens unlock/auth security | No silent PBKDF2 fallback; explicit degraded-mode decision and migration plan | #3 |
+| Copied auth database enables guessing | Vault/account compromise risk | Account secret key, explicit PBKDF2 browser-MVP profile, Argon2id hardening target, SCRAM-like verifier material, rate limits | Auth protocol, #3 |
+| Silent KDF downgrade or mixed-profile enumeration | Weakens unlock/auth security or reveals legacy accounts | Versioned KDF profile; PBKDF2 is an explicit browser-MVP decision, not runtime fallback; pre-MVP Argon2id rows are migrated rather than served as separate login metadata; future changes need migration plan | #3 |
 | Browser-delivered JavaScript is malicious | Unlock material theft | Accepted residual risk; pinned/reviewed dependencies, no third-party auth scripts, service-worker/cache policy, future stronger clients | #3, #9 |
 | AES-GCM nonce/key misuse | Payload confidentiality/integrity failure | Per-revision content keys or strict nonce budget/rekey spec and tests | #3 |
 | Malicious server serves stale or rolled-back vault revisions | User trusts old or hidden data | Client-verifiable monotonic revision or hash-chain design bound into AAD; stale-revision tests | #3, API contract |

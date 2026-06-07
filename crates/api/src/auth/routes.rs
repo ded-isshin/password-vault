@@ -38,6 +38,8 @@ const CLIENT_NONCE_BYTES: usize = 32;
 const SERVER_NONCE_BYTES: usize = 32;
 const AUTH_KEY_BYTES: usize = 32;
 const AEAD_NONCE_BYTES: usize = 12;
+const PBKDF2_BROWSER_PROFILE_ID: &str = "pbkdf2-sha256-browser-v1";
+const PBKDF2_BROWSER_ITERATIONS: u32 = 600_000;
 const MAX_ENCRYPTED_ENVELOPE_BYTES: usize = 64 * 1024;
 const MAX_LOGIN_HANDLE_BYTES: usize = 320;
 const MAX_DEVICE_LABEL_BYTES: usize = 128;
@@ -1859,11 +1861,10 @@ fn synthetic_bytes(
 
 fn default_kdf_profile() -> Value {
     json!({
-        "id": "argon2id-browser-v1",
-        "algorithm": "argon2id",
-        "memory_kib": 19456,
-        "iterations": 2,
-        "parallelism": 1,
+        "id": PBKDF2_BROWSER_PROFILE_ID,
+        "algorithm": "PBKDF2-HMAC-SHA-256",
+        "iterations": PBKDF2_BROWSER_ITERATIONS,
+        "hash": "SHA-256",
     })
 }
 

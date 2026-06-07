@@ -117,6 +117,20 @@ iterations, and parallelism 1, then be tuned on representative browsers and devi
 PBKDF2 must not be a silent runtime fallback. It is allowed only as an explicitly approved prototype
 or degraded-mode decision with a migration plan.
 
+Implementation update, 2026-06-07:
+
+- The first browser registration MVP uses `pbkdf2-sha256-browser-v1` with PBKDF2-HMAC-SHA-256 and
+  600,000 iterations.
+- Reason: WebCrypto supports PBKDF2 natively, while browser Argon2id requires a WASM dependency that
+  still needs pinning, test vectors, and supply-chain review.
+- This is an explicit browser-MVP decision, not a silent runtime downgrade.
+- Pre-MVP `argon2id-browser-v1` rows are migrated to the PBKDF2 profile instead of being served as
+  legacy login metadata. Supporting both profiles in `login/start` would make legacy accounts
+  distinguishable from unknown login handles and weaken the anti-enumeration goal.
+- Argon2id/WASM remains the future hardening target after dependency review.
+- The browser must require the user to save the generated account secret key before it creates the
+  server account.
+
 AES-GCM is the practical browser MVP AEAD because it is available in WebCrypto. The final crypto
 spec should use per-revision content keys or define nonce generation, per-key encryption budget,
 rekey triggers, associated data, and payload versioning before item encryption is implemented.
