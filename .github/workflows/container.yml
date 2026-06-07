@@ -13,6 +13,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ded-isshin/password-vault-api
   TEST_SYNTHETIC_METADATA_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+  TEST_TOTP_SEED_KEY_B64: YmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWE
 
 jobs:
   pr-smoke:
@@ -22,7 +23,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:17-bookworm
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: password_vault_test
           POSTGRES_USER: postgres
@@ -56,6 +57,7 @@ jobs:
             -e PV_REQUIRE_DATABASE=true \
             -e PV_RUN_MIGRATIONS_ON_STARTUP=true \
             -e PV_SYNTHETIC_METADATA_KEY_B64="${TEST_SYNTHETIC_METADATA_KEY_B64}" \
+            -e PV_TOTP_SEED_KEY_B64="${TEST_TOTP_SEED_KEY_B64}" \
             password-vault-api:ci-smoke
           trap 'docker rm -f password-vault-api-smoke >/dev/null 2>&1 || true' EXIT
           for _ in $(seq 1 60); do

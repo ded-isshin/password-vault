@@ -20,6 +20,7 @@ pub struct ApiConfig {
     pub bind_addr: SocketAddr,
     database_url: Option<String>,
     synthetic_metadata_key: Option<[u8; 32]>,
+    totp_seed_key: Option<[u8; 32]>,
     pub require_database: bool,
     pub run_migrations_on_startup: bool,
 }
@@ -43,6 +44,12 @@ impl ApiConfig {
             .map(|value| auth::encoding::decode_base64url_array::<32>(&value))
             .transpose()
             .map_err(|_| ConfigError::InvalidSyntheticMetadataKey)?;
+        let totp_seed_key = env::var("PV_TOTP_SEED_KEY_B64")
+            .ok()
+            .and_then(nonempty_string)
+            .map(|value| auth::encoding::decode_base64url_array::<32>(&value))
+            .transpose()
+            .map_err(|_| ConfigError::InvalidTotpSeedKey)?;
 
         let run_migrations_on_startup = match env::var("PV_RUN_MIGRATIONS_ON_STARTUP") {
             Ok(value) => parse_bool(&value).ok_or(ConfigError::InvalidRunMigrationsOnStartup)?,
@@ -53,6 +60,7 @@ impl ApiConfig {
             bind_addr,
             database_url: database_url_present,
             synthetic_metadata_key,
+            totp_seed_key,
             require_database,
             run_migrations_on_startup,
         })
@@ -66,6 +74,7 @@ impl ApiConfig {
             database_url: database_url_present
                 .then(|| "postgres://test:test@127.0.0.1:5432/test".to_string()),
             synthetic_metadata_key: None,
+            totp_seed_key: None,
             require_database,
             run_migrations_on_startup: false,
         }
@@ -82,6 +91,10 @@ impl ApiConfig {
     fn synthetic_metadata_key(&self) -> Option<&[u8; 32]> {
         self.synthetic_metadata_key.as_ref()
     }
+
+    fn totp_seed_key(&self) -> Option<&[u8; 32]> {
+        self.totp_seed_key.as_ref()
+    }
 }
 
 impl std::fmt::Debug for ApiConfig {
@@ -97,6 +110,10 @@ impl std::fmt::Debug for ApiConfig {
                 "synthetic_metadata_key",
                 &self.synthetic_metadata_key.as_ref().map(|_| "<redacted>"),
             )
+            .field(
+                "totp_seed_key",
+                &self.totp_seed_key.as_ref().map(|_| "<redacted>"),
+            )
             .field("require_database", &self.require_database)
             .field("run_migrations_on_startup", &self.run_migrations_on_startup)
             .finish()
@@ -109,6 +126,7 @@ pub enum ConfigError {
     InvalidRequireDatabase,
     InvalidRunMigrationsOnStartup,
     InvalidSyntheticMetadataKey,
+    InvalidTotpSeedKey,
 }
 
 impl std::fmt::Display for ConfigError {
@@ -128,6 +146,12 @@ impl std::fmt::Display for ConfigError {
                 write!(
                     formatter,
                     "PV_SYNTHETIC_METADATA_KEY_B64 must be 32 bytes encoded as base64url without padding"
+                )
+            }
+            Self::InvalidTotpSeedKey => {
+                write!(
+                    formatter,
+                    "PV_TOTP_SEED_KEY_B64 must be 32 bytes encoded as base64url without padding"
                 )
             }
         }
@@ -280,14 +304,16 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<ReadyRespons
     let database_ready = matches!(database_status, "ok");
     let synthetic_metadata_key_status = synthetic_metadata_key_readiness(&state);
     let synthetic_metadata_key_ready = matches!(synthetic_metadata_key_status, "ok");
+    let totp_seed_key_status = totp_seed_key_readiness(&state);
+    let totp_seed_key_ready = matches!(totp_seed_key_status, "ok");
 
-    let status = if database_ready && synthetic_metadata_key_ready {
+    let status = if database_ready && synthetic_metadata_key_ready && totp_seed_key_ready {
         StatusCode::OK
     } else {
         StatusCode::SERVICE_UNAVAILABLE
     };
 
-    let body_status = if database_ready && synthetic_metadata_key_ready {
+    let body_status = if database_ready && synthetic_metadata_key_ready && totp_seed_key_ready {
         "ready"
     } else {
         "not_ready"
@@ -305,6 +331,10 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<ReadyRespons
                 ReadyCheck {
                     name: "synthetic_metadata_key",
                     status: synthetic_metadata_key_status,
+                },
+                ReadyCheck {
+                    name: "totp_seed_key",
+                    status: totp_seed_key_status,
                 },
             ],
         }),
@@ -331,6 +361,18 @@ async fn database_readiness(state: &AppState) -> &'static str {
 fn synthetic_metadata_key_readiness(state: &AppState) -> &'static str {
     if state.config.database_url_present() || state.config.require_database {
         if state.config.synthetic_metadata_key().is_some() {
+            "ok"
+        } else {
+            "missing"
+        }
+    } else {
+        "ok"
+    }
+}
+
+fn totp_seed_key_readiness(state: &AppState) -> &'static str {
+    if state.config.database_url_present() || state.config.require_database {
+        if state.config.totp_seed_key().is_some() {
             "ok"
         } else {
             "missing"
@@ -389,6 +431,7 @@ mod tests {
         auth::{
             encoding::{decode_base64url, encode_base64url},
             tokens,
+            totp::{self, TotpProfile},
         },
         db,
     };
@@ -594,6 +637,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some("postgres://test:test@127.0.0.1:1/test".to_string()),
             synthetic_metadata_key: None,
+            totp_seed_key: None,
             require_database: true,
             run_migrations_on_startup: false,
         };
@@ -645,6 +689,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
         })
@@ -777,6 +822,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
         })
@@ -896,6 +942,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
         })
@@ -1102,6 +1149,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
         })
@@ -1259,6 +1307,423 @@ mod tests {
         assert_eq!(
             session_count_for_login(&pool, "origin-mismatch@example.com").await,
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn totp_enrollment_confirm_generates_recovery_codes_and_rotates_session() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping totp enrollment database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let set_cookie = register_account_and_return_set_cookie(
+            &router,
+            "totp-enroll@example.com",
+            "00000000-0000-4000-8000-000000000787",
+        )
+        .await;
+        let setup_cookie = cookie_pair(&set_cookie);
+        let csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &setup_cookie))
+            .await
+            .expect("csrf request returns a response");
+        assert_eq!(csrf_response.status(), http::StatusCode::OK);
+        let csrf_body = response_json(csrf_response).await;
+        let csrf_token = csrf_body["csrf_token"]
+            .as_str()
+            .expect("csrf token is present");
+
+        let start_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("totp enroll start returns a response");
+        assert_eq!(start_response.status(), http::StatusCode::OK);
+        let start_body = response_json(start_response).await;
+        assert_eq!(start_body["status"], "pending");
+        assert_eq!(start_body["totp_profile"]["algorithm"], "SHA1");
+        assert_eq!(start_body["totp_profile"]["digits"], 6);
+        assert_eq!(start_body["totp_profile"]["period"], 30);
+        let factor_id = start_body["factor_id"]
+            .as_str()
+            .expect("factor id is present");
+        let manual_secret = start_body["manual_secret"]
+            .as_str()
+            .expect("manual secret is present");
+        assert!(
+            start_body["otpauth_uri"]
+                .as_str()
+                .expect("otpauth uri is present")
+                .contains("otpauth://totp/Password%20Vault:totp-enroll%40example.com")
+        );
+        let seed = decode_base32_no_padding(manual_secret).expect("manual secret decodes");
+        assert_eq!(seed.len(), 20);
+        assert_pending_totp_factor_is_encrypted(&pool, "totp-enroll@example.com", &seed).await;
+
+        let bad_confirm_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/confirm",
+                &format!(r#"{{"factor_id":"{factor_id}","code":"12x456"}}"#),
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("bad totp confirm returns a response");
+        assert_eq!(bad_confirm_response.status(), http::StatusCode::FORBIDDEN);
+        let bad_confirm_body = response_json(bad_confirm_response).await;
+        assert_eq!(bad_confirm_body["error"]["code"], "mfa_verification_failed");
+        assert_totp_factor_is_pending(&pool, "totp-enroll@example.com").await;
+
+        let code = totp::generate(
+            &seed,
+            current_unix_seconds(),
+            TotpProfile::google_authenticator_default(),
+        )
+        .expect("totp code generates");
+        let confirm_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/confirm",
+                &format!(r#"{{"factor_id":"{factor_id}","code":"{code}"}}"#),
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("totp confirm returns a response");
+        assert_eq!(confirm_response.status(), http::StatusCode::OK);
+        let rotated_cookie = confirm_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("totp confirm rotates the session cookie")
+            .to_string();
+        let rotated_cookie = cookie_pair(&rotated_cookie);
+        assert_ne!(rotated_cookie, setup_cookie);
+        let confirm_body = response_json(confirm_response).await;
+        assert_eq!(confirm_body["status"], "active");
+        assert_eq!(confirm_body["session"]["state"], "mfa_verified");
+        assert_eq!(confirm_body["session"]["vault_access"], true);
+        let recovery_codes = confirm_body["recovery_codes"]
+            .as_array()
+            .expect("recovery codes are returned");
+        assert_eq!(recovery_codes.len(), 10);
+        let mut unique_codes = recovery_codes
+            .iter()
+            .map(|value| value.as_str().expect("recovery code is a string"))
+            .collect::<Vec<_>>();
+        unique_codes.sort_unstable();
+        unique_codes.dedup();
+        assert_eq!(unique_codes.len(), 10);
+        assert!(
+            unique_codes
+                .iter()
+                .all(|code| code.starts_with("pvrc-") && code.len() >= 30)
+        );
+        assert_totp_factor_is_verified_and_recovery_codes_are_hashed(
+            &pool,
+            "totp-enroll@example.com",
+            recovery_codes
+                .first()
+                .and_then(|value| value.as_str())
+                .expect("first recovery code is present"),
+        )
+        .await;
+
+        let old_cookie_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/session", &setup_cookie))
+            .await
+            .expect("old cookie session returns a response");
+        assert_eq!(old_cookie_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            response_json(old_cookie_response).await["authenticated"],
+            false
+        );
+
+        let verified_session_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/session", &rotated_cookie))
+            .await
+            .expect("rotated cookie session returns a response");
+        assert_eq!(verified_session_response.status(), http::StatusCode::OK);
+        let verified_session_body = response_json(verified_session_response).await;
+        assert_eq!(verified_session_body["authenticated"], true);
+        assert_eq!(verified_session_body["session_state"], "mfa_verified");
+        assert_eq!(verified_session_body["vault_access"], true);
+
+        let verified_csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &rotated_cookie))
+            .await
+            .expect("verified csrf request returns a response");
+        assert_eq!(verified_csrf_response.status(), http::StatusCode::OK);
+        let verified_csrf_body = response_json(verified_csrf_response).await;
+        let verified_csrf = verified_csrf_body["csrf_token"]
+            .as_str()
+            .expect("verified csrf token is present");
+        let verified_start_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &rotated_cookie,
+                verified_csrf,
+            ))
+            .await
+            .expect("verified enroll start returns a response");
+        assert_eq!(
+            verified_start_response.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            response_json(verified_start_response).await["error"]["code"],
+            "mfa_required"
+        );
+    }
+
+    #[tokio::test]
+    async fn totp_enrollment_edges_fail_closed() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping totp enrollment edge database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let setup_cookie = cookie_pair(
+            &register_account_and_return_set_cookie(
+                &router,
+                "totp-edge@example.com",
+                "00000000-0000-4000-8000-000000000788",
+            )
+            .await,
+        );
+
+        let missing_csrf_response = router
+            .clone()
+            .oneshot(json_request_with_cookie(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+            ))
+            .await
+            .expect("missing csrf enroll start returns a response");
+        assert_eq!(missing_csrf_response.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(missing_csrf_response).await["error"]["code"],
+            "csrf_required"
+        );
+        assert_eq!(
+            totp_factor_count_for_login(&pool, "totp-edge@example.com").await,
+            0
+        );
+
+        let csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &setup_cookie))
+            .await
+            .expect("csrf request returns a response");
+        let csrf_body = response_json(csrf_response).await;
+        let csrf_token = csrf_body["csrf_token"]
+            .as_str()
+            .expect("csrf token is present");
+
+        let cross_site_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_csrf_and_fetch_site(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+                csrf_token,
+                "cross-site",
+            ))
+            .await
+            .expect("cross-site enroll start returns a response");
+        assert_eq!(cross_site_response.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(cross_site_response).await["error"]["code"],
+            "csrf_required"
+        );
+
+        let missing_key_router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: None,
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds without totp seed key");
+        let missing_key_readyz = missing_key_router
+            .clone()
+            .oneshot(get_request("/readyz"))
+            .await
+            .expect("readyz returns a response");
+        assert_eq!(
+            missing_key_readyz.status(),
+            http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(
+            response_json(missing_key_readyz).await["checks"]
+                .as_array()
+                .expect("ready checks are an array")
+                .iter()
+                .any(|check| check["name"] == "totp_seed_key" && check["status"] == "missing")
+        );
+
+        let missing_key_start = missing_key_router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("missing key enroll start returns a response");
+        assert_eq!(
+            missing_key_start.status(),
+            http::StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        let first_start = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("first enroll start returns a response");
+        assert_eq!(first_start.status(), http::StatusCode::OK);
+        let first_start_body = response_json(first_start).await;
+        let first_factor_id = first_start_body["factor_id"]
+            .as_str()
+            .expect("first factor id is present")
+            .to_string();
+        let first_seed = decode_base32_no_padding(
+            first_start_body["manual_secret"]
+                .as_str()
+                .expect("first manual secret is present"),
+        )
+        .expect("first manual secret decodes");
+
+        let second_start = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &setup_cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("second enroll start returns a response");
+        assert_eq!(second_start.status(), http::StatusCode::OK);
+        let second_start_body = response_json(second_start).await;
+        let second_factor_id = second_start_body["factor_id"]
+            .as_str()
+            .expect("second factor id is present");
+        assert_ne!(first_factor_id, second_factor_id);
+        assert_eq!(
+            totp_factor_count_for_login(&pool, "totp-edge@example.com").await,
+            1
+        );
+
+        let other_cookie = cookie_pair(
+            &register_account_and_return_set_cookie(
+                &router,
+                "totp-other@example.com",
+                "00000000-0000-4000-8000-000000000789",
+            )
+            .await,
+        );
+        let other_csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &other_cookie))
+            .await
+            .expect("other csrf request returns a response");
+        let other_csrf_body = response_json(other_csrf_response).await;
+        let other_csrf = other_csrf_body["csrf_token"]
+            .as_str()
+            .expect("other csrf token is present");
+        let first_factor_code = totp::generate(
+            &first_seed,
+            current_unix_seconds(),
+            TotpProfile::google_authenticator_default(),
+        )
+        .expect("first factor code generates");
+        let cross_account_confirm = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/confirm",
+                &format!(r#"{{"factor_id":"{first_factor_id}","code":"{first_factor_code}"}}"#),
+                &other_cookie,
+                other_csrf,
+            ))
+            .await
+            .expect("cross-account confirm returns a response");
+        assert_eq!(cross_account_confirm.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(cross_account_confirm).await["error"]["code"],
+            "mfa_verification_failed"
         );
     }
 
@@ -1667,6 +2132,143 @@ mod tests {
         assert_ne!(stored_hash, csrf_token);
     }
 
+    async fn assert_pending_totp_factor_is_encrypted(
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        seed: &[u8],
+    ) {
+        let row: (
+            Vec<u8>,
+            Vec<u8>,
+            String,
+            String,
+            Option<time::OffsetDateTime>,
+        ) = sqlx::query_as(
+            "
+                SELECT
+                    t.seed_ciphertext,
+                    t.seed_nonce,
+                    t.seed_key_id,
+                    t.seed_aead,
+                    t.verified_at
+                FROM totp_factors t
+                JOIN accounts a ON a.id = t.account_id
+                WHERE a.login_handle_normalized = $1
+                ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("totp factor row exists");
+        assert_ne!(row.0, seed);
+        assert!(row.0.len() > seed.len());
+        assert_eq!(row.1.len(), 24);
+        assert_eq!(row.2, "app-totp-seed-key-v1");
+        assert_eq!(row.3, "xchacha20poly1305-v1");
+        assert!(row.4.is_none());
+    }
+
+    async fn assert_totp_factor_is_pending(pool: &sqlx::PgPool, login_handle: &str) {
+        let verified_at: Option<time::OffsetDateTime> = sqlx::query_scalar(
+            "
+            SELECT t.verified_at
+            FROM totp_factors t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("totp factor query succeeds");
+        assert!(verified_at.is_none());
+    }
+
+    async fn assert_totp_factor_is_verified_and_recovery_codes_are_hashed(
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        sample_recovery_code: &str,
+    ) {
+        let factor: (bool, bool) = sqlx::query_as(
+            "
+            SELECT
+                t.verified_at IS NOT NULL,
+                t.last_accepted_step IS NOT NULL
+            FROM totp_factors t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("totp factor query succeeds");
+        assert!(factor.0);
+        assert!(factor.1);
+
+        let recovery_codes: (i64, i64) = sqlx::query_as(
+            "
+            SELECT
+                COUNT(*)::bigint,
+                COUNT(DISTINCT code_hash)::bigint
+            FROM recovery_codes r
+            JOIN accounts a ON a.id = r.account_id
+            WHERE a.login_handle_normalized = $1
+              AND r.used_at IS NULL
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("recovery code query succeeds");
+        assert_eq!(recovery_codes.0, 10);
+        assert_eq!(recovery_codes.1, 10);
+
+        let plaintext_matches: i64 = sqlx::query_scalar(
+            "
+            SELECT COUNT(*)
+            FROM recovery_codes r
+            JOIN accounts a ON a.id = r.account_id
+            WHERE a.login_handle_normalized = $1
+              AND r.code_hash = $2
+            ",
+        )
+        .bind(login_handle)
+        .bind(sample_recovery_code.as_bytes())
+        .fetch_one(pool)
+        .await
+        .expect("recovery plaintext match query succeeds");
+        assert_eq!(plaintext_matches, 0);
+    }
+
+    fn decode_base32_no_padding(value: &str) -> Result<Vec<u8>, ()> {
+        let mut buffer = 0u32;
+        let mut bits = 0u8;
+        let mut output = Vec::with_capacity(value.len() * 5 / 8);
+        for byte in value.bytes() {
+            let value = match byte {
+                b'A'..=b'Z' => u32::from(byte - b'A'),
+                b'a'..=b'z' => u32::from(byte - b'a'),
+                b'2'..=b'7' => u32::from(byte - b'2' + 26),
+                _ => return Err(()),
+            };
+            buffer = (buffer << 5) | value;
+            bits += 5;
+            if bits >= 8 {
+                output.push(((buffer >> (bits - 8)) & 0xff) as u8);
+                bits -= 8;
+            }
+        }
+        Ok(output)
+    }
+
+    fn current_unix_seconds() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time is after unix epoch")
+            .as_secs()
+    }
+
     async fn account_count(pool: &sqlx::PgPool) -> i64 {
         sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
             .fetch_one(pool)
@@ -1694,6 +2296,21 @@ mod tests {
         .fetch_one(pool)
         .await
         .expect("session count by login query succeeds")
+    }
+
+    async fn totp_factor_count_for_login(pool: &sqlx::PgPool, login_handle: &str) -> i64 {
+        sqlx::query_scalar(
+            "
+            SELECT COUNT(*)
+            FROM totp_factors t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("totp factor count by login query succeeds")
     }
 
     async fn expire_session_idle(pool: &sqlx::PgPool, login_handle: &str) {

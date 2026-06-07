@@ -7,13 +7,17 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use chacha20poly1305::{
+    XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit as AeadKeyInit, Payload},
+};
 use hmac::{Hmac, Mac};
 use rand::{RngCore, rngs::OsRng};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row, types::Json as SqlJson};
+use sqlx::{PgPool, Postgres, Row, Transaction, types::Json as SqlJson};
 use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
@@ -24,6 +28,7 @@ use crate::{
         encoding::{decode_base64url, decode_base64url_array, encode_base64url},
         scram::{DEFAULT_ITERATIONS, DEFAULT_SALT_BYTES, PROFILE_ID},
         tokens,
+        totp::{self, TotpAlgorithm, TotpProfile},
     },
 };
 
@@ -47,6 +52,14 @@ const ACCOUNT_KEYSET_CRYPTO_VERSION: &str = "account-keyset-v1";
 const VAULT_KEY_WRAP_CRYPTO_VERSION: &str = "vault-key-wrap-v1";
 const VAULT_CRYPTO_PROFILE_ID: &str = "vault-crypto-v1";
 const SESSION_COOKIE_NAME: &str = "__Host-pv_session";
+const TOTP_ISSUER: &str = "Password Vault";
+const TOTP_SEED_BYTES: usize = 20;
+const TOTP_SEED_AEAD: &str = "xchacha20poly1305-v1";
+const TOTP_SEED_KEY_ID: &str = "app-totp-seed-key-v1";
+const XCHACHA20POLY1305_NONCE_BYTES: usize = 24;
+const RECOVERY_CODE_COUNT: usize = 10;
+const RECOVERY_CODE_RANDOM_BYTES: usize = 16;
+const RECOVERY_CODE_SALT_BYTES: usize = 16;
 type HmacSha256 = Hmac<Sha256>;
 
 pub(crate) fn router() -> Router<AppState> {
@@ -55,6 +68,8 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/v1/auth/register/finish", post(register_finish))
         .route("/v1/auth/login/start", post(login_start))
         .route("/v1/auth/logout", post(logout))
+        .route("/v1/mfa/totp/enroll/start", post(totp_enroll_start))
+        .route("/v1/mfa/totp/enroll/confirm", post(totp_enroll_confirm))
         .route("/v1/csrf", get(csrf_token))
         .route("/v1/session", get(session_status))
         .layer(DefaultBodyLimit::max(AUTH_BODY_LIMIT_BYTES))
@@ -134,6 +149,42 @@ struct SessionResponse {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LogoutRequest {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TotpEnrollStartRequest {}
+
+#[derive(Serialize)]
+struct TotpEnrollStartResponse {
+    factor_id: Uuid,
+    status: &'static str,
+    totp_profile: TotpProfileResponse,
+    otpauth_uri: String,
+    manual_secret: String,
+    expires_at: String,
+}
+
+#[derive(Serialize)]
+struct TotpProfileResponse {
+    algorithm: &'static str,
+    digits: u32,
+    period: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TotpEnrollConfirmRequest {
+    factor_id: Uuid,
+    code: String,
+}
+
+#[derive(Serialize)]
+struct TotpEnrollConfirmResponse {
+    factor_id: Uuid,
+    status: &'static str,
+    session: SessionResponse,
+    recovery_codes: Vec<String>,
+}
 
 #[derive(Serialize)]
 struct CsrfTokenResponse {
@@ -243,6 +294,22 @@ impl ApiError {
             status: StatusCode::FORBIDDEN,
             code: "csrf_required",
             message: "A valid CSRF token is required.",
+        }
+    }
+
+    fn mfa_required() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "mfa_required",
+            message: "MFA enrollment or verification is required.",
+        }
+    }
+
+    fn mfa_verification_failed() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "mfa_verification_failed",
+            message: "MFA verification failed.",
         }
     }
 }
@@ -767,6 +834,318 @@ async fn logout(
     Ok(response)
 }
 
+async fn totp_enroll_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    StrictJson(_request): StrictJson<TotpEnrollStartRequest>,
+) -> Result<Response, ApiError> {
+    let pool = database_pool(&state)?;
+    let totp_seed_key = state
+        .config
+        .totp_seed_key()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let now = now_utc_second()?;
+    let session = load_current_session(pool, &headers, now)
+        .await?
+        .ok_or_else(ApiError::session_required)?;
+    ensure_totp_enrollment_session(&session)?;
+    ensure_unsafe_request_context(&headers)?;
+    ensure_csrf_token(pool, &headers, session.id).await?;
+    let session = refresh_session_activity(pool, session, now).await?;
+
+    let factor_id = Uuid::new_v4();
+    let seed = random_bytes::<TOTP_SEED_BYTES>();
+    let nonce = random_bytes::<XCHACHA20POLY1305_NONCE_BYTES>();
+    let profile = TotpProfile::google_authenticator_default();
+    let aad = totp_seed_aad(session.account_id, factor_id, profile);
+    let seed_ciphertext = encrypt_totp_seed(totp_seed_key, &nonce, &aad, &seed)?;
+    let login_handle = account_login_handle(pool, session.account_id).await?;
+    let otpauth_uri = totp::provisioning_uri(TOTP_ISSUER, &login_handle, &seed, profile)
+        .map_err(|_| ApiError::service_unavailable())?;
+    let manual_secret = totp::base32_no_padding(&seed);
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query("DELETE FROM totp_factors WHERE account_id = $1")
+        .bind(session.account_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO totp_factors (
+            id,
+            account_id,
+            seed_ciphertext,
+            seed_nonce,
+            seed_key_id,
+            seed_aead,
+            algorithm,
+            digits,
+            period_seconds,
+            last_accepted_step,
+            verified_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, 'SHA1', 6, 30, NULL, NULL)
+        ",
+    )
+    .bind(factor_id)
+    .bind(session.account_id)
+    .bind(seed_ciphertext.as_slice())
+    .bind(nonce.as_slice())
+    .bind(TOTP_SEED_KEY_ID)
+    .bind(TOTP_SEED_AEAD)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    insert_audit_event(
+        &mut transaction,
+        session.account_id,
+        session.device_id,
+        "mfa_totp_enrollment_started",
+        json!({ "factor_id": factor_id }),
+    )
+    .await?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(no_store_json(
+        StatusCode::OK,
+        TotpEnrollStartResponse {
+            factor_id,
+            status: "pending",
+            totp_profile: totp_profile_response(profile),
+            otpauth_uri,
+            manual_secret,
+            expires_at: format_rfc3339(session.idle_expires_at)?,
+        },
+    ))
+}
+
+async fn totp_enroll_confirm(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    StrictJson(request): StrictJson<TotpEnrollConfirmRequest>,
+) -> Result<Response, ApiError> {
+    let pool = database_pool(&state)?;
+    let totp_seed_key = state
+        .config
+        .totp_seed_key()
+        .ok_or_else(ApiError::service_unavailable)?;
+    let now = now_utc_second()?;
+    let session = load_current_session(pool, &headers, now)
+        .await?
+        .ok_or_else(ApiError::session_required)?;
+    ensure_totp_enrollment_session(&session)?;
+    ensure_unsafe_request_context(&headers)?;
+    ensure_csrf_token(pool, &headers, session.id).await?;
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let factor = sqlx::query(
+        "
+        SELECT
+            id,
+            account_id,
+            seed_ciphertext,
+            seed_nonce,
+            seed_key_id,
+            seed_aead,
+            algorithm,
+            digits,
+            period_seconds,
+            last_accepted_step,
+            verified_at
+        FROM totp_factors
+        WHERE id = $1
+          AND account_id = $2
+        FOR UPDATE
+        ",
+    )
+    .bind(request.factor_id)
+    .bind(session.account_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(factor) = factor else {
+        return Err(ApiError::mfa_verification_failed());
+    };
+
+    let profile = totp_profile_from_row(&factor)?;
+    let verified_at = factor
+        .try_get::<Option<OffsetDateTime>, _>("verified_at")
+        .map_err(|_| ApiError::service_unavailable())?;
+    if verified_at.is_some() {
+        return Err(ApiError::mfa_verification_failed());
+    }
+    let seed_key_id = factor
+        .try_get::<String, _>("seed_key_id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let seed_aead = factor
+        .try_get::<String, _>("seed_aead")
+        .map_err(|_| ApiError::service_unavailable())?;
+    if seed_key_id != TOTP_SEED_KEY_ID || seed_aead != TOTP_SEED_AEAD {
+        return Err(ApiError::service_unavailable());
+    }
+    let seed_ciphertext = factor
+        .try_get::<Vec<u8>, _>("seed_ciphertext")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let seed_nonce = factor
+        .try_get::<Vec<u8>, _>("seed_nonce")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let last_accepted_step = factor
+        .try_get::<Option<i64>, _>("last_accepted_step")
+        .map_err(|_| ApiError::service_unavailable())?
+        .map(u64::try_from)
+        .transpose()
+        .map_err(|_| ApiError::service_unavailable())?;
+    let aad = totp_seed_aad(session.account_id, request.factor_id, profile);
+    let seed = decrypt_totp_seed(totp_seed_key, &seed_nonce, &aad, &seed_ciphertext)?;
+    let accepted_step = totp::verify(
+        &seed,
+        unix_time_seconds(now)?,
+        &request.code,
+        profile,
+        last_accepted_step,
+    )
+    .map_err(|_| ApiError::mfa_verification_failed())?;
+
+    let Some(accepted_step) = accepted_step else {
+        insert_audit_event(
+            &mut transaction,
+            session.account_id,
+            session.device_id,
+            "mfa_totp_enrollment_failed",
+            json!({ "factor_id": request.factor_id }),
+        )
+        .await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+        return Err(ApiError::mfa_verification_failed());
+    };
+
+    let recovery_codes = generate_recovery_codes();
+    sqlx::query("DELETE FROM recovery_codes WHERE account_id = $1")
+        .bind(session.account_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    for code in &recovery_codes {
+        let salt = random_bytes::<RECOVERY_CODE_SALT_BYTES>();
+        let hash = recovery_code_hash(session.account_id, &salt, code);
+        sqlx::query(
+            "
+            INSERT INTO recovery_codes (
+                id,
+                account_id,
+                code_salt,
+                code_hash
+            ) VALUES ($1, $2, $3, $4)
+            ",
+        )
+        .bind(Uuid::new_v4())
+        .bind(session.account_id)
+        .bind(salt.as_slice())
+        .bind(hash.as_slice())
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+    }
+
+    let session_token = tokens::random_token();
+    let session_token_hash = tokens::sha256_verifier(&session_token);
+    let idle_expires_at = min_time(now + SESSION_IDLE_TTL, session.absolute_expires_at);
+
+    sqlx::query(
+        "
+        UPDATE totp_factors
+        SET verified_at = $1,
+            last_accepted_step = $2,
+            updated_at = $1
+        WHERE id = $3
+        ",
+    )
+    .bind(now)
+    .bind(i64::try_from(accepted_step).map_err(|_| ApiError::service_unavailable())?)
+    .bind(request.factor_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        UPDATE sessions
+        SET session_token_hash = $1,
+            csrf_token_hash = NULL,
+            session_state = 'mfa_verified',
+            last_seen_at = $2,
+            idle_expires_at = $3,
+            expires_at = $3
+        WHERE id = $4
+        ",
+    )
+    .bind(session_token_hash.as_slice())
+    .bind(now)
+    .bind(idle_expires_at)
+    .bind(session.id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    insert_audit_event(
+        &mut transaction,
+        session.account_id,
+        session.device_id,
+        "mfa_totp_enrollment_confirmed",
+        json!({
+            "factor_id": request.factor_id,
+            "recovery_code_count": recovery_codes.len()
+        }),
+    )
+    .await?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let mut response = no_store_json(
+        StatusCode::OK,
+        TotpEnrollConfirmResponse {
+            factor_id: request.factor_id,
+            status: "active",
+            session: SessionResponse {
+                state: "mfa_verified",
+                vault_access: true,
+                idle_expires_at: format_rfc3339(idle_expires_at)?,
+                absolute_expires_at: format_rfc3339(session.absolute_expires_at)?,
+            },
+            recovery_codes,
+        },
+    );
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&session_cookie(&session_token))
+            .map_err(|_| ApiError::service_unavailable())?,
+    );
+
+    Ok(response)
+}
+
 struct LoginMetadata {
     account_id: Option<Uuid>,
     kdf_profile: Value,
@@ -935,6 +1314,177 @@ fn decode_register_challenge_metadata(value: Value) -> Result<RegisterChallengeM
         return Err(ApiError::service_unavailable());
     }
     Ok(metadata)
+}
+
+fn ensure_totp_enrollment_session(session: &CurrentSession) -> Result<(), ApiError> {
+    match session.session_state.as_str() {
+        "mfa_enrollment_required" | "mfa_recovery" => Ok(()),
+        _ => Err(ApiError::mfa_required()),
+    }
+}
+
+async fn account_login_handle(pool: &PgPool, account_id: Uuid) -> Result<String, ApiError> {
+    sqlx::query_scalar::<_, String>(
+        "
+        SELECT login_handle_normalized
+        FROM accounts
+        WHERE id = $1
+        ",
+    )
+    .bind(account_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|_| ApiError::service_unavailable())
+}
+
+fn totp_profile_response(profile: TotpProfile) -> TotpProfileResponse {
+    TotpProfileResponse {
+        algorithm: profile.algorithm.as_uri_value(),
+        digits: profile.digits,
+        period: profile.period_seconds,
+    }
+}
+
+fn totp_profile_from_row(row: &sqlx::postgres::PgRow) -> Result<TotpProfile, ApiError> {
+    let algorithm = match row
+        .try_get::<String, _>("algorithm")
+        .map_err(|_| ApiError::service_unavailable())?
+        .as_str()
+    {
+        "SHA1" => TotpAlgorithm::Sha1,
+        "SHA256" => TotpAlgorithm::Sha256,
+        "SHA512" => TotpAlgorithm::Sha512,
+        _ => return Err(ApiError::service_unavailable()),
+    };
+    let digits = row
+        .try_get::<i32, _>("digits")
+        .map_err(|_| ApiError::service_unavailable())?
+        .try_into()
+        .map_err(|_| ApiError::service_unavailable())?;
+    let period_seconds = row
+        .try_get::<i32, _>("period_seconds")
+        .map_err(|_| ApiError::service_unavailable())?
+        .try_into()
+        .map_err(|_| ApiError::service_unavailable())?;
+    Ok(TotpProfile {
+        algorithm,
+        digits,
+        period_seconds,
+    })
+}
+
+fn totp_seed_aad(account_id: Uuid, factor_id: Uuid, profile: TotpProfile) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(128);
+    aad.extend_from_slice(b"password-vault/totp-seed/v1");
+    aad.push(0);
+    aad.extend_from_slice(account_id.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(factor_id.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(TOTP_SEED_KEY_ID.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(profile.algorithm.as_uri_value().as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(&profile.digits.to_be_bytes());
+    aad.push(0);
+    aad.extend_from_slice(&profile.period_seconds.to_be_bytes());
+    aad
+}
+
+fn encrypt_totp_seed(
+    key: &[u8; 32],
+    nonce: &[u8; XCHACHA20POLY1305_NONCE_BYTES],
+    aad: &[u8],
+    seed: &[u8; TOTP_SEED_BYTES],
+) -> Result<Vec<u8>, ApiError> {
+    let cipher = XChaCha20Poly1305::new(key.into());
+    cipher
+        .encrypt(XNonce::from_slice(nonce), Payload { msg: seed, aad })
+        .map_err(|_| ApiError::service_unavailable())
+}
+
+fn decrypt_totp_seed(
+    key: &[u8; 32],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, ApiError> {
+    if nonce.len() != XCHACHA20POLY1305_NONCE_BYTES {
+        return Err(ApiError::service_unavailable());
+    }
+    let cipher = XChaCha20Poly1305::new(key.into());
+    cipher
+        .decrypt(
+            XNonce::from_slice(nonce),
+            Payload {
+                msg: ciphertext,
+                aad,
+            },
+        )
+        .map_err(|_| ApiError::service_unavailable())
+}
+
+fn generate_recovery_codes() -> Vec<String> {
+    (0..RECOVERY_CODE_COUNT)
+        .map(|_| recovery_code_from_random(random_bytes::<RECOVERY_CODE_RANDOM_BYTES>()))
+        .collect()
+}
+
+fn recovery_code_from_random(random: [u8; RECOVERY_CODE_RANDOM_BYTES]) -> String {
+    let secret = totp::base32_no_padding(&random).to_ascii_lowercase();
+    let mut output = String::with_capacity(5 + secret.len() + 6);
+    output.push_str("pvrc-");
+    for (index, chunk) in secret.as_bytes().chunks(4).enumerate() {
+        if index > 0 {
+            output.push('-');
+        }
+        output.push_str(std::str::from_utf8(chunk).expect("base32 emits ASCII"));
+    }
+    output
+}
+
+fn recovery_code_hash(
+    account_id: Uuid,
+    salt: &[u8; RECOVERY_CODE_SALT_BYTES],
+    code: &str,
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"password-vault/recovery-code/v1");
+    hasher.update([0]);
+    hasher.update(account_id.as_bytes());
+    hasher.update([0]);
+    hasher.update(salt);
+    hasher.update([0]);
+    hasher.update(code.trim().to_ascii_lowercase().as_bytes());
+    hasher.finalize().into()
+}
+
+async fn insert_audit_event(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    actor_device_id: Option<Uuid>,
+    event_type: &'static str,
+    event_metadata: Value,
+) -> Result<(), ApiError> {
+    sqlx::query(
+        "
+        INSERT INTO audit_events (
+            account_id,
+            actor_device_id,
+            event_type,
+            event_metadata
+        ) VALUES ($1, $2, $3, $4)
+        ",
+    )
+    .bind(account_id)
+    .bind(actor_device_id)
+    .bind(event_type)
+    .bind(SqlJson(event_metadata))
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(())
 }
 
 fn validate_short_text(value: &str, max_bytes: usize) -> Result<String, ApiError> {
@@ -1299,8 +1849,8 @@ fn synthetic_bytes(
     domain: &str,
     login_handle_normalized: &str,
 ) -> [u8; 32] {
-    let mut mac =
-        HmacSha256::new_from_slice(synthetic_metadata_key).expect("HMAC accepts any key length");
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(synthetic_metadata_key)
+        .expect("HMAC accepts any key length");
     mac.update(domain.as_bytes());
     mac.update(&[0]);
     mac.update(login_handle_normalized.as_bytes());
@@ -1366,6 +1916,13 @@ fn format_rfc3339(value: OffsetDateTime) -> Result<String, ApiError> {
 fn now_utc_second() -> Result<OffsetDateTime, ApiError> {
     OffsetDateTime::now_utc()
         .replace_nanosecond(0)
+        .map_err(|_| ApiError::service_unavailable())
+}
+
+fn unix_time_seconds(value: OffsetDateTime) -> Result<u64, ApiError> {
+    value
+        .unix_timestamp()
+        .try_into()
         .map_err(|_| ApiError::service_unavailable())
 }
 

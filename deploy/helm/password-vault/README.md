@@ -15,6 +15,8 @@ The chart expects Kubernetes Secrets created outside this public repository:
 - `database.urlSecret.name` / `database.urlSecret.key`: PostgreSQL connection URL.
 - `syntheticMetadata.keySecret.name` / `syntheticMetadata.keySecret.key`: 32-byte base64url
   `PV_SYNTHETIC_METADATA_KEY_B64` value.
+- `totpSeed.keySecret.name` / `totpSeed.keySecret.key`: 32-byte base64url
+  `PV_TOTP_SEED_KEY_B64` value used for application-level AEAD of server-owned TOTP seeds.
 
 Do not commit real secret values.
 

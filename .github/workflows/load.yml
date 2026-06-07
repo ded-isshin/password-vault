@@ -21,13 +21,14 @@ permissions:
 
 env:
   TEST_SYNTHETIC_METADATA_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+  TEST_TOTP_SEED_KEY_B64: YmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWE
 
 jobs:
   load-smoke:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-bookworm
+        image: postgres:18-alpine
         env:
           POSTGRES_DB: password_vault_test
           POSTGRES_USER: postgres
@@ -56,6 +57,7 @@ jobs:
             -e PV_REQUIRE_DATABASE=true \
             -e PV_RUN_MIGRATIONS_ON_STARTUP=true \
             -e PV_SYNTHETIC_METADATA_KEY_B64="${TEST_SYNTHETIC_METADATA_KEY_B64}" \
+            -e PV_TOTP_SEED_KEY_B64="${TEST_TOTP_SEED_KEY_B64}" \
             password-vault-api:load-smoke
           for _ in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then

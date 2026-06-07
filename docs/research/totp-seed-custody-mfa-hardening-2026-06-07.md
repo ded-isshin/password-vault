@@ -148,8 +148,8 @@ Use application-level AEAD for MVP seed encryption at rest.
 
 Runtime key material:
 
-- `PV_TOTP_SEED_KEY_B64`: base64-encoded 32-byte AEAD key supplied by Kubernetes Secret.
-- `PV_TOTP_SEED_KEY_ID`: non-empty key identifier stored with encrypted seed rows.
+- `PV_TOTP_SEED_KEY_B64`: base64url-no-padding 32-byte AEAD key supplied by Kubernetes Secret.
+- MVP key id: `app-totp-seed-key-v1`, stored with encrypted seed rows.
 
 Stored database fields:
 
@@ -164,10 +164,13 @@ Stored database fields:
 
 AEAD direction:
 
-- Use a 96-bit random nonce for each encryption when using AES-256-GCM.
+- Use RustCrypto `chacha20poly1305` `0.10.1`, the latest stable non-RC release checked for this
+  slice.
+- Use XChaCha20Poly1305 with a 192-bit random nonce for each encryption.
 - Associated data must bind at least:
   - purpose: `password-vault:totp-seed:v1`
   - `account_id`
+  - `factor_id`
   - `seed_key_id`
   - `algorithm`
   - `digits`

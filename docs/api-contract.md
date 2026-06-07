@@ -441,6 +441,17 @@ Response `200`:
 
 `otpauth_uri` and `manual_secret` are shown once and must never be logged.
 
+Implementation status:
+
+- Implemented.
+- Requires a valid setup/recovery session, same-origin unsafe request checks, and the current
+  `X-PV-CSRF` token.
+- Generates a server-owned 20-byte TOTP seed and stores it only as XChaCha20Poly1305 ciphertext
+  under the runtime `PV_TOTP_SEED_KEY_B64` key.
+- Replaces any previous factor row for the account before inserting the new pending factor.
+- Returns `otpauth_uri` and `manual_secret` once for QR/manual authenticator enrollment.
+- The response `expires_at` is the current effective session idle expiry.
+
 ### `POST /v1/mfa/totp/enroll/confirm`
 
 Request:
@@ -474,6 +485,18 @@ Response `200`:
 The real response returns 10 recovery codes. They are shown once.
 
 Enrollment confirmation rotates or upgrades the current session into `mfa_verified`.
+
+Implementation status:
+
+- Implemented.
+- Requires a valid setup/recovery session, same-origin unsafe request checks, and the current
+  `X-PV-CSRF` token.
+- Decrypts the pending TOTP seed with XChaCha20Poly1305 and verifies the submitted code with the
+  RFC 6238 adjacent-step window.
+- Marks the factor active, stores `last_accepted_step`, generates 10 one-time recovery codes, and
+  stores only salted SHA-256 recovery-code hashes.
+- Rotates the session token, clears the session CSRF verifier, upgrades the session to
+  `mfa_verified`, and returns a new `__Host-pv_session` cookie.
 
 ### `POST /v1/mfa/recovery-codes/rotate`
 
