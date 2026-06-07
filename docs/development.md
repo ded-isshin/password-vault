@@ -39,13 +39,15 @@ docker run --rm \
   -v "$PWD:/workspace" \
   -w /workspace \
   rust:<pinned-version>-bookworm \
-  cargo test --workspace
+  sh -lc 'export PATH=/usr/local/cargo/bin:$PATH; cargo test --workspace'
 ```
 
 Rules:
 
 - Pin the Rust image version in docs and CI before implementation PRs depend on it.
 - Do not use `latest`.
+- Add `/usr/local/cargo/bin` to `PATH` inside the container command. The Rust Docker image contains
+  the toolchain there, and the shell PATH may not include it by default in this environment.
 - Do not mount host secrets into the container.
 - Do not mount `/var/run/docker.sock` into product build containers.
 - Do not run privileged containers.
@@ -73,7 +75,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - run: cargo test --workspace
+      - run: |
+          export PATH=/usr/local/cargo/bin:$PATH
+          cargo test --workspace
 ```
 
 This avoids third-party Rust setup actions for the first MVP baseline.
@@ -126,4 +130,3 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
 - #20 must add the final CI workflow.
 - #24 must run its OPAQUE proof-of-concept in this selected build environment.
 - #21 must define Helm validation once a chart exists.
-
