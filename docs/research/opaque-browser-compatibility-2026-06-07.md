@@ -1,6 +1,6 @@
 # Research Note: OPAQUE Browser And Rust Compatibility
 
-Status: preliminary spike. Date: 2026-06-07. Related issue: #24.
+Status: completed research spike. Date: 2026-06-07. Related issue: #24.
 
 ## Why This Matters
 
@@ -48,6 +48,17 @@ Browser/client library candidates:
 - `opaque-wasm` npm metadata reports version `2.1.0`, last modified in 2023, and repository
   `github.com/marucjmar/opaque-wasm`.
 
+Additional package evidence:
+
+- `@serenity-kit/opaque` README states it is based on `opaque-ke`, links RFC 9807, documents browser
+  and Vite examples, and reports a 7ASecurity penetration test / whitebox security review.
+- `@serenity-kit/opaque` exposes an `exportKey` after registration/login and documents Argon2id key
+  stretching profiles.
+- Its README says the RFC-recommended Argon2 memory setting had to be reduced by one unit because
+  the exact `2^21` memory value crashed in browser environments. This is a practical browser risk
+  for MVP.
+- `opaque-wasm` appears older and less compelling for the MVP primary path.
+
 Local environment finding:
 
 - `rustc` is not installed.
@@ -55,6 +66,14 @@ Local environment finding:
 - Node and npm are installed.
 - Docker is installed.
 - Helm and Argo CD CLIs are not installed locally.
+
+Container build finding:
+
+- `rust:1.85-bookworm` and `rust:1.96-bookworm` work when `/usr/local/cargo/bin` is added to `PATH`.
+- `cargo info opaque-ke@4.0.1` reports Rust `1.85`, MIT/Apache-2.0 license, default `ristretto255`
+  and `serde` features, optional `argon2`, and repository `github.com/facebook/opaque-ke`.
+- `cargo info opaque-ke` currently resolves to a pre-release latest line (`4.1.0-pre.*`). MVP code
+  should pin the stable `4.0.1` line unless an ADR explicitly accepts a pre-release.
 
 ## Best Practices
 
@@ -79,12 +98,19 @@ Local environment finding:
 
 ## Recommendation
 
-Keep OPAQUE as the preferred security direction, but do not make it the default MVP auth protocol
-until a small proof-of-concept passes.
+Keep OPAQUE as the preferred security direction, but do not make it the default MVP auth protocol.
 
 The repository's earlier direction was derived-auth-key for MVP and OPAQUE later after review. This
-preliminary spike does not provide enough evidence to reverse that default. It does provide enough
-evidence to justify a time-boxed OPAQUE proof-of-concept before #2 is accepted.
+spike does not provide enough evidence to reverse that default. It does provide enough evidence to
+justify a time-boxed OPAQUE proof-of-concept before OPAQUE is selected for implementation.
+
+Recommended #2 default:
+
+- MVP default: `derived-auth-key + account secret key + server-side slow hash + TOTP`.
+- OPAQUE: preferred future authentication protocol and optional pre-MVP upgrade only if a dedicated
+  PoC passes.
+- API shape: protocol-neutral `/v1/auth/register/start`, `/finish`, `/login/start`, `/finish`, with
+  an explicit `auth_protocol` field.
 
 The proof-of-concept should verify:
 
@@ -94,9 +120,34 @@ The proof-of-concept should verify:
 - Argon2 or selected key-stretching configuration is explicit.
 - Export key or equivalent client material can be integrated with the vault key hierarchy.
 - CI can run the tests without real secrets.
+- Server setup secret handling and rotation/backup implications are understood.
+- Browser registration/login performance and memory use are acceptable.
 
-If the proof-of-concept fails or remains inconclusive, #2 should proceed with the derived-auth-key
-MVP default, label it weaker than OPAQUE, and preserve a replacement path in the `/v1` contract.
+If the proof-of-concept fails, is not completed before implementation pressure rises, or remains
+inconclusive, #2 should proceed with the derived-auth-key MVP default, label it weaker than OPAQUE,
+and preserve a replacement path in the `/v1` contract.
+
+## API Migration Advice
+
+Keep auth protocol selection explicit:
+
+```text
+auth_protocol = "derived-auth-v1" | "opaque-rfc9807-v1"
+```
+
+Store:
+
+- `auth_protocol_version`
+- fallback verifier fields for `derived-auth-v1`
+- nullable OPAQUE credential record for `opaque-rfc9807-v1`
+- KDF profile
+- migration status
+
+Do not silently downgrade from OPAQUE to fallback. The client must see and verify the protocol version
+being used.
+
+Keep TOTP/session APIs stable across auth-protocol migration. Keep vault unlock and key wrapping
+separate from auth so a future OPAQUE migration does not require re-encrypting vault items.
 
 ## What Not To Do
 
@@ -117,9 +168,9 @@ MVP default, label it weaker than OPAQUE, and preserve a replacement path in the
 
 ## Current Decision
 
-Needs verification. OPAQUE is worth a proof-of-concept, but the MVP default remains the documented
-derived-auth-key direction until the proof-of-concept demonstrates practical browser/server
-interoperability.
+Accepted for MVP planning: OPAQUE is not the MVP default. Derived-auth-key remains the MVP default
+for #2 unless a separate PoC proves browser/Rust OPAQUE interop, performance, and operational
+handling before auth implementation begins.
 
 ## Sources
 
