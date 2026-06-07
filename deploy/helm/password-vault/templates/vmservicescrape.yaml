@@ -1,0 +1,23 @@
+{{- if .Values.observability.vmServiceScrape.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: {{ include "password-vault.fullname" . }}-api
+  namespace: {{ .Values.observability.vmServiceScrape.namespace }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "password-vault.namespace" . }}
+  selector:
+    matchLabels:
+      {{- include "password-vault.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      relabelConfigs:
+        - action: replace
+          replacement: password-vault-api
+          targetLabel: job
+{{- end }}

@@ -190,7 +190,7 @@ Threat focus:
 
 1. Product changes enter through GitHub issues, branches, and PRs.
 2. GitHub Actions validate docs and public safety on GitHub-hosted runners.
-3. Future release jobs may build and publish images to GHCR.
+3. Release jobs build and publish images to GHCR.
 4. Infrastructure deployment happens through a separate GitOps PR.
 
 Threat focus:
@@ -227,7 +227,7 @@ Threat focus:
 | Public PR abuses GitHub Actions | Secret or supply-chain exposure | GitHub-hosted runners only, minimal permissions, no secrets for untrusted PRs | #7 |
 | Workflow or ruleset tampering | Review and CI bypass | Branch rulesets, required checks, CODEOWNERS for sensitive paths | #7 |
 | Third-party Action or dependency compromise | Supply-chain compromise | Prefer trusted/pinned Actions, dependency review, Dependabot, release hardening | #7 |
-| CI publishes malicious or mutable image | Supply-chain compromise | Build provenance/signing/SBOM decision later; restricted workflow permissions and digest pinning | #7 |
+| CI publishes malicious or mutable image | Supply-chain compromise | Restricted workflow permissions, GHCR publishing, SBOM/provenance, GitHub attestation, digest pinning | #7 |
 | GHCR tag and GitOps digest drift | Wrong image deployed | GitOps should reference immutable image digests, not only mutable tags | #7 |
 | Logs expose secrets | Secret leakage | Redaction, no secret values in logs/audit/CI, public-safety scans | #7 |
 | Metrics or traces leak sensitive metadata | Metadata disclosure | Avoid secret values and high-cardinality sensitive labels; retention/access policy | #7 |

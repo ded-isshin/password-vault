@@ -1,0 +1,13 @@
+.git
+.github
+target
+docs
+load
+deploy
+.claude
+.codex
+*.local
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,30 @@
+name: helm
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint and render chart
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            lint deploy/helm/password-vault
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set observability.vmServiceScrape.enabled=true \
+            >/tmp/password-vault-rendered.yaml
+          test -s /tmp/password-vault-rendered.yaml

@@ -1,6 +1,14 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, sync::OnceLock};
 
-use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
+use axum::{
+    Json, Router,
+    extract::State,
+    http::{StatusCode, header},
+    response::IntoResponse,
+    routing::get,
+};
+use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
+use metrics_exporter_prometheus::PrometheusHandle;
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -195,11 +203,15 @@ pub async fn build_app(config: ApiConfig) -> Result<Router, ApiInitError> {
 }
 
 fn router(state: AppState) -> Router {
+    let (metrics_layer, metrics_handle) = metrics_layer_and_handle();
+
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(move || metrics(metrics_handle.clone())))
         .merge(auth::routes::router())
         .with_state(state)
+        .layer(metrics_layer)
 }
 
 #[derive(Serialize)]
@@ -215,6 +227,16 @@ async fn healthz() -> Json<HealthResponse> {
         service: "password-vault-api",
         version: env!("CARGO_PKG_VERSION"),
     })
+}
+
+async fn metrics(metrics_handle: PrometheusHandle) -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        metrics_handle.render(),
+    )
 }
 
 #[derive(Serialize)]
@@ -313,6 +335,23 @@ pub fn init_tracing() {
         .try_init();
 }
 
+fn metrics_layer_and_handle() -> (PrometheusMetricLayer<'static>, PrometheusHandle) {
+    static METRICS: OnceLock<(PrometheusMetricLayer<'static>, PrometheusHandle)> = OnceLock::new();
+    let (layer, handle) = METRICS.get_or_init(|| {
+        PrometheusMetricLayerBuilder::new()
+            .with_endpoint_label_type(EndpointLabel::MatchedPathWithFallbackFn(
+                unmatched_endpoint_label,
+            ))
+            .with_default_metrics()
+            .build_pair()
+    });
+    (layer.clone(), handle.clone())
+}
+
+fn unmatched_endpoint_label(_: &str) -> String {
+    "/<unmatched>".to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{body::Body, body::to_bytes, http::Request};
@@ -343,6 +382,64 @@ mod tests {
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(body.contains("\"status\":\"ok\""));
         assert!(body.contains("\"service\":\"password-vault-api\""));
+    }
+
+    #[tokio::test]
+    async fn metrics_records_low_cardinality_http_metrics() {
+        let app = app(ApiConfig::local_test(false, false));
+
+        let health_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(health_response.status(), 200);
+
+        for path in [
+            "/not-found-cardinality-probe-a",
+            "/not-found-cardinality-probe-b",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 404);
+        }
+
+        let metrics_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(metrics_response.status(), 200);
+        assert_eq!(
+            metrics_response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("text/plain; version=0.0.4; charset=utf-8")
+        );
+
+        let body = to_bytes(metrics_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("axum_http_requests_total"));
+        assert!(body.contains("endpoint=\"/healthz\""));
+        assert!(body.contains("endpoint=\"/<unmatched>\""));
+        assert!(body.contains("method=\"GET\""));
+        assert!(!body.contains("not-found-cardinality-probe"));
+        assert!(!body.contains("login_handle"));
     }
 
     #[tokio::test]

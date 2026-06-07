@@ -167,6 +167,16 @@ The product should be deployed through GitOps:
 
 No direct `kubectl apply` from this repository.
 
+Current artifact direction:
+
+- local release builds are avoided;
+- GitHub Actions builds and publishes `ghcr.io/ded-isshin/password-vault-api`;
+- Docker Hub is used only for trusted base/test images, not for product autobuilds;
+- deployment values should pin immutable image digests, not mutable tags;
+- the product chart owns `Deployment`, `Service`, probes, PDB, and `VMServiceScrape`;
+- infrastructure owns production values, runtime secrets, Argo CD `Application`, and Grafana
+  dashboard provisioning.
+
 ## More Detail
 
 - [Technical whitepaper](whitepaper.md)
