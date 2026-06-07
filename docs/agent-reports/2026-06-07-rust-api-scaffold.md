@@ -20,6 +20,8 @@ Create the first Rust backend service scaffold with health and readiness endpoin
 - Added environment-based configuration with safe variable names only.
 - Added graceful shutdown for Ctrl+C and SIGTERM.
 - Added Rust GitHub Actions workflow on GitHub-hosted runner with Rust container.
+- Fixed the Rust workflow step to use `bash`; the GitHub container default shell is `sh`, which does
+  not support `set -o pipefail`.
 - Added unit-style route tests for health and readiness behavior.
 
 ## Security Notes
@@ -66,6 +68,7 @@ Deferred suggestions:
 - `docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/workspace" -w /workspace rust:1.85-bookworm sh -lc 'export PATH=/usr/local/cargo/bin:$PATH; cargo test --workspace'`
 - `docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:/workspace" -w /workspace rust:1.85-bookworm sh -lc 'export PATH=/usr/local/cargo/bin:$PATH; rustup component add rustfmt && cargo fmt --all && cargo test --workspace'`
 - `claude -p --permission-mode plan --tools "Read,Glob,Grep" --no-session-persistence --model opus --effort high ...`
+- `gh run view 27090045035 -R ded-isshin/password-vault --job 79951834540 --log`
 
 ## Files Changed
 
