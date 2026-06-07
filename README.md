@@ -85,6 +85,7 @@ Use placeholders such as `<redacted-secret>`, `<redacted-domain>`, and
 - [docs/lock-unlock-state.md](docs/lock-unlock-state.md)
 - [docs/threat-model.md](docs/threat-model.md)
 - [docs/security/crypto-design-draft.md](docs/security/crypto-design-draft.md)
+- [docs/security/revision-freshness.md](docs/security/revision-freshness.md)
 - [docs/adr/0001-initial-product-direction.md](docs/adr/0001-initial-product-direction.md)
 - [docs/adr/0002-backend-stack-rust.md](docs/adr/0002-backend-stack-rust.md)
 - [docs/adr/0003-auth-and-crypto-direction.md](docs/adr/0003-auth-and-crypto-direction.md)

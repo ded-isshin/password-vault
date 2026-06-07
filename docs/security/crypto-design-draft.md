@@ -87,9 +87,13 @@ user key material
 
 vault key / root data key
   -> HKDF(vault_id, item_id, revision_id, key_epoch) -> item-revision content key
+  -> HKDF("password-vault/vault-integrity/v1", vault_id) -> vault integrity key
 
 item-revision content key
   -> encrypt/decrypt exactly one item revision payload
+
+vault integrity key
+  -> HMAC-SHA-256 per-vault state hash chain
 ```
 
 Recommended direction: derive a unique content key per item revision. This keeps the vault key as
@@ -111,6 +115,42 @@ Working candidate:
 - Associated data: bind record type, crypto version, vault ID, item ID, revision ID, and key ID.
 - Payload: versioned encrypted item revision.
 - Migration: every encrypted artifact carries version and algorithm metadata.
+
+### Revision Freshness
+
+Associated data does not prove the server returned the latest state. The MVP must use a client-keyed
+per-vault state hash chain and local client checkpoints, as specified in
+[Vault Revision Freshness And Rollback Resistance](revision-freshness.md).
+
+The hash-chain key is derived from unlocked vault material and is never sent to the backend.
+
+Every encrypted item write must bind:
+
+- previous vault state hash;
+- new vault sequence;
+- operation type;
+- vault ID;
+- item ID;
+- item revision ID;
+- item revision sequence;
+- base item revision sequence;
+- base vault head sequence and hash;
+- key ID and crypto version;
+- hash of the encrypted envelope.
+
+MVP operation values are `create`, `update`, and `delete`. A deletion is an authenticated deletion
+revision, not a server-only metadata flag.
+
+The client computes a `change_mac` over the client-controlled change fields and encrypted envelope
+hash. The chain head then binds the server-ordered vault head sequence, previous head hash, and
+`change_mac`.
+
+The backend stores the chain head and enforces optimistic concurrency, but clients verify the
+`change_mac` and chain. This detects rollback for clients that have a newer local checkpoint. It does
+not fully protect a new device with no checkpoint; that stronger transparency problem is post-MVP.
+
+Implementation prerequisite: define typed canonical encoding and test vectors for `envelope_hash`,
+`change_mac`, and `head_hash` before writing product code.
 
 ### TOTP Seed Protection
 
@@ -165,6 +205,8 @@ Open, but the recommended MVP default is conservative:
 - replayed TOTP denial
 - crypto-version migration tests after more than one version exists
 - AEAD associated-data tamper rejection
+- vault state hash-chain tamper and rollback rejection
+- client change MAC tamper rejection
 - AES-GCM nonce uniqueness and rekey-budget tests
 - server-side test proving raw client auth secret is not stored
 - server-side rate-limit and anti-DoS tests around slow auth-secret hashing
