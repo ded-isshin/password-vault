@@ -1,6 +1,10 @@
-# API Contract Draft
+# API Contract
 
-Status: bootstrap draft. This is not an implementation spec.
+Status: MVP implementation contract draft. This document is concrete enough for backend and
+frontend MVP work, but a machine-readable OpenAPI or typed contract should be added before broad
+client expansion.
+
+Related issues: #4, #13, #16, #18.
 
 ## Purpose
 
@@ -11,157 +15,841 @@ should reuse the same versioned contracts.
 API-first does not mean public unauthenticated access. It means stable, documented contracts for
 authorized clients.
 
-## Contract Strength
-
-Before product code for security-sensitive endpoints is marked review-ready, the endpoint must have:
-
-- documented request and response shapes;
-- generic error behavior;
-- rate-limit expectations;
-- auth/session requirements;
-- plaintext metadata versus encrypted payload boundary;
-- tests or test vectors appropriate to the endpoint.
-
-Human-readable Markdown is acceptable for early design. A machine-readable OpenAPI contract, or an
-equivalent typed contract used by both backend and frontend, is required before implementation PRs for
-the API surface are marked review-ready.
-
 ## Versioning
 
-Initial namespace:
+Initial product namespace:
 
 ```text
 /v1
 ```
 
-Breaking API changes require a versioning or migration decision before implementation.
-
-## Canonical Initial `/v1` Surface
-
-### System
-
-- `GET /v1/health`
-- `GET /v1/ready`
-
-Readiness must be safe for Kubernetes and must not expose private infrastructure details.
-
-### Registration And Login
-
-- `POST /v1/auth/register/start`
-- `POST /v1/auth/register/finish`
-- `POST /v1/auth/login/start`
-- `POST /v1/auth/login/finish`
-- `POST /v1/auth/mfa/totp/verify`
-- `POST /v1/auth/logout`
-- `GET /v1/session`
-- `GET /v1/csrf`
-
-The MVP auth protocol is `derived-auth-v1`. OPAQUE remains a future protocol:
+Kubernetes probes are currently unversioned:
 
 ```text
-auth_protocol = "derived-auth-v1" | "opaque-rfc9807-v1"
+GET /healthz
+GET /readyz
 ```
 
-Auth start endpoints must use protocol-neutral names so the future OPAQUE migration can reuse the
-same public API shape.
+Breaking product API changes require a versioning or migration decision before implementation.
 
-`login/start` must use constant-shape responses and generic errors so it does not become an
-account-enumeration endpoint. Unknown accounts use deterministic synthetic KDF/auth metadata.
+## Common Conventions
 
-`login/start` must not return pre-authenticated MFA enrollment status. The server reveals whether
-TOTP is required only after `login/finish` succeeds.
+- Request and response bodies are JSON unless explicitly stated.
+- Requests with a body must use `Content-Type: application/json`.
+- State-changing `/v1` routes reject browser-simple form content types:
+  `application/x-www-form-urlencoded`, `multipart/form-data`, and `text/plain`.
+- Byte strings are Base64url without padding.
+- IDs are UUID strings unless the endpoint says otherwise.
+- Timestamps are RFC 3339 UTC strings.
+- Unknown JSON fields are rejected for security-sensitive endpoints.
+- State-changing endpoints require non-GET methods.
+- Authenticated state-changing browser requests require `X-PV-CSRF`.
+- Auth, MFA, session, and CSRF responses include `Cache-Control: no-store`.
+- Clients may send `X-Request-Id`; the server may echo or replace it. Request IDs are correlation
+  metadata only and must not contain secrets or free-form secret-bearing text.
+- Sensitive values must not be logged: passwords, account secret keys, raw client auth secrets,
+  TOTP seeds, TOTP codes, recovery codes, unwrapped vault keys, plaintext item fields.
 
-Registration endpoints must also avoid trivial account enumeration. Duplicate login-handle behavior
-must be generic until the implementation spec defines an accepted mitigation.
+### Error Envelope
 
-Sensitive boundary:
+Generic error shape:
 
-- raw master password: never sent to backend;
-- account secret key: never sent to backend;
-- account unlock key: never sent to backend;
-- unwrapped vault key: never sent to backend;
-- `client_auth_secret`: password-equivalent; allowed only as the documented `derived-auth-v1`
-  challenge-bound proof input and never stored or sent raw;
-- TOTP code: sent only to MFA verification endpoint and never logged.
+```json
+{
+  "error": {
+    "code": "auth_failed",
+    "message": "Authentication failed."
+  }
+}
+```
 
-### TOTP Enrollment And Recovery Codes
+Security-sensitive endpoints use generic errors. They must not reveal whether a login handle exists,
+whether TOTP is enrolled before auth succeeds, or whether a recovery code was close to valid.
 
-- `POST /v1/mfa/totp/enroll/start`
-- `POST /v1/mfa/totp/enroll/confirm`
-- `POST /v1/mfa/totp/disable`
-- `POST /v1/mfa/recovery-codes/rotate`
-- `POST /v1/auth/mfa/recovery-code/verify`
+Common codes:
 
-Recovery codes recover login-factor access only. They must not become a vault-decryption recovery
-path.
+```text
+bad_request
+auth_failed
+mfa_required
+session_required
+csrf_required
+forbidden
+not_found
+conflict
+rate_limited
+registration_unavailable
+vault_conflict
+```
 
-TOTP is login MFA only. It is not part of vault item encryption.
+Rate-limited responses use HTTP `429` and may include:
 
-### Devices And Sessions
+```text
+Retry-After
+X-RateLimit-Limit
+X-RateLimit-Remaining
+X-RateLimit-Reset
+```
 
-- `GET /v1/devices`
-- `PATCH /v1/devices/{device_id}`
-- `DELETE /v1/devices/{device_id}`
-- `GET /v1/sessions`
-- `DELETE /v1/sessions/{session_id}`
+Header values must not expose account existence.
 
-The MVP device model may be a soft audit/revocation model. Strong cryptographic enrollment can be a
-later ADR.
+## Sensitive Boundary
 
-### Vaults And Item Revisions
+Never sent to backend:
 
-- `GET /v1/vaults`
-- `GET /v1/vaults/{vault_id}/sync`
-- `POST /v1/vaults/{vault_id}/items`
-- `POST /v1/vaults/{vault_id}/items/{item_id}/revisions`
+- raw master password;
+- account secret key;
+- account unlock key;
+- unwrapped user or vault keys;
+- plaintext item title, URL, username, password, notes, tags, or custom fields.
 
-Item payloads are encrypted client-side. The API stores ciphertext and allowed sync metadata only.
+Sent only as protocol-safe derived material:
 
-Write requests for item create, revision create, and delete must include:
+- `auth_stored_key` and `auth_server_key` during registration;
+- `client_proof` during login finish.
 
-- `base_head_seq`
-- `base_head_hash`
-- `new_head_hash`
-- `change_mac`
+Stored server-side:
 
-Revision-create and deletion requests must also include `base_revision_seq`.
+- auth verifier metadata;
+- encrypted TOTP seed;
+- one-way recovery-code verifiers;
+- session token hash;
+- encrypted vault key wraps and item ciphertext;
+- sync metadata required for authorization, conflict checks, and client-side integrity.
 
-Deletion is represented as a signed deletion revision through
-`POST /v1/vaults/{vault_id}/items/{item_id}/revisions` with `operation=delete`. The MVP should not
-use a bare `DELETE` endpoint because the client must authenticate the deletion change.
+## Auth Protocol
 
-Sync responses must include:
+MVP protocol:
 
-- `from_head`
-- `to_head`
-- ordered encrypted changes with each change's `head_seq`, `previous_head_hash`, `head_hash`, and
-  `change_mac`
-- all fields required to recompute `change_mac`, including operation, item/revision identifiers,
-  base revision sequence, base head, key ID, crypto version, and envelope hash
+```text
+auth_protocol = "derived-auth-v1"
+auth_verifier_profile = "pv-scram-sha-256-v1"
+```
 
-The backend checks authorization and optimistic concurrency. The unlocked client verifies the
-client-keyed change MACs and state hash chain before trusting or decrypting returned item envelopes.
+OPAQUE future protocol:
 
-Stale writes return `409 Conflict` with a generic conflict code and the current visible vault head.
-Sync requests include both sequence and hash so a stale or forked cursor can return `409 Conflict`.
-Client-side rollback/fork detection must be represented as a local client error state; it is not
-resolved by the backend.
+```text
+auth_protocol = "opaque-rfc9807-v1"
+```
 
-### Audit Events
+The public API uses protocol-neutral start/finish endpoints so OPAQUE can be introduced later
+without changing TOTP/session/vault endpoints.
 
-- `GET /v1/audit-events`
+`pv-scram-sha-256-v1` is the MVP verifier/proof profile documented in
+[docs/security/auth-protocol-v1.md](security/auth-protocol-v1.md). The server stores verifier
+material, not the raw `client_auth_secret`.
+
+## Registration
+
+### `POST /v1/auth/register/start`
+
+Request:
+
+```json
+{
+  "login_handle": "user@example.com",
+  "auth_protocol": "derived-auth-v1"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "registration_id": "00000000-0000-4000-8000-000000000001",
+  "auth_protocol": "derived-auth-v1",
+  "kdf_profile": {
+    "id": "argon2id-browser-v1",
+    "algorithm": "argon2id",
+    "memory_kib": 19456,
+    "iterations": 2,
+    "parallelism": 1
+  },
+  "account_salt": "<base64url-32-bytes>",
+  "auth_verifier_profile": "pv-scram-sha-256-v1",
+  "auth_verifier_salt": "<base64url-32-bytes>",
+  "auth_verifier_iterations": 150000,
+  "expires_at": "2026-06-07T00:10:00Z"
+}
+```
+
+The response shape is generic. Duplicate login handles are not revealed at start.
+
+### `POST /v1/auth/register/finish`
+
+Request:
+
+```json
+{
+  "registration_id": "00000000-0000-4000-8000-000000000001",
+  "auth_protocol": "derived-auth-v1",
+  "auth_stored_key": "<base64url-32-bytes>",
+  "auth_server_key": "<base64url-32-bytes>",
+  "encrypted_account_keyset": {
+    "crypto_version": "account-keyset-v1",
+    "key_id": "user-key-v1",
+    "nonce": "<base64url-12-bytes>",
+    "ciphertext": "<base64url-bytes>"
+  },
+  "initial_vault": {
+    "vault_id": "00000000-0000-4000-8000-000000000010",
+    "encrypted_vault_key": {
+      "crypto_version": "vault-key-wrap-v1",
+      "key_id": "user-key-v1",
+      "nonce": "<base64url-12-bytes>",
+      "ciphertext": "<base64url-bytes>"
+    }
+  },
+  "device": {
+    "label": "Firefox on laptop",
+    "client_type": "browser",
+    "public_metadata": {
+      "platform_hint": "web"
+    }
+  }
+}
+```
+
+Response `201`:
+
+```json
+{
+  "account_id": "00000000-0000-4000-8000-000000000100",
+  "session": {
+    "state": "mfa_enrollment_required",
+    "vault_access": false,
+    "idle_expires_at": "2026-06-07T00:30:00Z",
+    "absolute_expires_at": "2026-06-07T12:00:00Z"
+  },
+  "next_step": "enroll_totp"
+}
+```
+
+Response headers set `__Host-pv_session` when a session is created.
+
+Duplicate or expired registration returns a generic failure such as `registration_unavailable`.
+The implementation must rate-limit registration attempts by source and normalized handle.
+
+## Login
+
+### `POST /v1/auth/login/start`
+
+Request:
+
+```json
+{
+  "login_handle": "user@example.com",
+  "auth_protocol": "derived-auth-v1",
+  "client_nonce": "<base64url-32-bytes>"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "login_challenge_id": "00000000-0000-4000-8000-000000000020",
+  "auth_protocol": "derived-auth-v1",
+  "kdf_profile": {
+    "id": "argon2id-browser-v1",
+    "algorithm": "argon2id",
+    "memory_kib": 19456,
+    "iterations": 2,
+    "parallelism": 1
+  },
+  "account_salt": "<base64url-32-bytes>",
+  "auth_verifier_profile": "pv-scram-sha-256-v1",
+  "auth_verifier_salt": "<base64url-32-bytes>",
+  "auth_verifier_iterations": 150000,
+  "server_nonce": "<base64url-32-bytes>",
+  "combined_nonce": "<base64url-64-or-more-bytes>",
+  "expires_at": "2026-06-07T00:05:00Z"
+}
+```
+
+`login/start` must return the same status, header shape, and JSON shape for existing and unknown
+accounts. Unknown accounts use deterministic synthetic metadata.
+
+`login/start` must not reveal MFA enrollment status.
+
+### `POST /v1/auth/login/finish`
+
+Request:
+
+```json
+{
+  "login_challenge_id": "00000000-0000-4000-8000-000000000020",
+  "auth_protocol": "derived-auth-v1",
+  "client_nonce": "<base64url-32-bytes>",
+  "server_nonce": "<base64url-32-bytes>",
+  "client_final_without_proof": "<base64url-bytes>",
+  "client_proof": "<base64url-32-bytes>",
+  "device": {
+    "label": "Firefox on laptop",
+    "client_type": "browser"
+  }
+}
+```
+
+Response `200` when TOTP is required:
+
+```json
+{
+  "result": "mfa_required",
+  "mfa_challenge_id": "00000000-0000-4000-8000-000000000021",
+  "available_methods": ["totp", "recovery_code"],
+  "expires_at": "2026-06-07T00:05:00Z"
+}
+```
+
+Response `200` when no MFA is active:
+
+```json
+{
+  "result": "session_created",
+  "session": {
+    "state": "mfa_enrollment_required",
+    "vault_access": false,
+    "idle_expires_at": "2026-06-07T00:30:00Z",
+    "absolute_expires_at": "2026-06-07T12:00:00Z"
+  },
+  "next_step": "enroll_totp"
+}
+```
+
+The no-MFA session is a setup/recovery state only. It must not access vault item APIs until TOTP is
+confirmed and the session is upgraded.
+
+Wrong proof, expired challenge, unknown account, or unsupported protocol returns a generic auth
+failure. The server must not log `client_proof`.
+
+## MFA
+
+### `POST /v1/auth/mfa/totp/verify`
+
+Request:
+
+```json
+{
+  "mfa_challenge_id": "00000000-0000-4000-8000-000000000021",
+  "code": "123456"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "result": "session_created",
+  "session": {
+    "state": "mfa_verified",
+    "vault_access": true,
+    "idle_expires_at": "2026-06-07T00:30:00Z",
+    "absolute_expires_at": "2026-06-07T12:00:00Z"
+  }
+}
+```
+
+Response headers set `__Host-pv_session`.
+
+TOTP verification policy:
+
+- SHA1, 6 digits, 30 second period;
+- accept current step and one adjacent step on either side;
+- reject any step less than or equal to `last_accepted_step`;
+- generic failure for invalid, replayed, expired, or rate-limited attempts.
+
+### `POST /v1/auth/mfa/recovery-code/verify`
+
+Request:
+
+```json
+{
+  "mfa_challenge_id": "00000000-0000-4000-8000-000000000021",
+  "recovery_code": "pvrc-xxxx-xxxx-xxxx-xxxx"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "result": "session_created",
+  "session": {
+    "state": "mfa_recovery",
+    "vault_access": false,
+    "idle_expires_at": "2026-06-07T00:30:00Z",
+    "absolute_expires_at": "2026-06-07T12:00:00Z"
+  },
+  "next_step": "reenroll_totp"
+}
+```
+
+Recovery-code verification consumes the code permanently and does not reveal or change vault
+decryption material.
+
+## TOTP Enrollment And Recovery Codes
+
+These endpoints require an active session and CSRF protection.
+
+### `POST /v1/mfa/totp/enroll/start`
+
+Request:
+
+```json
+{}
+```
+
+Response `200`:
+
+```json
+{
+  "factor_id": "00000000-0000-4000-8000-000000000030",
+  "status": "pending",
+  "totp_profile": {
+    "algorithm": "SHA1",
+    "digits": 6,
+    "period": 30
+  },
+  "otpauth_uri": "otpauth://totp/Password%20Vault:user%40example.com?secret=<redacted-secret>&issuer=Password%20Vault&algorithm=SHA1&digits=6&period=30",
+  "manual_secret": "<base32-secret-shown-once>",
+  "expires_at": "2026-06-07T00:10:00Z"
+}
+```
+
+`otpauth_uri` and `manual_secret` are shown once and must never be logged.
+
+### `POST /v1/mfa/totp/enroll/confirm`
+
+Request:
+
+```json
+{
+  "factor_id": "00000000-0000-4000-8000-000000000030",
+  "code": "123456"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "factor_id": "00000000-0000-4000-8000-000000000030",
+  "status": "active",
+  "session": {
+    "state": "mfa_verified",
+    "vault_access": true,
+    "idle_expires_at": "2026-06-07T00:30:00Z",
+    "absolute_expires_at": "2026-06-07T12:00:00Z"
+  },
+  "recovery_codes": [
+    "pvrc-aaaa-bbbb-cccc-dddd",
+    "pvrc-eeee-ffff-gggg-hhhh"
+  ]
+}
+```
+
+The real response returns 10 recovery codes. They are shown once.
+
+Enrollment confirmation rotates or upgrades the current session into `mfa_verified`.
+
+### `POST /v1/mfa/recovery-codes/rotate`
+
+Request:
+
+```json
+{}
+```
+
+Response `200`:
+
+```json
+{
+  "recovery_codes": [
+    "pvrc-aaaa-bbbb-cccc-dddd",
+    "pvrc-eeee-ffff-gggg-hhhh"
+  ]
+}
+```
+
+Rotation invalidates old unused recovery codes.
+
+### `POST /v1/mfa/totp/disable`
+
+Request:
+
+```json
+{
+  "code": "123456"
+}
+```
+
+Response `200`:
+
+```json
+{
+  "status": "disabled"
+}
+```
+
+Disabling TOTP requires a fresh authenticated session and either current TOTP verification or a
+future stronger step-up policy. The exact UX can be implemented after enroll/confirm.
+
+## Sessions And CSRF
+
+### Cookie
+
+The server session is represented only by a host-prefixed cookie:
+
+```text
+__Host-pv_session=<opaque-token>
+Secure
+HttpOnly
+SameSite=Strict
+Path=/
+Domain not set
+```
+
+The database stores only a hash of the token.
+
+### `GET /v1/csrf`
+
+Response `200`:
+
+```json
+{
+  "csrf_token": "<base64url-32-bytes>",
+  "expires_at": "2026-06-07T00:30:00Z"
+}
+```
+
+Authenticated state-changing requests send:
+
+```text
+X-PV-CSRF: <token>
+```
+
+### `GET /v1/session`
+
+Response `200`:
+
+```json
+{
+  "authenticated": true,
+  "account_id": "00000000-0000-4000-8000-000000000100",
+  "device_id": "00000000-0000-4000-8000-000000000200",
+  "session_state": "mfa_verified",
+  "vault_access": true,
+  "idle_expires_at": "2026-06-07T00:30:00Z",
+  "absolute_expires_at": "2026-06-07T12:00:00Z"
+}
+```
+
+Response `200` without a session:
+
+```json
+{
+  "authenticated": false
+}
+```
+
+Session states:
+
+| State | Vault access | Meaning |
+| --- | --- | --- |
+| `mfa_enrollment_required` | No | New or recovered account must enroll TOTP. |
+| `mfa_recovery` | No | Recovery code was used; account must re-enroll TOTP. |
+| `mfa_verified` | Yes | Session passed TOTP and can use account and vault APIs. |
+
+### `POST /v1/auth/logout`
+
+Request:
+
+```json
+{}
+```
+
+Response `204`.
+
+The server deletes the current session and clears `__Host-pv_session`.
+
+## Devices
+
+### `GET /v1/devices`
+
+Response `200`:
+
+```json
+{
+  "devices": [
+    {
+      "device_id": "00000000-0000-4000-8000-000000000200",
+      "label": "Firefox on laptop",
+      "client_type": "browser",
+      "created_at": "2026-06-07T00:00:00Z",
+      "last_seen_at": "2026-06-07T00:15:00Z",
+      "revoked_at": null
+    }
+  ]
+}
+```
+
+### `PATCH /v1/devices/{device_id}`
+
+Request:
+
+```json
+{
+  "label": "Laptop browser"
+}
+```
+
+Response `200` returns the updated device object.
+
+### `DELETE /v1/devices/{device_id}`
+
+Response `204`.
+
+Device deletion is soft revocation for API access. It cannot erase already copied local data from a
+compromised client.
+
+### `GET /v1/sessions`
+
+Response `200`:
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "00000000-0000-4000-8000-000000000300",
+      "device_id": "00000000-0000-4000-8000-000000000200",
+      "created_at": "2026-06-07T00:00:00Z",
+      "last_seen_at": "2026-06-07T00:15:00Z",
+      "idle_expires_at": "2026-06-07T00:30:00Z",
+      "absolute_expires_at": "2026-06-07T12:00:00Z"
+    }
+  ]
+}
+```
+
+### `DELETE /v1/sessions/{session_id}`
+
+Response `204`.
+
+## Vaults And Encrypted Item Revisions
+
+The API stores ciphertext and sync metadata only. Plaintext item fields stay inside encrypted
+client-side envelopes.
+
+Vault endpoints require `mfa_verified` session state.
+
+The backend persists row-level `key_id` and `crypto_version` from the encrypted envelope so sync and
+schema constraints can validate versioned ciphertext metadata without decrypting payloads.
+
+### `GET /v1/vaults`
+
+Response `200`:
+
+```json
+{
+  "vaults": [
+    {
+      "vault_id": "00000000-0000-4000-8000-000000000010",
+      "name_ciphertext": "<base64url-bytes>",
+      "head_seq": 0,
+      "head_hash": "<base64url-32-bytes>",
+      "encrypted_vault_key": {
+        "crypto_version": "vault-key-wrap-v1",
+        "key_id": "user-key-v1",
+        "nonce": "<base64url-12-bytes>",
+        "ciphertext": "<base64url-bytes>"
+      }
+    }
+  ]
+}
+```
+
+### `GET /v1/vaults/{vault_id}/sync`
+
+Query parameters:
+
+```text
+from_head_seq=0
+from_head_hash=<base64url-32-bytes>
+```
+
+Response `200`:
+
+```json
+{
+  "from_head": {
+    "seq": 0,
+    "hash": "<base64url-32-bytes>"
+  },
+  "to_head": {
+    "seq": 2,
+    "hash": "<base64url-32-bytes>"
+  },
+  "changes": [
+    {
+      "item_id": "00000000-0000-4000-8000-000000000400",
+      "revision_id": "00000000-0000-4000-8000-000000000401",
+      "operation": "create",
+      "revision_seq": 1,
+      "head_seq": 1,
+      "previous_head_hash": "<base64url-32-bytes>",
+      "head_hash": "<base64url-32-bytes>",
+      "base_revision_seq": 0,
+      "base_head_seq": 0,
+      "base_head_hash": "<base64url-32-bytes>",
+      "change_mac": "<base64url-32-bytes>",
+      "envelope_hash": "<base64url-32-bytes>",
+      "encrypted_item_envelope": {
+        "crypto_version": "item-envelope-v1",
+        "key_id": "vault-key-v1",
+        "aead": "AES-256-GCM",
+        "nonce": "<base64url-12-bytes>",
+        "ciphertext": "<base64url-bytes>"
+      }
+    }
+  ]
+}
+```
+
+If the supplied cursor does not match the visible vault head history, return `409 vault_conflict`
+with the current visible head.
+
+### `POST /v1/vaults/{vault_id}/items`
+
+Request:
+
+```json
+{
+  "item_id": "00000000-0000-4000-8000-000000000400",
+  "base_head_seq": 0,
+  "base_head_hash": "<base64url-32-bytes>",
+  "new_head_hash": "<base64url-32-bytes>",
+  "change_mac": "<base64url-32-bytes>",
+  "envelope_hash": "<base64url-32-bytes>",
+  "encrypted_item_envelope": {
+    "crypto_version": "item-envelope-v1",
+    "key_id": "vault-key-v1",
+    "aead": "AES-256-GCM",
+    "nonce": "<base64url-12-bytes>",
+    "ciphertext": "<base64url-bytes>"
+  }
+}
+```
+
+Response `201`:
+
+```json
+{
+  "item_id": "00000000-0000-4000-8000-000000000400",
+  "revision_id": "00000000-0000-4000-8000-000000000401",
+  "revision_seq": 1,
+  "head_seq": 1,
+  "head_hash": "<base64url-32-bytes>"
+}
+```
+
+### `POST /v1/vaults/{vault_id}/items/{item_id}/revisions`
+
+Request:
+
+```json
+{
+  "operation": "update",
+  "base_revision_seq": 1,
+  "base_head_seq": 1,
+  "base_head_hash": "<base64url-32-bytes>",
+  "new_head_hash": "<base64url-32-bytes>",
+  "change_mac": "<base64url-32-bytes>",
+  "envelope_hash": "<base64url-32-bytes>",
+  "encrypted_item_envelope": {
+    "crypto_version": "item-envelope-v1",
+    "key_id": "vault-key-v1",
+    "aead": "AES-256-GCM",
+    "nonce": "<base64url-12-bytes>",
+    "ciphertext": "<base64url-bytes>"
+  }
+}
+```
+
+`operation` is `update` or `delete`. Deletion is an authenticated revision. There is no bare item
+`DELETE` endpoint in the MVP.
+
+Response `201`:
+
+```json
+{
+  "item_id": "00000000-0000-4000-8000-000000000400",
+  "revision_id": "00000000-0000-4000-8000-000000000402",
+  "revision_seq": 2,
+  "head_seq": 2,
+  "head_hash": "<base64url-32-bytes>"
+}
+```
+
+Stale writes return `409 vault_conflict` with the current visible vault head. The unlocked client is
+responsible for verifying `change_mac`, `envelope_hash`, and hash-chain continuity before trusting
+or decrypting sync responses.
+
+## Audit Events
+
+### `GET /v1/audit-events`
+
+Response `200`:
+
+```json
+{
+  "events": [
+    {
+      "event_id": "00000000-0000-4000-8000-000000000500",
+      "event_type": "auth.login_succeeded",
+      "created_at": "2026-06-07T00:00:00Z",
+      "actor_device_id": "00000000-0000-4000-8000-000000000200",
+      "metadata": {
+        "client_type": "browser"
+      }
+    }
+  ]
+}
+```
 
 Audit events must not include secret values, plaintext vault item contents, TOTP seeds, recovery
-codes, or private infrastructure details.
+codes, session tokens, private infrastructure details, or request bodies.
 
-## Open Decisions
+## Required API Tests
 
-- Exact registration and login message shapes.
-- Exact derived-auth-v1 challenge-bound proof construction and test vectors.
-- Exact duplicate-registration non-enumeration behavior.
-- Exact account secret key UX and new-device flow.
-- Exact TOTP replay and rate-limit behavior.
-- Exact encrypted item payload format.
-- Exact optimistic concurrency and conflict response shape.
-- Exact canonical encoding for envelope hashes, `change_mac`, and head-hash inputs.
-- Whether OpenAPI or another typed contract format is the first machine-readable source of truth.
+- `login/start` has constant response shape for existing and unknown accounts.
+- Auth/MFA/session responses include `Cache-Control: no-store`.
+- Routes with bodies reject non-JSON and browser-simple form content types.
+- `login/start` does not expose MFA state.
+- Registration duplicate handling returns generic failure and is rate-limited.
+- Auth verifier registration never stores raw `client_auth_secret`.
+- Login proof verifies with stored verifier material and fails generically for wrong proof.
+- TOTP enrollment returns seed material once and stores only ciphertext.
+- TOTP replay fails for the same accepted time step.
+- Recovery code can be used once and does not expose vault decryption material.
+- Pre-MFA challenge cannot call authenticated endpoints.
+- Setup/recovery sessions cannot call vault item APIs until TOTP is confirmed.
+- `__Host-pv_session` cookie flags are enforced.
+- Authenticated mutation without `X-PV-CSRF` fails.
+- Cross-site unsafe request with Fetch Metadata headers fails.
+- Vault item APIs reject plaintext item fields.
+- Stale vault write returns `409 vault_conflict`.
+- Sync cursor mismatch returns `409 vault_conflict`.
+- Audit events and logs do not include secrets, OTPs, recovery codes, or plaintext item fields.
+
+## Sources
+
+- https://www.rfc-editor.org/rfc/rfc5802.html
+- https://www.rfc-editor.org/rfc/rfc7677.html
+- https://www.rfc-editor.org/rfc/rfc6238.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+- https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie
+- https://github.com/google/google-authenticator/wiki/Key-Uri-Format

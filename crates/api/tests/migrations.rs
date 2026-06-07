@@ -15,16 +15,26 @@ const EXPECTED_TABLES: &[&str] = &[
 
 const EXPECTED_CONSTRAINTS: &[&str] = &[
     "accounts_auth_protocol_check",
-    "accounts_derived_auth_hash_len",
+    "accounts_auth_verifier_profile_check",
+    "accounts_auth_verifier_salt_len",
+    "accounts_auth_verifier_iterations_positive",
+    "accounts_auth_stored_key_len",
+    "accounts_auth_server_key_len",
+    "sessions_account_id_fkey",
     "sessions_session_token_hash_len",
+    "sessions_session_state_check",
     "sessions_account_device_fk",
+    "totp_factors_account_id_uq",
     "totp_factors_seed_ciphertext_nonempty",
+    "totp_factors_seed_aead_nonempty",
+    "recovery_codes_code_salt_len",
     "vaults_head_hash_len",
     "vault_item_revisions_item_fk",
     "vault_item_revisions_operation_check",
     "vault_item_revisions_revision_shape_check",
     "vault_item_revisions_head_seq_advances_check",
     "vault_item_revisions_base_hash_matches_previous_check",
+    "vault_item_revisions_crypto_version_nonempty",
     "vault_item_revisions_vault_item_id_uq",
     "vault_item_revisions_vault_head_seq_uq",
     "vault_items_latest_revision_fk",
@@ -67,6 +77,7 @@ async fn migrations_apply_and_create_expected_schema() {
     assert_no_plaintext_item_columns(&pool).await;
     assert_duplicate_login_handle_is_rejected(&pool).await;
     assert_cross_account_session_device_link_is_rejected(&pool).await;
+    assert_session_without_device_requires_existing_account(&pool).await;
     assert_invalid_revision_shape_is_rejected(&pool).await;
     assert_cross_vault_revision_link_is_rejected(&pool).await;
 }
@@ -130,16 +141,22 @@ async fn assert_duplicate_login_handle_is_rejected(pool: &sqlx::PgPool) {
             auth_protocol,
             kdf_profile,
             account_salt,
-            derived_auth_hash,
-            server_auth_hash_profile
+            auth_verifier_profile,
+            auth_verifier_salt,
+            auth_verifier_iterations,
+            auth_stored_key,
+            auth_server_key
         ) VALUES (
             '00000000-0000-0000-0000-000000000002',
             'alice',
             'derived-auth-v1',
             '{}'::jsonb,
             decode(repeat('aa', 16), 'hex'),
-            decode(repeat('bb', 32), 'hex'),
-            '{}'::jsonb
+            'pv-scram-sha-256-v1',
+            decode(repeat('bb', 16), 'hex'),
+            150000,
+            decode(repeat('cc', 32), 'hex'),
+            decode(repeat('dd', 32), 'hex')
         )
         ",
     )
@@ -169,12 +186,38 @@ async fn assert_cross_account_session_device_link_is_rejected(pool: &sqlx::PgPoo
             account_id,
             device_id,
             session_token_hash,
+            session_state,
             expires_at
         ) VALUES (
             '00000000-0000-0000-0000-000000000201',
             '00000000-0000-0000-0000-000000000001',
             '00000000-0000-0000-0000-000000000101',
             decode(repeat('11', 32), 'hex'),
+            'mfa_verified',
+            now() + interval '1 hour'
+        )
+        ",
+    )
+    .await;
+}
+
+async fn assert_session_without_device_requires_existing_account(pool: &sqlx::PgPool) {
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO sessions (
+            id,
+            account_id,
+            device_id,
+            session_token_hash,
+            session_state,
+            expires_at
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000202',
+            '00000000-0000-0000-0000-000000999999',
+            NULL,
+            decode(repeat('12', 32), 'hex'),
+            'mfa_verified',
             now() + interval '1 hour'
         )
         ",
@@ -243,16 +286,22 @@ async fn insert_account(pool: &sqlx::PgPool, id: &str, login_handle: &str) {
             auth_protocol,
             kdf_profile,
             account_salt,
-            derived_auth_hash,
-            server_auth_hash_profile
+            auth_verifier_profile,
+            auth_verifier_salt,
+            auth_verifier_iterations,
+            auth_stored_key,
+            auth_server_key
         ) VALUES (
             '{id}',
             '{login_handle}',
             'derived-auth-v1',
             '{{}}'::jsonb,
             decode(repeat('aa', 16), 'hex'),
-            decode(repeat('bb', 32), 'hex'),
-            '{{}}'::jsonb
+            'pv-scram-sha-256-v1',
+            decode(repeat('bb', 16), 'hex'),
+            150000,
+            decode(repeat('cc', 32), 'hex'),
+            decode(repeat('dd', 32), 'hex')
         )
         "
     );
@@ -329,7 +378,7 @@ fn revision_insert_sql<'a>(
             decode(repeat('01', 32), 'hex'),
             decode(repeat('02', 32), 'hex'),
             'key-v1',
-            1,
+            'item-envelope-v1',
             decode(repeat('03', 32), 'hex'),
             '{{\"ciphertext\":\"opaque\"}}'::jsonb
         )
