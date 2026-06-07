@@ -40,8 +40,8 @@ Repositories out of scope:
   migration.
 - Tightened unsafe request origin checks to require `https://` origins.
 - Fixed API contract drift for auth body limit status and planned audit endpoint status.
-- Updated canonical docs to say login finish/TOTP verify are implemented locally, not merged or
-  deployed.
+- Merged the login finish/TOTP verify product PR after CI passed, published the GHCR image from
+  `main`, updated the infrastructure digest, and verified the preview rollout.
 - Added three bounded subagent reports and incorporated the accepted findings into canonical docs.
 - Ran Claude Code as an independent read-only architecture/security/SRE reviewer.
 
@@ -223,12 +223,19 @@ Tested:
 - `git diff --check` passed.
 - Product public-safety scan found only local test DSNs and old disposable PostgreSQL command
   examples, not real secrets.
+- Product PR checks passed: docs, helm, public-safety, PostgreSQL migrations, Rust, and PR smoke.
+- Infrastructure PR validate check passed.
+- Live preview rolled out image digest
+  `sha256:f64a54b3d542793a1152ecc915c8098e94db54575374d3981d8e428cc05ed5b2`.
+- Live `/v1/auth/login/start` returned a constant-shape unknown-account challenge.
+- Live `/v1/auth/login/finish` and `/v1/auth/mfa/totp/verify` returned `400 bad_request` for empty
+  JSON bodies, proving the routes are deployed without creating real account data.
 
 Not tested:
 
 - Browser access from the MacBook itself.
-- Deployed login finish/TOTP verify through the browser; the code is local and not yet merged or
-  deployed.
+- Full login finish/TOTP verify through the browser UI; backend routes are deployed, but the browser
+  UI is not yet wired to the full return-login flow.
 - Full vault unlock, encrypted item CRUD, and sync; these remain unimplemented.
 - PostgreSQL failover, backup, restore, and migration job behavior.
 - Alert delivery.
@@ -243,13 +250,11 @@ Not tested:
 
 ## Next Steps
 
-1. Commit and PR the local login-finish/TOTP verification slice after final review.
-2. Merge only after CI passes.
-3. Publish the new image through GitHub Actions/GHCR and update infrastructure image digest.
-4. Add NetworkPolicy/internal-only metrics hardening.
-5. Add product-specific alert rules and release/build metrics.
-6. Implement browser unlock and encrypted vault item CRUD/sync.
-7. Plan product-specific CloudNativePG HA, backup, restore, and failover gates before real secrets.
+1. Add NetworkPolicy/internal-only metrics hardening.
+2. Add product-specific alert rules and release/build metrics.
+3. Wire the browser UI to the deployed return-login and TOTP verification flow.
+4. Implement browser unlock and encrypted vault item CRUD/sync.
+5. Plan product-specific CloudNativePG HA, backup, restore, and failover gates before real secrets.
 
 ## Sources
 

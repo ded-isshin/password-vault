@@ -16,9 +16,9 @@ Current implementation status, 2026-06-07:
 - TOTP enrollment starts a pending factor, encrypts the server-owned seed with the runtime
   `PV_TOTP_SEED_KEY_B64` key, and confirmation upgrades the setup session to `mfa_verified` while
   returning one-time recovery codes.
-- Login finish and login-time TOTP verification are implemented locally on a feature branch and are
-  not yet merged or deployed. Recovery-code verification, vault item CRUD/sync, and browser-side
-  crypto/unlock remain unimplemented.
+- Login finish and login-time TOTP verification are merged and deployed in the current preview.
+  Recovery-code verification, vault item CRUD/sync, and browser-side crypto/unlock remain
+  unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
 
