@@ -61,4 +61,4 @@ jobs:
           rustc --version
           cargo --version
           cargo fetch --locked
-          cargo test --locked --workspace --test migrations
+          cargo test --locked --workspace -- --test-threads=1

@@ -15,9 +15,10 @@ const EXPECTED_TABLES: &[&str] = &[
 
 const EXPECTED_CONSTRAINTS: &[&str] = &[
     "accounts_auth_protocol_check",
+    "accounts_kdf_profile_check",
     "accounts_auth_verifier_profile_check",
     "accounts_auth_verifier_salt_len",
-    "accounts_auth_verifier_iterations_positive",
+    "accounts_auth_verifier_iterations_exact",
     "accounts_auth_stored_key_len",
     "accounts_auth_server_key_len",
     "sessions_account_id_fkey",
@@ -150,10 +151,16 @@ async fn assert_duplicate_login_handle_is_rejected(pool: &sqlx::PgPool) {
             '00000000-0000-0000-0000-000000000002',
             'alice',
             'derived-auth-v1',
-            '{}'::jsonb,
-            decode(repeat('aa', 16), 'hex'),
+            jsonb_build_object(
+                'id', 'argon2id-browser-v1',
+                'algorithm', 'argon2id',
+                'memory_kib', 19456,
+                'iterations', 2,
+                'parallelism', 1
+            ),
+            decode(repeat('aa', 32), 'hex'),
             'pv-scram-sha-256-v1',
-            decode(repeat('bb', 16), 'hex'),
+            decode(repeat('bb', 32), 'hex'),
             150000,
             decode(repeat('cc', 32), 'hex'),
             decode(repeat('dd', 32), 'hex')
@@ -295,10 +302,16 @@ async fn insert_account(pool: &sqlx::PgPool, id: &str, login_handle: &str) {
             '{id}',
             '{login_handle}',
             'derived-auth-v1',
-            '{{}}'::jsonb,
-            decode(repeat('aa', 16), 'hex'),
+            jsonb_build_object(
+                'id', 'argon2id-browser-v1',
+                'algorithm', 'argon2id',
+                'memory_kib', 19456,
+                'iterations', 2,
+                'parallelism', 1
+            ),
+            decode(repeat('aa', 32), 'hex'),
             'pv-scram-sha-256-v1',
-            decode(repeat('bb', 16), 'hex'),
+            decode(repeat('bb', 32), 'hex'),
             150000,
             decode(repeat('cc', 32), 'hex'),
             decode(repeat('dd', 32), 'hex')

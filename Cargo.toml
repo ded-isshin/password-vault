@@ -14,11 +14,14 @@ hmac = "0.12.1"
 http = "1.4.0"
 rand = "0.8.6"
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 subtle = "2.6.1"
+time = { version = "=0.3.41", features = ["formatting", "serde"] }
 tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tower = { version = "0.5.2", features = ["util"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "macros"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio-rustls", "postgres", "migrate", "macros", "json", "time", "uuid"] }

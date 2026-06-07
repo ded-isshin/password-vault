@@ -5,10 +5,10 @@ CREATE TABLE accounts (
     auth_protocol text NOT NULL,
     auth_migration_status text NOT NULL DEFAULT 'current',
     kdf_profile jsonb NOT NULL,
-    account_salt bytea NOT NULL CONSTRAINT accounts_account_salt_len CHECK (octet_length(account_salt) >= 16),
+    account_salt bytea NOT NULL CONSTRAINT accounts_account_salt_len CHECK (octet_length(account_salt) = 32),
     auth_verifier_profile text NOT NULL,
-    auth_verifier_salt bytea NOT NULL CONSTRAINT accounts_auth_verifier_salt_len CHECK (octet_length(auth_verifier_salt) >= 16),
-    auth_verifier_iterations integer NOT NULL CONSTRAINT accounts_auth_verifier_iterations_positive CHECK (auth_verifier_iterations > 0),
+    auth_verifier_salt bytea NOT NULL CONSTRAINT accounts_auth_verifier_salt_len CHECK (octet_length(auth_verifier_salt) = 32),
+    auth_verifier_iterations integer NOT NULL CONSTRAINT accounts_auth_verifier_iterations_exact CHECK (auth_verifier_iterations = 150000),
     auth_stored_key bytea NOT NULL CONSTRAINT accounts_auth_stored_key_len CHECK (octet_length(auth_stored_key) = 32),
     auth_server_key bytea NOT NULL CONSTRAINT accounts_auth_server_key_len CHECK (octet_length(auth_server_key) = 32),
     opaque_credential_record bytea,
@@ -19,6 +19,15 @@ CREATE TABLE accounts (
     CONSTRAINT accounts_login_handle_nonempty CHECK (length(btrim(login_handle_normalized)) > 0),
     CONSTRAINT accounts_auth_protocol_check CHECK (auth_protocol IN ('derived-auth-v1', 'opaque-rfc9807-v1')),
     CONSTRAINT accounts_auth_verifier_profile_check CHECK (auth_verifier_profile IN ('pv-scram-sha-256-v1')),
+    CONSTRAINT accounts_kdf_profile_check CHECK (
+        kdf_profile = jsonb_build_object(
+            'id', 'argon2id-browser-v1',
+            'algorithm', 'argon2id',
+            'memory_kib', 19456,
+            'iterations', 2,
+            'parallelism', 1
+        )
+    ),
     CONSTRAINT accounts_auth_migration_status_check CHECK (auth_migration_status IN ('current', 'migration_required', 'migration_in_progress'))
 );
 
@@ -46,7 +55,7 @@ CREATE TABLE auth_challenges (
     login_handle_normalized text NOT NULL,
     challenge_type text NOT NULL,
     auth_protocol text NOT NULL,
-    server_nonce bytea NOT NULL CONSTRAINT auth_challenges_server_nonce_len CHECK (octet_length(server_nonce) >= 16),
+    server_nonce bytea NOT NULL CONSTRAINT auth_challenges_server_nonce_len CHECK (octet_length(server_nonce) = 32),
     public_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     attempts integer NOT NULL DEFAULT 0 CONSTRAINT auth_challenges_attempts_nonnegative CHECK (attempts >= 0),
     expires_at timestamptz NOT NULL,
@@ -62,6 +71,9 @@ CREATE INDEX auth_challenges_account_id_idx
 
 CREATE INDEX auth_challenges_expires_at_idx
     ON auth_challenges (expires_at);
+
+CREATE INDEX auth_challenges_handle_type_created_at_idx
+    ON auth_challenges (login_handle_normalized, challenge_type, created_at DESC);
 
 CREATE TABLE totp_factors (
     id uuid PRIMARY KEY,

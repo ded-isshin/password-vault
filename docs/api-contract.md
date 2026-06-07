@@ -49,6 +49,7 @@ Breaking product API changes require a versioning or migration decision before i
   metadata only and must not contain secrets or free-form secret-bearing text.
 - Sensitive values must not be logged: passwords, account secret keys, raw client auth secrets,
   TOTP seeds, TOTP codes, recovery codes, unwrapped vault keys, plaintext item fields.
+- Auth start endpoints use a maximum request body size of 16 KiB for the MVP.
 
 ### Error Envelope
 
@@ -262,13 +263,21 @@ Response `200`:
   "auth_verifier_salt": "<base64url-32-bytes>",
   "auth_verifier_iterations": 150000,
   "server_nonce": "<base64url-32-bytes>",
-  "combined_nonce": "<base64url-64-or-more-bytes>",
+  "combined_nonce": "<base64url-64-bytes>",
   "expires_at": "2026-06-07T00:05:00Z"
 }
 ```
 
 `login/start` must return the same status, header shape, and JSON shape for existing and unknown
 accounts. Unknown accounts use deterministic synthetic metadata.
+
+For `derived-auth-v1`, `combined_nonce` is:
+
+```text
+base64url_no_pad(client_nonce || server_nonce)
+```
+
+where both inputs are decoded 32-byte values and `||` means byte concatenation in that order.
 
 `login/start` must not reveal MFA enrollment status.
 

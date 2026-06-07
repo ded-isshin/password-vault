@@ -135,13 +135,15 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
 ## Follow-Up Work
 
 - #14 added the first Rust workspace and test commands.
-- #15 adds SQLx migrations. Local migration tests need a disposable PostgreSQL database and
-  `PV_TEST_DATABASE_URL`; routine `cargo test --workspace` skips the migration integration test when
-  that variable is absent.
+- #15 adds SQLx migrations. Local database-backed tests need a disposable PostgreSQL database and
+  `PV_TEST_DATABASE_URL`; routine `cargo test --workspace` skips database-backed checks when that
+  variable is absent.
   The CI migration job uses a PostgreSQL service container and the dummy URL
   `postgres://postgres:postgres@postgres:5432/password_vault_test`.
-  CI uses `cargo fetch --locked`, `cargo clippy --locked`, and `cargo test --locked` so the
-  Rust 1.85-compatible lockfile cannot silently drift.
+  The PostgreSQL CI job runs `cargo test --locked --workspace -- --test-threads=1`, so migration tests
+  and DB-backed API route tests run against the same disposable service without concurrent cleanup
+  collisions. CI uses `cargo fetch --locked`, `cargo clippy --locked`, and `cargo test --locked` so
+  the Rust 1.85-compatible lockfile cannot silently drift.
 - #20 must add the final CI workflow.
 - #24 must run its OPAQUE proof-of-concept in this selected build environment.
 - #21 must define Helm validation once a chart exists.
