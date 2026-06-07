@@ -239,10 +239,10 @@ Implementation note: setup-session TOTP enrollment endpoints are implemented. En
 creates a pending encrypted seed under `PV_TOTP_SEED_KEY_B64`; confirmation verifies the submitted
 code, returns one-time recovery codes, rotates the session token, and upgrades the session to
 `mfa_verified`. A failed enrollment confirmation consumes the pending factor and requires enrollment
-restart. Login-finish and login-time TOTP verification are implemented locally on the current
-feature branch: successful password proof either creates a setup session when no verified TOTP
-factor exists, or creates a one-shot pre-MFA challenge; successful TOTP verification consumes that
-challenge and creates an `mfa_verified` session.
+restart. Login-finish and login-time TOTP verification are merged and deployed in the current
+preview: successful password proof either creates a setup session when no verified TOTP factor
+exists, or creates a one-shot pre-MFA challenge; successful TOTP verification consumes that challenge
+and creates an `mfa_verified` session.
 
 ## Session Flow
 
