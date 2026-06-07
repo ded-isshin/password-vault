@@ -92,11 +92,11 @@ environment variables.
 
 ### PostgreSQL Version
 
-The MVP CI migration job uses `postgres:17-bookworm`.
+The MVP CI migration job currently uses `postgres:18-alpine`.
 
 The current migration uses PostgreSQL column-specific `ON DELETE SET NULL (device_id)` on a composite
-foreign key, so supported PostgreSQL versions must be PostgreSQL 15 or newer. Keep CI on PostgreSQL
-17 unless a database-platform ADR explicitly changes the target.
+foreign key, so supported PostgreSQL versions must be PostgreSQL 15 or newer. Keep CI on a supported
+current PostgreSQL version unless a database-platform ADR explicitly changes the target.
 
 ### Kubernetes And GitOps Commands
 
@@ -138,8 +138,7 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
 - #15 adds SQLx migrations. Local database-backed tests need a disposable PostgreSQL database and
   `PV_TEST_DATABASE_URL`; routine `cargo test --workspace` skips database-backed checks when that
   variable is absent.
-  The CI migration job uses a PostgreSQL service container and the dummy URL
-  `postgres://postgres:postgres@postgres:5432/password_vault_test`.
+  The CI migration job uses a PostgreSQL service container and a dummy `PV_TEST_DATABASE_URL` value.
   The PostgreSQL CI job runs `cargo test --locked --workspace -- --test-threads=1`, so migration tests
   and DB-backed API route tests run against the same disposable service without concurrent cleanup
   collisions. CI uses `cargo fetch --locked`, `cargo clippy --locked`, and `cargo test --locked` so
