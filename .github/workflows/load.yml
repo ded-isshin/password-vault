@@ -1,0 +1,95 @@
+name: load-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: k6 scenario file under load/k6/scenarios
+        default: smoke.js
+        required: true
+      rate:
+        description: Constant arrival rate per second
+        default: "5"
+        required: true
+      duration:
+        description: Test duration
+        default: 30s
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TEST_SYNTHETIC_METADATA_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+
+jobs:
+  load-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: password_vault_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d password_vault_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build local image
+        run: docker build -t password-vault-api:load-smoke .
+
+      - name: Run API
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --rm --name password-vault-api-load --network host \
+            -e PV_BIND_ADDR=127.0.0.1:8080 \
+            -e PV_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/password_vault_test \
+            -e PV_REQUIRE_DATABASE=true \
+            -e PV_RUN_MIGRATIONS_ON_STARTUP=true \
+            -e PV_SYNTHETIC_METADATA_KEY_B64="${TEST_SYNTHETIC_METADATA_KEY_B64}" \
+            password-vault-api:load-smoke
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/readyz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs password-vault-api-load
+          exit 1
+
+      - name: Run k6 scenario
+        shell: bash
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          LOAD_RATE: ${{ inputs.rate }}
+          LOAD_DURATION: ${{ inputs.duration }}
+        run: |
+          set -euo pipefail
+          case "$SCENARIO" in
+            ""|.*|*/*|*[!A-Za-z0-9._-]*)
+              echo "Invalid scenario name: $SCENARIO" >&2
+              exit 1
+              ;;
+          esac
+          test -f "load/k6/scenarios/$SCENARIO"
+          docker run --rm --network host \
+            -v "$PWD/load/k6:/scripts:ro" \
+            -w /scripts \
+            -e BASE_URL=http://127.0.0.1:8080 \
+            -e RUN_ID=manual-${{ github.run_id }} \
+            -e LOAD_RATE="$LOAD_RATE" \
+            -e LOAD_DURATION="$LOAD_DURATION" \
+            grafana/k6:2.0.0 run "scenarios/$SCENARIO"
+
+      - name: Stop API
+        if: always()
+        run: docker rm -f password-vault-api-load >/dev/null 2>&1 || true

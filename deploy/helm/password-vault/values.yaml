@@ -1,0 +1,92 @@
+namespaceOverride: ""
+nameOverride: ""
+
+image:
+  repository: ghcr.io/ded-isshin/password-vault-api
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+replicaCount: 3
+
+service:
+  port: 8080
+
+config:
+  bindAddr: 0.0.0.0:8080
+  requireDatabase: true
+  runMigrationsOnStartup: false
+  rustLog: password_vault_api=info
+
+database:
+  urlSecret:
+    name: password-vault-database
+    key: url
+
+syntheticMetadata:
+  keySecret:
+    name: password-vault-auth
+    key: synthetic-metadata-key-b64
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 384Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+tmp:
+  enabled: true
+  mountPath: /tmp
+  sizeLimit: 64Mi
+
+rollout:
+  minReadySeconds: 10
+  progressDeadlineSeconds: 120
+  terminationGracePeriodSeconds: 30
+  preStopDelaySeconds: 5
+  maxUnavailable: 0
+  maxSurge: 1
+
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: kubernetes.io/hostname
+  whenUnsatisfiable: ScheduleAnyway
+
+ingress:
+  enabled: false
+  className: nginx
+  host: ""
+  annotations: {}
+  path: /
+
+networkPolicy:
+  enabled: false
+
+observability:
+  vmServiceScrape:
+    enabled: false
+    namespace: observability

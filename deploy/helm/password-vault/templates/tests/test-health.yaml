@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "password-vault.fullname" . }}-test-health
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+spec:
+  restartPolicy: Never
+  containers:
+    - name: curl
+      image: curlimages/curl:8.17.0
+      command:
+        - curl
+      args:
+        - --fail
+        - --show-error
+        - --silent
+        - http://{{ include "password-vault.fullname" . }}-api:{{ .Values.service.port }}/healthz

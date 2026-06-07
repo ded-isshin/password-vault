@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "password-vault.fullname" . }}-api
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  minReadySeconds: {{ .Values.rollout.minReadySeconds }}
+  progressDeadlineSeconds: {{ .Values.rollout.progressDeadlineSeconds }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: {{ .Values.rollout.maxUnavailable }}
+      maxSurge: {{ .Values.rollout.maxSurge }}
+  selector:
+    matchLabels:
+      {{- include "password-vault.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "password-vault.labels" . | nindent 8 }}
+        component: api
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.rollout.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              {{- include "password-vault.selectorLabels" . | nindent 14 }}
+      {{- end }}
+      containers:
+        - name: api
+          image: {{ include "password-vault.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - containerPort: 8080
+              name: http
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - sleep {{ .Values.rollout.preStopDelaySeconds | quote }}
+          env:
+            - name: PV_BIND_ADDR
+              value: {{ .Values.config.bindAddr | quote }}
+            - name: PV_REQUIRE_DATABASE
+              value: {{ .Values.config.requireDatabase | quote }}
+            - name: PV_RUN_MIGRATIONS_ON_STARTUP
+              value: {{ .Values.config.runMigrationsOnStartup | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.config.rustLog | quote }}
+            {{- if .Values.tmp.enabled }}
+            - name: TMPDIR
+              value: {{ .Values.tmp.mountPath | quote }}
+            {{- end }}
+            - name: PV_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.urlSecret.name }}
+                  key: {{ .Values.database.urlSecret.key }}
+            - name: PV_SYNTHETIC_METADATA_KEY_B64
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.syntheticMetadata.keySecret.name }}
+                  key: {{ .Values.syntheticMetadata.keySecret.key }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 24
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.tmp.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: {{ .Values.tmp.mountPath | quote }}
+          {{- end }}
+      {{- if .Values.tmp.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmp.sizeLimit | quote }}
+      {{- end }}

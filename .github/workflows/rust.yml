@@ -13,10 +13,10 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     container:
-      image: rust:1.85-bookworm
+      image: rust:1.96-bookworm
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Test workspace
         shell: bash
@@ -34,7 +34,7 @@ jobs:
   postgres-migrations:
     runs-on: ubuntu-latest
     container:
-      image: rust:1.85-bookworm
+      image: rust:1.96-bookworm
     services:
       postgres:
         image: postgres:17-bookworm
@@ -51,7 +51,7 @@ jobs:
       PV_TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/password_vault_test
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Test PostgreSQL migrations
         shell: bash

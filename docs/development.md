@@ -38,7 +38,7 @@ docker run --rm \
   -u "$(id -u):$(id -g)" \
   -v "$PWD:/workspace" \
   -w /workspace \
-  rust:<pinned-version>-bookworm \
+  rust:1.96-bookworm \
   sh -lc 'export PATH=/usr/local/cargo/bin:$PATH; cargo test --workspace'
 ```
 
@@ -70,14 +70,14 @@ jobs:
   rust:
     runs-on: ubuntu-latest
     container:
-      image: rust:<pinned-version>-bookworm
+      image: rust:1.96-bookworm
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: |
           export PATH=/usr/local/cargo/bin:$PATH
-          cargo test --workspace
+          cargo test --locked --workspace
 ```
 
 This avoids third-party Rust setup actions for the first MVP baseline.
@@ -143,7 +143,10 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
   The PostgreSQL CI job runs `cargo test --locked --workspace -- --test-threads=1`, so migration tests
   and DB-backed API route tests run against the same disposable service without concurrent cleanup
   collisions. CI uses `cargo fetch --locked`, `cargo clippy --locked`, and `cargo test --locked` so
-  the Rust 1.85-compatible lockfile cannot silently drift.
-- #20 must add the final CI workflow.
+  the Rust 1.96-compatible lockfile cannot silently drift.
+- #20 adds the container image workflow. Pull requests build and smoke-test the image without
+  registry writes; pushes to `main` publish to GHCR with SBOM/provenance and GitHub attestation.
+- #21 adds the product Helm chart. Validation uses pinned `alpine/helm:3.19.0` in GitHub Actions.
+- Load smoke tests use pinned `grafana/k6:2.0.0`. PR smoke stays intentionally small; heavier tests
+  use the manual `load-smoke` workflow.
 - #24 must run its OPAQUE proof-of-concept in this selected build environment.
-- #21 must define Helm validation once a chart exists.

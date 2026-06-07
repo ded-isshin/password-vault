@@ -5,20 +5,22 @@ resolver = "2"
 [workspace.package]
 edition = "2024"
 license = "MIT"
-rust-version = "1.85"
+rust-version = "1.96"
 
 [workspace.dependencies]
 axum = "0.8.9"
+axum-prometheus = "0.10.0"
 base64 = "0.22.1"
 hmac = "0.12.1"
 http = "1.4.0"
+metrics-exporter-prometheus = "0.18.3"
 rand = "0.8.6"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 subtle = "2.6.1"
-time = { version = "=0.3.41", features = ["formatting", "serde"] }
+time = { version = "0.3.47", features = ["formatting", "serde"] }
 tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal"] }
 tower = { version = "0.5.2", features = ["util"] }
 tracing = "0.1.44"
