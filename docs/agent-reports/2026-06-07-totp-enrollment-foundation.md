@@ -30,12 +30,17 @@ upgrade to `mfa_verified`, Helm/runtime-secret wiring, CI updates, and documenta
 - Wired the Helm chart to read `PV_TOTP_SEED_KEY_B64` from the `password-vault-auth` Kubernetes
   Secret key `totp-seed-key-b64`.
 - Updated CI smoke/load workflows to provide a non-secret test TOTP seed key.
+- Removed Rust job-container dependency on Docker Hub `rust:*` images after GitHub Actions failed
+  during Docker Hub pull. Rust CI now installs Rust 1.96.0 with `rustup` on GitHub-hosted runners.
+- Updated CI PostgreSQL service images to `postgres:18-alpine`, matching the current PostgreSQL 18
+  major line used in local DB-backed validation.
 - Updated API/security/MFA lifecycle docs and the MFA/CSRF ADR.
 
 ## Files changed
 
 - `.github/workflows/container.yml`
 - `.github/workflows/load.yml`
+- `.github/workflows/rust.yml`
 - `Cargo.lock`
 - `Cargo.toml`
 - `crates/api/Cargo.toml`
@@ -130,6 +135,8 @@ Tested:
 - Helm lint and rendered manifest.
 - Git diff whitespace hygiene.
 - Public-safety grep for common secret/private-key/kubeconfig/private-IP patterns.
+- GitHub Actions failure mode where `postgres-migrations` could fail before checkout because the
+  job container could not pull `rust:1.96-bookworm` from Docker Hub.
 
 Verified:
 
@@ -139,6 +146,7 @@ Verified:
 - Recovery codes are returned once and only hashed values are stored.
 - Successful TOTP confirmation rotates the session and invalidates the old cookie.
 - CI has a PostgreSQL-backed Rust job using `PV_TEST_DATABASE_URL`.
+- CI Rust jobs no longer depend on a Docker Hub Rust job container.
 
 Not tested:
 
