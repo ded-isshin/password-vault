@@ -2,10 +2,10 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{DefaultBodyLimit, FromRequest, Request, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use hmac::{Hmac, Mac};
 use rand::{RngCore, rngs::OsRng};
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row, types::Json as SqlJson};
+use subtle::ConstantTimeEq;
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
@@ -45,6 +46,7 @@ const SESSION_ABSOLUTE_TTL: Duration = Duration::hours(12);
 const ACCOUNT_KEYSET_CRYPTO_VERSION: &str = "account-keyset-v1";
 const VAULT_KEY_WRAP_CRYPTO_VERSION: &str = "vault-key-wrap-v1";
 const VAULT_CRYPTO_PROFILE_ID: &str = "vault-crypto-v1";
+const SESSION_COOKIE_NAME: &str = "__Host-pv_session";
 type HmacSha256 = Hmac<Sha256>;
 
 pub(crate) fn router() -> Router<AppState> {
@@ -52,6 +54,9 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/v1/auth/register/start", post(register_start))
         .route("/v1/auth/register/finish", post(register_finish))
         .route("/v1/auth/login/start", post(login_start))
+        .route("/v1/auth/logout", post(logout))
+        .route("/v1/csrf", get(csrf_token))
+        .route("/v1/session", get(session_status))
         .layer(DefaultBodyLimit::max(AUTH_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn(add_no_store_header))
 }
@@ -128,6 +133,32 @@ struct SessionResponse {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct LogoutRequest {}
+
+#[derive(Serialize)]
+struct CsrfTokenResponse {
+    csrf_token: String,
+    expires_at: String,
+}
+
+#[derive(Serialize)]
+struct AuthenticatedSessionResponse {
+    authenticated: bool,
+    account_id: Uuid,
+    device_id: Option<Uuid>,
+    session_state: String,
+    vault_access: bool,
+    idle_expires_at: String,
+    absolute_expires_at: String,
+}
+
+#[derive(Serialize)]
+struct UnauthenticatedSessionResponse {
+    authenticated: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LoginStartRequest {
     login_handle: String,
     auth_protocol: String,
@@ -196,6 +227,22 @@ impl ApiError {
             status: StatusCode::CONFLICT,
             code: "registration_unavailable",
             message: "Registration is unavailable.",
+        }
+    }
+
+    fn session_required() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "session_required",
+            message: "A valid session is required.",
+        }
+    }
+
+    fn csrf_required() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "csrf_required",
+            message: "A valid CSRF token is required.",
         }
     }
 }
@@ -620,6 +667,106 @@ async fn login_start(
     ))
 }
 
+async fn session_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let pool = database_pool(&state)?;
+    let now = now_utc_second()?;
+    let Some(session) = load_current_session(pool, &headers, now).await? else {
+        let mut response = no_store_json(
+            StatusCode::OK,
+            UnauthenticatedSessionResponse {
+                authenticated: false,
+            },
+        );
+        if session_token_from_headers(&headers).is_some() {
+            response.headers_mut().insert(
+                header::SET_COOKIE,
+                HeaderValue::from_static(clear_session_cookie()),
+            );
+        }
+        return Ok(response);
+    };
+
+    let session = refresh_session_activity(pool, session, now).await?;
+    Ok(no_store_json(
+        StatusCode::OK,
+        AuthenticatedSessionResponse {
+            authenticated: true,
+            account_id: session.account_id,
+            device_id: session.device_id,
+            session_state: session.session_state.clone(),
+            vault_access: session.vault_access(),
+            idle_expires_at: format_rfc3339(session.idle_expires_at)?,
+            absolute_expires_at: format_rfc3339(session.absolute_expires_at)?,
+        },
+    ))
+}
+
+async fn csrf_token(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let pool = database_pool(&state)?;
+    let now = now_utc_second()?;
+    let session = load_current_session(pool, &headers, now)
+        .await?
+        .ok_or_else(ApiError::session_required)?;
+    let session = refresh_session_activity(pool, session, now).await?;
+    let csrf_token = tokens::random_token();
+    let csrf_token_hash = tokens::sha256_verifier(&csrf_token);
+
+    sqlx::query(
+        "
+        UPDATE sessions
+        SET csrf_token_hash = $1
+        WHERE id = $2
+        ",
+    )
+    .bind(csrf_token_hash.as_slice())
+    .bind(session.id)
+    .execute(pool)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(no_store_json(
+        StatusCode::OK,
+        CsrfTokenResponse {
+            csrf_token: encode_base64url(&csrf_token),
+            expires_at: format_rfc3339(session.idle_expires_at)?,
+        },
+    ))
+}
+
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    StrictJson(_request): StrictJson<LogoutRequest>,
+) -> Result<Response, ApiError> {
+    let pool = database_pool(&state)?;
+    let now = now_utc_second()?;
+    if let Some(session) = load_current_session(pool, &headers, now).await? {
+        ensure_unsafe_request_context(&headers)?;
+        ensure_csrf_token(pool, &headers, session.id).await?;
+        sqlx::query("DELETE FROM sessions WHERE id = $1")
+            .bind(session.id)
+            .execute(pool)
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+    }
+
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_static(clear_session_cookie()),
+    );
+    Ok(response)
+}
+
 struct LoginMetadata {
     account_id: Option<Uuid>,
     kdf_profile: Value,
@@ -645,6 +792,21 @@ struct LoginChallengeMetadata {
     auth_verifier_profile: &'static str,
     auth_verifier_iterations: u32,
     synthetic: bool,
+}
+
+struct CurrentSession {
+    id: Uuid,
+    account_id: Uuid,
+    device_id: Option<Uuid>,
+    session_state: String,
+    idle_expires_at: OffsetDateTime,
+    absolute_expires_at: OffsetDateTime,
+}
+
+impl CurrentSession {
+    fn vault_access(&self) -> bool {
+        self.session_state == "mfa_verified"
+    }
 }
 
 struct InsertChallenge<'a> {
@@ -793,9 +955,221 @@ fn genesis_head_hash(vault_id: Uuid) -> [u8; 32] {
 
 fn session_cookie(session_token: &[u8; tokens::TOKEN_LEN]) -> String {
     format!(
-        "__Host-pv_session={}; Path=/; Secure; HttpOnly; SameSite=Strict",
+        "{SESSION_COOKIE_NAME}={}; Path=/; Secure; HttpOnly; SameSite=Strict",
         encode_base64url(session_token)
     )
+}
+
+const fn clear_session_cookie() -> &'static str {
+    "__Host-pv_session=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+}
+
+fn session_token_from_headers(headers: &HeaderMap) -> Option<[u8; tokens::TOKEN_LEN]> {
+    let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
+    let mut seen_session_cookie = false;
+    let mut session_token = None;
+    for part in cookie_header.split(';') {
+        if let Some((name, value)) = part.trim().split_once('=')
+            && name == SESSION_COOKIE_NAME
+        {
+            if seen_session_cookie {
+                return None;
+            }
+            seen_session_cookie = true;
+            session_token = Some(decode_base64url_array::<{ tokens::TOKEN_LEN }>(value).ok()?);
+        }
+    }
+    session_token
+}
+
+fn csrf_token_from_headers(headers: &HeaderMap) -> Option<[u8; tokens::TOKEN_LEN]> {
+    let value = headers.get("x-pv-csrf")?.to_str().ok()?;
+    decode_base64url_array::<{ tokens::TOKEN_LEN }>(value).ok()
+}
+
+async fn ensure_csrf_token(
+    pool: &PgPool,
+    headers: &HeaderMap,
+    session_id: Uuid,
+) -> Result<(), ApiError> {
+    let csrf_token = csrf_token_from_headers(headers).ok_or_else(ApiError::csrf_required)?;
+    let csrf_token_hash = tokens::sha256_verifier(&csrf_token);
+    let stored_hash = sqlx::query_scalar::<_, Option<Vec<u8>>>(
+        "
+        SELECT csrf_token_hash
+        FROM sessions
+        WHERE id = $1
+          AND revoked_at IS NULL
+        ",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?
+    .flatten()
+    .ok_or_else(ApiError::csrf_required)?;
+
+    if stored_hash.len() == tokens::TOKEN_LEN
+        && stored_hash
+            .as_slice()
+            .ct_eq(csrf_token_hash.as_slice())
+            .into()
+    {
+        Ok(())
+    } else {
+        Err(ApiError::csrf_required())
+    }
+}
+
+fn ensure_unsafe_request_context(headers: &HeaderMap) -> Result<(), ApiError> {
+    if headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("cross-site"))
+    {
+        return Err(ApiError::csrf_required());
+    }
+
+    if let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) {
+        let host = headers
+            .get(header::HOST)
+            .and_then(|value| value.to_str().ok())
+            .ok_or_else(ApiError::csrf_required)?;
+        let origin_host = origin_host(origin).ok_or_else(ApiError::csrf_required)?;
+        if origin_host != host {
+            return Err(ApiError::csrf_required());
+        }
+    }
+
+    Ok(())
+}
+
+fn origin_host(origin: &str) -> Option<&str> {
+    let without_scheme = origin
+        .strip_prefix("https://")
+        .or_else(|| origin.strip_prefix("http://"))?;
+    without_scheme
+        .split('/')
+        .next()
+        .filter(|host| !host.is_empty())
+}
+
+async fn load_current_session(
+    pool: &PgPool,
+    headers: &HeaderMap,
+    now: OffsetDateTime,
+) -> Result<Option<CurrentSession>, ApiError> {
+    let Some(session_token) = session_token_from_headers(headers) else {
+        return Ok(None);
+    };
+    let session_token_hash = tokens::sha256_verifier(&session_token);
+
+    let row = sqlx::query(
+        "
+        SELECT
+            s.id,
+            s.account_id,
+            s.device_id,
+            s.session_state,
+            s.idle_expires_at,
+            s.absolute_expires_at,
+            d.revoked_at AS device_revoked_at
+        FROM sessions s
+        LEFT JOIN devices d
+          ON d.account_id = s.account_id
+         AND d.id = s.device_id
+        WHERE s.session_token_hash = $1
+          AND s.revoked_at IS NULL
+        ",
+    )
+    .bind(session_token_hash.as_slice())
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(row) = row else {
+        return Ok(None);
+    };
+
+    let id = row
+        .try_get::<Uuid, _>("id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let account_id = row
+        .try_get::<Uuid, _>("account_id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let device_id = row
+        .try_get::<Option<Uuid>, _>("device_id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let session_state = row
+        .try_get::<String, _>("session_state")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let idle_expires_at = row
+        .try_get::<OffsetDateTime, _>("idle_expires_at")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let absolute_expires_at = row
+        .try_get::<OffsetDateTime, _>("absolute_expires_at")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let device_revoked_at = row
+        .try_get::<Option<OffsetDateTime>, _>("device_revoked_at")
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    if device_revoked_at.is_some() || idle_expires_at <= now || absolute_expires_at <= now {
+        revoke_session(pool, id, now).await?;
+        return Ok(None);
+    }
+
+    Ok(Some(CurrentSession {
+        id,
+        account_id,
+        device_id,
+        session_state,
+        idle_expires_at,
+        absolute_expires_at,
+    }))
+}
+
+async fn refresh_session_activity(
+    pool: &PgPool,
+    mut session: CurrentSession,
+    now: OffsetDateTime,
+) -> Result<CurrentSession, ApiError> {
+    let refreshed_idle_expires_at = min_time(now + SESSION_IDLE_TTL, session.absolute_expires_at);
+    sqlx::query(
+        "
+        UPDATE sessions
+        SET last_seen_at = $1,
+            idle_expires_at = $2,
+            expires_at = $2
+        WHERE id = $3
+        ",
+    )
+    .bind(now)
+    .bind(refreshed_idle_expires_at)
+    .bind(session.id)
+    .execute(pool)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    session.idle_expires_at = refreshed_idle_expires_at;
+    Ok(session)
+}
+
+async fn revoke_session(
+    pool: &PgPool,
+    session_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<(), ApiError> {
+    sqlx::query("UPDATE sessions SET revoked_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(session_id)
+        .execute(pool)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+    Ok(())
+}
+
+fn min_time(left: OffsetDateTime, right: OffsetDateTime) -> OffsetDateTime {
+    if left <= right { left } else { right }
 }
 
 fn is_unique_violation(error: &sqlx::Error) -> bool {
@@ -1022,7 +1396,14 @@ async fn add_no_store_header(request: axum::http::Request<Body>, next: Next) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_login_handle, synthetic_login_metadata};
+    use axum::http::{HeaderMap, HeaderValue, header};
+
+    use crate::auth::{encoding::encode_base64url, tokens};
+
+    use super::{
+        SESSION_COOKIE_NAME, csrf_token_from_headers, normalize_login_handle,
+        session_token_from_headers, synthetic_login_metadata,
+    };
 
     #[test]
     fn login_handle_normalization_is_lowercase_trimmed() {
@@ -1052,5 +1433,70 @@ mod tests {
 
         assert_ne!(first.account_salt, second.account_salt);
         assert_ne!(first.auth_verifier_salt, second.auth_verifier_salt);
+    }
+
+    #[test]
+    fn session_cookie_parser_accepts_one_host_cookie_among_others() {
+        let token = [0x42; tokens::TOKEN_LEN];
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!(
+                "foo=1; {SESSION_COOKIE_NAME}={}; bar=2",
+                encode_base64url(&token)
+            ))
+            .expect("test cookie header is valid"),
+        );
+
+        assert_eq!(
+            session_token_from_headers(&headers).expect("session token parses"),
+            token
+        );
+    }
+
+    #[test]
+    fn session_cookie_parser_rejects_duplicate_or_wrong_length_tokens() {
+        let token = encode_base64url(&[0x42; tokens::TOKEN_LEN]);
+        let mut duplicate = HeaderMap::new();
+        duplicate.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!(
+                "{SESSION_COOKIE_NAME}={token}; {SESSION_COOKIE_NAME}={token}"
+            ))
+            .expect("test cookie header is valid"),
+        );
+        assert!(session_token_from_headers(&duplicate).is_none());
+
+        let mut wrong_length = HeaderMap::new();
+        wrong_length.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!(
+                "{SESSION_COOKIE_NAME}={}",
+                encode_base64url(&[0x42; 31])
+            ))
+            .expect("test cookie header is valid"),
+        );
+        assert!(session_token_from_headers(&wrong_length).is_none());
+    }
+
+    #[test]
+    fn csrf_header_parser_accepts_only_base64url_32_byte_tokens() {
+        let token = [0x24; tokens::TOKEN_LEN];
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-pv-csrf",
+            HeaderValue::from_str(&encode_base64url(&token)).expect("test csrf header is valid"),
+        );
+        assert_eq!(
+            csrf_token_from_headers(&headers).expect("csrf token parses"),
+            token
+        );
+
+        headers.insert(
+            "x-pv-csrf",
+            HeaderValue::from_str(&encode_base64url(&[0x24; 31]))
+                .expect("test csrf header is valid"),
+        );
+        assert!(csrf_token_from_headers(&headers).is_none());
     }
 }

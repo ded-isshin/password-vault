@@ -6,12 +6,14 @@ Current implementation status, 2026-06-07:
 
 - Deployed browser preview, health/readiness/metrics, PostgreSQL, Helm/GitOps, and Grafana
   dashboard exist.
-- `/v1/auth/register/start`, `/v1/auth/login/start`, and `/v1/auth/register/finish` are
-  implemented.
+- `/v1/auth/register/start`, `/v1/auth/login/start`, `/v1/auth/register/finish`,
+  `/v1/session`, `/v1/csrf`, and `/v1/auth/logout` are implemented.
 - `register/finish` creates the account, encrypted account keyset metadata, initial vault, encrypted
   vault key wrap, device record, and setup session.
-- TOTP enrollment/confirmation, login finish, CSRF endpoint, authenticated session inspection, vault
-  item CRUD/sync, and browser-side crypto/unlock remain unimplemented.
+- `GET /v1/csrf` rotates the per-session CSRF token hash, and `POST /v1/auth/logout` validates
+  session plus CSRF before deleting the current session.
+- TOTP enrollment/confirmation, login finish, vault item CRUD/sync, and browser-side crypto/unlock
+  remain unimplemented.
 - The live preview is plain HTTP, so the secure session cookie contract is not a complete browser
   login UX until HTTPS ingress/LB behavior is added.
 
