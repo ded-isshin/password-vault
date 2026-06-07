@@ -7,7 +7,9 @@ const EXPECTED_TABLES: &[&str] = &[
     "totp_factors",
     "recovery_codes",
     "sessions",
+    "account_keysets",
     "vaults",
+    "vault_key_wraps",
     "vault_items",
     "vault_item_revisions",
     "audit_events",
@@ -25,6 +27,19 @@ const EXPECTED_CONSTRAINTS: &[&str] = &[
     "sessions_session_token_hash_len",
     "sessions_session_state_check",
     "sessions_account_device_fk",
+    "sessions_idle_before_absolute_check",
+    "devices_client_type_check",
+    "devices_public_metadata_object_check",
+    "account_keysets_nonce_len",
+    "account_keysets_ciphertext_nonempty",
+    "account_keysets_crypto_version_check",
+    "account_keysets_account_key_id_uq",
+    "vault_key_wraps_nonce_len",
+    "vault_key_wraps_ciphertext_nonempty",
+    "vault_key_wraps_crypto_version_check",
+    "vault_key_wraps_vault_account_fk",
+    "vault_key_wraps_account_key_fk",
+    "vault_key_wraps_vault_account_key_uq",
     "totp_factors_account_id_uq",
     "totp_factors_seed_ciphertext_nonempty",
     "totp_factors_seed_aead_nonempty",
@@ -79,6 +94,7 @@ async fn migrations_apply_and_create_expected_schema() {
     assert_duplicate_login_handle_is_rejected(&pool).await;
     assert_cross_account_session_device_link_is_rejected(&pool).await;
     assert_session_without_device_requires_existing_account(&pool).await;
+    assert_registration_key_material_guards(&pool).await;
     assert_invalid_revision_shape_is_rejected(&pool).await;
     assert_cross_vault_revision_link_is_rejected(&pool).await;
 }
@@ -101,6 +117,8 @@ async fn reset_test_data(pool: &sqlx::PgPool) {
             recovery_codes,
             totp_factors,
             auth_challenges,
+            vault_key_wraps,
+            account_keysets,
             vault_item_revisions,
             vault_items,
             vaults,
@@ -232,6 +250,189 @@ async fn assert_session_without_device_requires_existing_account(pool: &sqlx::Pg
     .await;
 }
 
+async fn assert_registration_key_material_guards(pool: &sqlx::PgPool) {
+    insert_account(pool, "00000000-0000-0000-0000-000000000006", "carol").await;
+    insert_account(pool, "00000000-0000-0000-0000-000000000007", "dave").await;
+    insert_vault(
+        pool,
+        "00000000-0000-0000-0000-000000000306",
+        "00000000-0000-0000-0000-000000000006",
+    )
+    .await;
+    insert_account_keyset(
+        pool,
+        "00000000-0000-0000-0000-000000000701",
+        "00000000-0000-0000-0000-000000000006",
+        "carol-key-v1",
+    )
+    .await;
+    insert_account_keyset(
+        pool,
+        "00000000-0000-0000-0000-000000000702",
+        "00000000-0000-0000-0000-000000000007",
+        "dave-key-v1",
+    )
+    .await;
+
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO account_keysets (
+            id,
+            account_id,
+            crypto_version,
+            key_id,
+            nonce,
+            ciphertext
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000703',
+            '00000000-0000-0000-0000-000000000006',
+            'account-keyset-v1',
+            'bad-nonce',
+            decode(repeat('01', 11), 'hex'),
+            decode('02', 'hex')
+        )
+        ",
+    )
+    .await;
+
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO account_keysets (
+            id,
+            account_id,
+            crypto_version,
+            key_id,
+            nonce,
+            ciphertext
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000704',
+            '00000000-0000-0000-0000-000000000006',
+            'account-keyset-v1',
+            'empty-ciphertext',
+            decode(repeat('01', 12), 'hex'),
+            decode('', 'hex')
+        )
+        ",
+    )
+    .await;
+
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO vault_key_wraps (
+            id,
+            vault_id,
+            account_id,
+            key_id,
+            crypto_version,
+            nonce,
+            ciphertext
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000801',
+            '00000000-0000-0000-0000-000000000306',
+            '00000000-0000-0000-0000-000000000006',
+            'carol-key-v1',
+            'unsupported-wrap-v1',
+            decode(repeat('03', 12), 'hex'),
+            decode('04', 'hex')
+        )
+        ",
+    )
+    .await;
+
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO vault_key_wraps (
+            id,
+            vault_id,
+            account_id,
+            key_id,
+            crypto_version,
+            nonce,
+            ciphertext
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000802',
+            '00000000-0000-0000-0000-000000000306',
+            '00000000-0000-0000-0000-000000000007',
+            'dave-key-v1',
+            'vault-key-wrap-v1',
+            decode(repeat('03', 12), 'hex'),
+            decode('04', 'hex')
+        )
+        ",
+    )
+    .await;
+
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO devices (
+            id,
+            account_id,
+            display_name,
+            client_type,
+            public_metadata
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000901',
+            '00000000-0000-0000-0000-000000000006',
+            'Carol browser',
+            'browser',
+            '[]'::jsonb
+        )
+        ",
+    )
+    .await;
+
+    execute(
+        pool,
+        "
+        INSERT INTO devices (
+            id,
+            account_id,
+            display_name,
+            client_type,
+            public_metadata
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000902',
+            '00000000-0000-0000-0000-000000000006',
+            'Carol browser',
+            'browser',
+            '{}'::jsonb
+        )
+        ",
+    )
+    .await;
+
+    assert_rejected(
+        pool,
+        "
+        INSERT INTO sessions (
+            id,
+            account_id,
+            device_id,
+            session_token_hash,
+            session_state,
+            expires_at,
+            idle_expires_at,
+            absolute_expires_at
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000903',
+            '00000000-0000-0000-0000-000000000006',
+            '00000000-0000-0000-0000-000000000902',
+            decode(repeat('13', 32), 'hex'),
+            'mfa_enrollment_required',
+            now() + interval '30 minutes',
+            now() + interval '12 hours',
+            now() + interval '30 minutes'
+        )
+        ",
+    )
+    .await;
+}
+
 async fn assert_invalid_revision_shape_is_rejected(pool: &sqlx::PgPool) {
     insert_vault(
         pool,
@@ -347,6 +548,29 @@ async fn insert_item(pool: &sqlx::PgPool, item_id: &str, vault_id: &str) {
         "
         INSERT INTO vault_items (id, vault_id)
         VALUES ('{item_id}', '{vault_id}')
+        "
+    );
+    execute(pool, &sql).await;
+}
+
+async fn insert_account_keyset(pool: &sqlx::PgPool, id: &str, account_id: &str, key_id: &str) {
+    let sql = format!(
+        "
+        INSERT INTO account_keysets (
+            id,
+            account_id,
+            crypto_version,
+            key_id,
+            nonce,
+            ciphertext
+        ) VALUES (
+            '{id}',
+            '{account_id}',
+            'account-keyset-v1',
+            '{key_id}',
+            decode(repeat('01', 12), 'hex'),
+            decode('02', 'hex')
+        )
         "
     );
     execute(pool, &sql).await;
