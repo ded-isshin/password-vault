@@ -28,6 +28,14 @@ Implemented in the current GitOps preview:
 - The current dashboard queries have been verified against the live VictoriaMetrics datasource after
   synthetic traffic.
 
+Important label note:
+
+- Application metrics use low-cardinality route labels from the Axum metrics layer.
+- In the current VictoriaMetrics/Grafana path, the route label is queried as `exported_endpoint`
+  because another scrape label already uses `endpoint`.
+- Product docs may describe the application label as `endpoint`; production dashboards and alert
+  rules must use the label name verified in the target datasource before they are accepted.
+
 Planned:
 
 - SLO and burn-rate panels.
@@ -58,25 +66,34 @@ sum(rate(axum_http_requests_total{job="password-vault-api"}[5m]))
 
 sum(rate(axum_http_requests_total{
   job="password-vault-api",
-  endpoint!~"/(healthz|readyz|metrics|<unmatched>)",
+  exported_endpoint!~"/(healthz|readyz|metrics|<unmatched>)",
   status=~"5.."
 }[5m]))
 /
 sum(rate(axum_http_requests_total{
   job="password-vault-api",
-  endpoint!~"/(healthz|readyz|metrics|<unmatched>)"
+  exported_endpoint!~"/(healthz|readyz|metrics|<unmatched>)"
 }[5m]))
 
 histogram_quantile(
   0.95,
   sum(rate(axum_http_requests_duration_seconds_bucket{
     job="password-vault-api",
-    endpoint!~"/(healthz|readyz|metrics|<unmatched>)"
+    exported_endpoint!~"/(healthz|readyz|metrics|<unmatched>)"
   }[5m])) by (le)
 )
 ```
 
 ## Technical Metrics
+
+Map the Google SRE Golden Signals to product-specific telemetry as follows:
+
+| Golden signal | MVP implementation | Product-specific interpretation |
+| --- | --- | --- |
+| Latency | HTTP duration histogram by route group and status class | Registration, login, MFA, unlock metadata, and vault sync must be tracked separately because auth hashing can be intentionally slower than normal reads. |
+| Traffic | Request rate and product operation counters | Demand is not only total RPS; registration starts, login attempts, MFA verifies, vault item writes, and sync pulls are separate demand types. |
+| Errors | 5xx ratio, policy errors, auth/MFA failure aggregates | 4xx from invalid users or attackers should not page by itself, but spikes are security/product signals. |
+| Saturation | Pending requests, DB pool, DB latency, auth hash active work, pod CPU/memory, PostgreSQL lag/disk | Password-manager saturation includes expensive auth work and database write durability, not only HTTP queue depth. |
 
 ### Implemented
 
@@ -127,6 +144,30 @@ not be used with user-identifying labels.
 
 Security dashboards should show rates and ratios, not raw operational logs. Example: failed login
 rate, TOTP failure rate, rate-limit hit rate, CSRF failure rate, and session invalidation spikes.
+
+Minimum useful product dashboards should be organized by funnel rather than by metric name:
+
+| Funnel / health question | Metrics | Why it matters |
+| --- | --- | --- |
+| Can a new user become protected? | registration starts, registration finishes, TOTP enroll starts, TOTP confirms, recovery codes generated | Shows whether the first-run security journey is actually usable. |
+| Can a returning user regain access? | login starts, login proof failures, MFA required, TOTP verifies, session created | Separates password/proof failures from MFA failures and backend faults. |
+| Can users save and retrieve secrets? | vault item writes, reads, sync pulls, conflict responses, stale revision rejections | This is the product's core reliability signal after auth. |
+| Is the system resisting abuse? | rate-limit hits, CSRF failures, invalid origin/fetch metadata rejections, repeated MFA failures | Tracks attack pressure without exposing account identifiers. |
+| Is data durability healthy? | PostgreSQL primary health, replica lag, backup age, last successful restore drill timestamp, WAL archive failures | A password manager is not stable until saved data survives failover and restore. |
+
+Suggested derived business SLIs after the flows exist:
+
+- registration completion ratio: `register_finish_success / register_start_success`;
+- protected activation ratio: `totp_confirm_success / register_finish_success`;
+- returning access success ratio: `session_created_after_mfa / login_start_success`;
+- first-secret activation ratio: `first_vault_item_created / register_finish_success`;
+- vault write success ratio: `vault_write_success / vault_write_attempt`;
+- sync freshness success ratio: `sync_success_without_stale_revision / sync_attempt`;
+- recovery usage rate and recovery failure rate, without user labels.
+
+These are product-health and abuse-detection signals, not vanity metrics. They should drive backlog
+choices only after the underlying event counters are implemented and verified against synthetic
+journeys.
 
 ## Current Dashboard Gaps
 
