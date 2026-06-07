@@ -9,7 +9,7 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 | Area | Feature | Notes |
 | --- | --- | --- |
 | Identity | Register personal account | Organization accounts are deferred. |
-| Identity | Login | Final auth/key-derivation protocol is not selected. |
+| Identity | Login | Derived-auth-key is the MVP recommendation; OPAQUE remains long-term. |
 | Sessions | Server-side browser session | Opaque session ID in secure cookies is preferred for MVP. |
 | MFA | TOTP enrollment | QR and manual secret display, verify before activation. |
 | MFA | TOTP verification | Rate limiting and replay prevention are required. |
@@ -20,6 +20,8 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 | Items | Item revisions | Immutable encrypted revisions. |
 | Sync | Delta pull by cursor | Server-visible cursor, encrypted payloads. |
 | Sync | Optimistic concurrency | Stale base revision returns conflict. |
+| Clients | Multi-device protocol support | Browser web app only, but sync/key model must support multiple user devices. |
+| Devices | Soft device records | Audit/revocation foundation, not a strong authenticator by itself. |
 | Audit | Security/product events | No secret values in audit events. |
 | CI | Docs, public-safety, tests | GitHub-hosted runners only. |
 | Deploy | GitOps-compatible artifacts | No direct cluster mutation from product repo. |
@@ -28,13 +30,13 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 
 | Area | Feature | Why delayed |
 | --- | --- | --- |
-| Devices | Explicit device enrollment | Requires final key hierarchy. |
+| Devices | Strong device enrollment | Requires final key hierarchy and WebAuthn/passkey decisions. |
 | Recovery | Zero-knowledge recovery key | Must be designed before making recovery promises. |
 | Identity | Email verification | Useful but not core to vault crypto. |
 | Auth | WebAuthn/passkeys | Stronger MFA, but TOTP is first. |
 | Organizations | Org accounts and memberships | Requires sharing, groups, and key wrapping. |
 | Sharing | Shared vaults or collections | Requires per-member key distribution. |
-| Clients | Browser extension | Should reuse the same sync and crypto model. |
+| Clients | Browser extension | Should reuse the same sync and crypto model; autofill threat model required. |
 | Clients | Desktop/mobile clients | Stronger client distribution, larger scope. |
 | Import | KeePass/KDBX import | Migration feature, not MVP core. |
 | Import | 1Password/Bitwarden import | Migration feature, not MVP core. |

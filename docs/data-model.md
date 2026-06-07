@@ -42,11 +42,21 @@ users
 sessions
   id
   user_id
+  device_id
   created_at
   expires_at
   revoked_at
   user_agent_hash
   ip_hash
+
+devices
+  id
+  user_id
+  device_label_ciphertext
+  client_type
+  first_seen_at
+  last_seen_at
+  revoked_at
 
 mfa_totp
   id
@@ -120,9 +130,22 @@ audit_events
 
 ## Open Decisions
 
-- Whether MVP supports more than one device.
 - Whether `login_handle` is email, username, or both.
 - Whether email verification is required before TOTP enrollment.
+- Whether device records are soft audit records in MVP or full cryptographic enrollments.
 - Whether `vault_members.wrapped_vault_key` exists in MVP or only after device/sharing design.
 - Whether recovery-key wrapping is included from day one.
 - TOTP seed protection: app-level encryption, Vault/OpenBao Transit, or another KMS path.
+
+## Device Direction
+
+The MVP browser client must support multiple user devices at the protocol level. A user should be
+able to log in and unlock the same personal vault from more than one browser session using the
+approved auth and unlock flow.
+
+The initial `devices` table is a soft device/audit record, not a phishing-resistant authenticator and
+not a cryptographic enrollment by itself. It gives the product a place to attach sessions, user-facing
+device labels, revocation state, future WebAuthn credentials, and future per-device key material.
+
+Strong device enrollment, trusted-device unlock, and device-specific key wraps are post-MVP unless
+the auth/key hierarchy ADR explicitly pulls them into the first implementation.

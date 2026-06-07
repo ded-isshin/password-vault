@@ -79,6 +79,43 @@ stateDiagram-v2
   AuthenticatedUnlocked --> Anonymous: logout / session expiry
 ```
 
+## Auth Direction For MVP And Future
+
+```mermaid
+flowchart LR
+  P[User password] --> KDF[Client KDF]
+  SK[Account secret key] --> KDF
+  KDF --> AUTH[Client auth secret]
+  KDF --> UNLOCK[Vault unlock material]
+  AUTH --> HASH[Server-side slow hash]
+  HASH --> S[(Auth verifier storage)]
+  UNLOCK --> WRAP[Unwrap user or vault keys]
+  WRAP --> ITEMS[Decrypt item payloads locally]
+  TOTP[TOTP code] --> MFA[Login MFA verification]
+  PASSKEY[Future WebAuthn/passkey] -. future .-> MFA
+```
+
+The server session authenticates API access. The unlock path stays local to the client.
+
+## Multi-Device Key-Wrap Direction
+
+```mermaid
+flowchart TB
+  Account[User account] --> D1[Browser device]
+  Account --> D2[Future browser extension]
+  Account --> D3[Future mobile app]
+  D1 --> W1[Wrapped user/vault keys]
+  D2 --> W2[Wrapped user/vault keys]
+  D3 --> W3[Wrapped user/vault keys]
+  W1 --> Vault[Vault key]
+  W2 --> Vault
+  W3 --> Vault
+  Vault --> Payloads[Encrypted item revisions]
+```
+
+The first MVP client is the browser web app. The protocol and data model should still support
+multiple enrolled devices from the beginning.
+
 ## Kubernetes Data Platform Direction
 
 ```mermaid

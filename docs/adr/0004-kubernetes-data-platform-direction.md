@@ -68,7 +68,7 @@ Evaluate quorum synchronous replication with one synchronous standby for vault d
 CloudNativePG 1.29 documents this through `spec.postgresql.synchronous.method: any` and
 `number: 1`.
 
-Open decision:
+MVP recommendation:
 
 - `dataDurability: required` favors acknowledged-write durability and may pause writes when the
   required standby is unavailable.
@@ -77,12 +77,28 @@ Open decision:
 - asynchronous replication alone is acceptable only for development or throwaway data unless there is
   explicit risk acceptance.
 
-The default product recommendation is synchronous quorum replication. The `required` versus
-`preferred` durability setting must be decided after failure-mode testing in the target cluster.
+The default product recommendation is synchronous replication with one synchronous standby and
+`dataDurability: required` for real user data. This favors acknowledged-write durability over write
+availability during degraded states.
+
+`dataDurability: preferred` can be considered after failure-mode testing if write availability
+during degraded states is more important than strict RPO=0 for acknowledged writes. That tradeoff
+requires explicit risk acceptance.
+
+Asynchronous replication is acceptable for development or throwaway data, not for public real-data
+use.
+
+Failure-mode testing in the target cluster is still required before production-like use. The test
+must prove how the application behaves during one worker failure, standby loss, primary failover,
+and backup restore.
 
 ## Backup Direction
 
 No real vault data should be stored until off-node backups and restore testing exist.
+
+The expected direction is S3-compatible object storage or another object-store target supported by
+the CloudNativePG backup path. If the first public deployment happens before this exists, it must be
+treated as a public demo only and must clearly forbid real secrets.
 
 CloudNativePG 1.29 documents WAL archiving and physical base backups as the core backup building
 blocks. Native backup/recovery is being phased toward CNPG-I plugins; the Barman Cloud Plugin should
@@ -142,10 +158,11 @@ server-owned TOTP seed encryption. It must not decrypt user vault item payloads.
 ## Sources
 
 - https://cloudnative-pg.io/docs/1.29/architecture/
-- https://cloudnative-pg.io/docs/1.29/replication/
+- https://cloudnative-pg.io/docs/1.27/replication/
 - https://cloudnative-pg.io/docs/1.29/scheduling/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/
+- https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/
 - https://kubernetes.io/docs/concepts/storage/persistent-volumes/
 - https://kubernetes.io/docs/concepts/services-networking/ingress/
 - https://argo-cd.readthedocs.io/en/release-3.0/user-guide/application-specification/

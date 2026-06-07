@@ -28,6 +28,7 @@ item contents.
 
 - user can register
 - user can log in
+- user receives and can use an account secret key if two-secret key derivation is accepted for MVP
 - user can enroll and verify TOTP
 - user can recover from lost TOTP using recovery codes
 - user can create encrypted vault items
@@ -41,16 +42,16 @@ item contents.
 ## Current Design Blockers
 
 - login and key-derivation protocol
-- client-side Argon2id via reviewed WASM vs WebCrypto-native KDF
+- account secret key UX and recovery implications
+- reviewed browser Argon2id/WASM dependency and concrete KDF parameters
 - cryptographic item format
 - browser-delivered JavaScript residual risk
 - TOTP seed key custody
 - off-node backup target
-- GitHub Project creation is blocked until the active token has the full `project` scope
-- single-device vs multi-device MVP
 - plaintext metadata boundary
 - recovery key vs account recovery codes
 - item revision and delta-sync protocol
+- GitHub branch ruleset and public repository safety gates
 
 ## Planned Post-MVP
 

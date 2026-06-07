@@ -1,6 +1,6 @@
 # ADR 0003: Auth And Crypto Direction
 
-Status: proposed.
+Status: proposed. This is the current recommended direction for the MVP, pending human acceptance.
 
 ## Context
 
@@ -47,6 +47,25 @@ Cons:
 - must avoid creating an offline password guessing oracle after database compromise;
 - protocol details are subtle and need careful documentation.
 
+### WebAuthn / Passkeys
+
+WebAuthn is a W3C API for public-key credentials. Passkeys can provide phishing-resistant
+authentication and are a strong fit for future MFA and passwordless login.
+
+Pros:
+
+- phishing-resistant when used correctly;
+- no shared password secret is sent to the server;
+- strong user experience on modern browsers and mobile platforms;
+- good future fit for browser extension and mobile clients.
+
+Cons:
+
+- authenticates account access but does not automatically unlock encrypted vault payloads;
+- device enrollment and recovery flows need careful design;
+- policy choices around synced passkeys, device-bound credentials, attestation, and user
+  verification need a separate review.
+
 ### Simple Password Over TLS
 
 The browser sends the password over TLS and the server hashes it.
@@ -69,15 +88,26 @@ Do not implement simple password-over-TLS for the public MVP.
 Use a derived-auth-key design as the working MVP candidate, while keeping the key hierarchy
 independent enough that OPAQUE can replace the authentication layer later.
 
+Keep a high-entropy account secret key as a future hardening option, not a first-MVP requirement.
+It follows the same security idea as 1Password-style two-secret key derivation, but it changes UX,
+device onboarding, and recovery. The first MVP should not silently require it without a dedicated
+human-approved ADR.
+
 OPAQUE remains the preferred long-term authentication protocol, but it should not be implemented
 until Rust and browser library maturity, interoperability, and test strategy are reviewed.
+
+WebAuthn/passkeys should be designed as a post-MVP phishing-resistant MFA and login path. They do not
+replace the vault unlock design by themselves.
 
 ## Crypto V1 Direction
 
 Working direction:
 
 - KDF target: Argon2id in the browser through a reviewed, pinned WASM dependency.
-- KDF fallback: PBKDF2-HMAC-SHA-256 through WebCrypto only if Argon2id/WASM review is not ready.
+- KDF fallback: PBKDF2-HMAC-SHA-256 through WebCrypto only as an explicitly approved prototype or
+  degraded-mode decision; not as a silent production fallback.
+- KDF input target: user password for first MVP; account secret key remains a future hardening
+  option.
 - Key separation: run one expensive password KDF, then use HKDF domain separation for
   authentication and vault-unlock material.
 - Server auth storage: any client-derived auth secret received by the server is treated as a
@@ -85,8 +115,10 @@ Working direction:
   value.
 - Key wrapping: wrap vault keys client-side; do not send unwrapped vault keys to the server.
 - AEAD for web MVP: AES-256-GCM through WebCrypto.
-- Nonce: 96-bit nonce per encryption under a key, with an explicit per-key encryption budget and
-  rekey trigger before implementation.
+- Content key direction: derive a unique item-revision content key from vault/root data key material
+  through HKDF, then encrypt exactly one payload under that content key.
+- Nonce: 96-bit nonce per encryption, with one encryption per derived item-revision content key in
+  the recommended MVP design.
 - Associated data: bind ciphertext to version, vault, item, revision, and key context.
 - Versioning: store crypto version, KDF algorithm, KDF parameters, key ID, nonce, and payload format
   version with every encrypted artifact.
@@ -98,6 +130,23 @@ project must review and pin a WASM dependency, test it against vectors, and docu
 controls.
 
 If a WebCrypto-native KDF is selected, the tradeoff against Argon2id must be explicit.
+
+Initial Argon2id parameter target should start from the OWASP minimum recommendation of 19 MiB
+memory, 2 iterations, and parallelism 1, then be tuned on representative browsers and devices.
+
+## Pre-Login Metadata
+
+The browser needs KDF salt and parameters before deriving client-side auth material. The final
+protocol must prevent this lookup from becoming a user-enumeration endpoint.
+
+Required direction:
+
+- constant-shape metadata responses;
+- generic errors;
+- stored KDF metadata for real accounts;
+- deterministic synthetic metadata for unknown accounts;
+- rate limits before expensive server-side auth-secret hashing;
+- tests for account non-enumeration.
 
 ## Key Hierarchy Draft
 
@@ -119,7 +168,10 @@ user key material
   -> unwrap vault key copies available to the user
 
 vault key
-  -> encrypt/decrypt item revision payloads
+  -> HKDF(vault_id, item_id, revision_id, key_epoch) -> item-revision content key
+
+item-revision content key
+  -> encrypt/decrypt exactly one item revision payload
 ```
 
 Future organization sharing should use organization or vault keys wrapped for authorized members.
@@ -166,11 +218,16 @@ TOTP design must include:
 
 Proposed, not final:
 
-- Derived-auth-key flow is the MVP working candidate.
+- Derived-auth-key flow is the MVP recommended login candidate.
+- Account secret key / two-secret key derivation is a future hardening option, pending UX and
+  recovery acceptance.
 - OPAQUE is the preferred long-term authentication candidate after library review.
 - Simple password-over-TLS is not acceptable for the public MVP.
-- Argon2id/WASM is the KDF target; PBKDF2 is only a documented fallback.
+- WebAuthn/passkeys are post-MVP authentication and MFA candidates, not the first MVP blocker.
+- Argon2id/WASM is the KDF target; PBKDF2 is only an explicitly approved prototype/degraded mode.
 - AES-256-GCM is the web MVP AEAD target.
+- The MVP must be multi-device-capable in data model and protocol even if the first client is only
+  the browser web app.
 
 ## Consequences
 
@@ -184,6 +241,9 @@ Proposed, not final:
 - Argon2id or PBKDF2 known-answer tests.
 - HKDF domain separation tests.
 - Server stores only a slow hash of received auth secret, not the raw auth secret.
+- Pre-login metadata response non-enumeration tests.
+- Server-side slow-hash rate-limit and anti-DoS tests.
+- If account secret key is added later, registration does not persist it server-side in plaintext.
 - AES-GCM round-trip and tamper rejection.
 - AES-GCM nonce uniqueness and rekey-budget tests.
 - Associated-data tamper rejection.
@@ -194,10 +254,18 @@ Proposed, not final:
 - Crypto version parsing and migration tests once more than one version exists.
 - Negative test that backend code cannot decrypt a stored item payload.
 
+## Related Notes
+
+- [Auth login protocol options](../research/auth-login-protocol-options.md)
+
 ## Sources
 
 - https://www.rfc-editor.org/info/rfc9807/
+- https://pages.nist.gov/800-63-4/sp800-63b.html
+- https://www.w3.org/TR/webauthn-3/
 - https://www.w3.org/TR/webcrypto/
 - https://www.rfc-editor.org/rfc/rfc9106.html
 - https://www.rfc-editor.org/info/rfc6238/
+- https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html
 - https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html

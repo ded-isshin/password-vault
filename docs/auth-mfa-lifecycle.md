@@ -10,6 +10,8 @@ This document describes intended account, session, TOTP, and account-recovery fl
 - Unlock establishes local browser access to vault decryption.
 - A valid server session does not imply vault unlock.
 - TOTP protects login. TOTP is not a vault encryption key.
+- A future account secret key may strengthen password-derived authentication and unlock material,
+  but it is not required for the first MVP unless a later ADR accepts the UX and recovery tradeoff.
 - Recovery codes recover account MFA access only. They do not decrypt vault data.
 
 ## Registration Flow
@@ -23,7 +25,12 @@ server starts session or requires first login
 user is prompted to enroll TOTP
 ```
 
-Open blocker: the login/key-derivation protocol is not selected.
+Open blocker: the exact login/key-derivation protocol is not finalized. The current MVP
+recommendation is derived-auth-key plus TOTP, with account secret key left as a future hardening
+option.
+
+The final protocol must define when and how KDF salt and parameters are created, stored, and returned
+to the client. The login metadata endpoint must not reveal whether an account exists.
 
 ## TOTP Enrollment Flow
 
@@ -41,6 +48,14 @@ user acknowledges recovery-code custody
 TOTP seed custody is a server-side secret-management problem. Acceptable future options include
 application-level encryption or Vault/OpenBao Transit. The seed must not become a vault decrypt key.
 
+Recommended staged direction:
+
+- server generates the seed;
+- seed is displayed once during enrollment as QR/manual code;
+- seed is stored encrypted;
+- app-level AEAD is acceptable only as an interim MVP path if Vault/OpenBao is not available;
+- Vault/OpenBao Transit or another KMS path is preferred once platform secret management is approved.
+
 ## Login Flow
 
 ```text
@@ -52,6 +67,9 @@ server checks replay/rate-limit state
 server creates server-side session
 client performs local vault unlock if needed
 ```
+
+Before this flow can be implemented, the product needs a pre-login metadata flow that returns KDF
+salt and parameters without making account existence easy to enumerate.
 
 ## Recovery Code Flow
 
@@ -71,6 +89,9 @@ Recovery codes must be labeled as account MFA recovery, not vault recovery.
 - TOTP cannot be enabled without verify-before-activate.
 - Replayed TOTP step is rejected.
 - Rate limits apply to password/auth and TOTP attempts.
+- Login metadata lookup does not expose account existence through response shape.
+- Expensive server-side auth verification is protected by rate limits.
+- If account secret key is added later, it is not persisted server-side in plaintext.
 - Used recovery code cannot be reused.
 - Recovery code does not reveal or change vault decryption material.
 - Logs never include TOTP seeds or recovery codes.
@@ -82,3 +103,5 @@ Recovery codes must be labeled as account MFA recovery, not vault recovery.
 - Whether TOTP seed is generated server-side or client-side.
 - TOTP allowed time window.
 - Whether recovery key is included in MVP.
+- Exact pre-login KDF metadata behavior.
+- Future account secret key UX: emergency kit only, remember-device option, or both.

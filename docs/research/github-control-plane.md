@@ -28,12 +28,38 @@ auditable without exposing the home cluster or private operational details.
 9. Merge through PR only.
 10. Deploy through GitOps PR to the infrastructure repository, not direct product CI cluster access.
 
+This is GitHub Flow with stricter safety gates for a public security-sensitive repository.
+Branches are short-lived, pull requests are the review unit, and `main` is the only stable product
+line.
+
 ## Recommended GitHub Project Fields
 
 - Status: Inbox, Backlog, Ready, In progress, In review, Blocked, Done.
 - Priority: P0, P1, P2.
 - Area: Crypto, Auth, Backend, Frontend, DB, Kubernetes, CI, Docs.
 - Risk: Low, Medium, High.
+
+## Recommended GitHub Project Views
+
+GitHub Project views are saved ways to look at the same project items. They do not create new work
+or a second backlog. They only filter, group, sort, or change the layout of existing issues and PRs.
+
+Recommended initial views:
+
+- `Backlog`: table layout, all open work, sorted by priority and risk.
+- `Board`: board layout, grouped by Status for day-to-day work.
+- `High Risk`: table layout filtered to high-risk auth, crypto, DB, Kubernetes, and CI work.
+- `Decisions`: table layout filtered to ADR/research items where a decision is still needed.
+- `MVP`: table layout filtered to MVP-phase items.
+
+`Roadmap` can wait until target dates exist. It is not useful while the project is still in research
+and ADR mode.
+
+The working public project is `Password Vault MVP`:
+
+```text
+https://github.com/users/ded-isshin/projects/2
+```
 
 ## Recommended Ruleset Direction
 
@@ -67,20 +93,24 @@ Sensitive paths:
 - Prefer `GITHUB_TOKEN` over long-lived PATs where possible.
 - Consider OIDC for external services only after a dedicated security design.
 
-## Current GitHub Project Blocker
+## Current GitHub Project State
 
-`gh project list` works, but creating a project currently fails because the active token has
-`read:project` and GitHub requires the `project` scope for project creation. Run:
+GitHub Project access works. The public project exists and contains the startup research and ADR
+issues. A previous private project with a similar name may remain visible to the owner; the public
+project is the working project for this repository.
 
-```bash
-gh auth refresh -s project
-```
-
-After that, create `Password Vault MVP` and add the existing startup issues.
+Project views are saved layouts and filters over the same project items. Recommended working views
+are documented in
+[Decision Brief: GitHub Workflow](../decision-briefs/2026-06-07-github-workflow.md).
 
 ## Sources
 
 - https://docs.github.com/en/issues/planning-and-tracking-with-projects
+- https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects
+- https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project
+- https://docs.github.com/en/issues/planning-and-tracking-with-projects/customizing-views-in-your-project/changing-the-layout-of-a-view
+- https://docs.github.com/en/get-started/using-github/github-flow
+- https://git-scm.com/book/en/v2/Git-Branching-Branching-Workflows.html
 - https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
 - https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 - https://docs.github.com/en/actions/concepts/security/github_token

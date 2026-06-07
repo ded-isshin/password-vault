@@ -37,13 +37,20 @@ zero-knowledge.
 
 ## Current Stack Blockers
 
-- Login/key-derivation protocol is not selected.
-- WebCrypto vs Argon2id/WASM is not selected.
+- Login/key-derivation implementation spec is not accepted.
+- Browser Argon2id/WASM dependency and parameters are not selected.
 - TOTP seed custody is not selected.
-- PostgreSQL synchronous vs asynchronous replication is not selected.
 - Backup target is not selected.
 - Browser KDF implementation is not selected.
-- GitHub Project creation is blocked by missing full `project` scope.
+- GitHub branch ruleset and security settings are not configured.
+
+Current recommendation:
+
+- derived-auth-key login with account secret key for MVP, OPAQUE later after library review;
+- Argon2id/WASM target with PBKDF2 fallback only by explicit decision;
+- CloudNativePG synchronous replication with one synchronous standby and `dataDurability: required`
+  for real user data;
+- public GitHub Project exists at https://github.com/users/ded-isshin/projects/2.
 
 ## Sources
 
@@ -53,7 +60,7 @@ zero-knowledge.
 - https://www.w3.org/TR/webcrypto/
 - https://www.rfc-editor.org/info/rfc6238/
 - https://cloudnative-pg.io/docs/1.29/architecture/
-- https://cloudnative-pg.io/docs/1.29/replication/
+- https://cloudnative-pg.io/docs/1.27/replication/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/
 - https://developer.hashicorp.com/vault/docs/about-vault/how-vault-works

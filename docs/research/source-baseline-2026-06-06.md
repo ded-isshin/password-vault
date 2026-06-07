@@ -59,7 +59,8 @@ primary sources before implementation begins.
 - CloudNativePG backup design should prefer the CNPG-I/Barman Cloud Plugin direction for new work
   where the installed version supports it.
 - Vault/OpenBao is useful for platform secrets but not as user-vault decrypt path.
-- GitHub Project creation requires the GitHub CLI `project` scope, not only `read:project`.
+- GitHub Project creation requires the GitHub CLI `project` scope, not only `read:project`; this was
+  resolved on 2026-06-07 for the working public project.
 - GitHub Projects are managed through the new Projects surface and ProjectV2 GraphQL model; the
   repository `projects` field exposed by `gh repo view` still maps to deprecated classic projects.
 

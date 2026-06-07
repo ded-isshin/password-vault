@@ -17,6 +17,8 @@ The target security model is zero-knowledge for vault item contents:
 - the server stores ciphertext and synchronization metadata;
 - the server does not receive plaintext vault item contents;
 - the server does not receive or persist unwrapped user vault keys;
+- an account secret key is recommended as a second KDF input so a stolen database is not enough for
+  normal password-only offline guessing;
 - TOTP protects account login, not vault decryption;
 - forgotten vault unlock material is unrecoverable unless a future zero-knowledge recovery design is
   approved.
@@ -28,7 +30,7 @@ The target security model is zero-knowledge for vault item contents:
 - Personal user registration.
 - Login and session management.
 - TOTP enrollment, verification, replay protection, and recovery codes.
-- One or more personal vaults.
+- One personal vault first.
 - Encrypted item create/read/update/delete.
 - Item revision history.
 - Basic audit events without secret values.
@@ -124,7 +126,6 @@ flowchart LR
 ```mermaid
 erDiagram
   USERS ||--o{ SESSIONS : has
-  USERS ||--o{ DEVICES : enrolls
   USERS ||--o{ MFA_TOTP_SECRETS : owns
   USERS ||--o{ RECOVERY_CODES : owns
   USERS ||--o{ VAULT_MEMBERS : joins
@@ -148,6 +149,10 @@ This means server-side content search is out of scope for MVP. Search happens lo
 
 See [Data Model Draft](data-model.md) and [Sync Protocol Draft](sync-protocol.md).
 
+Explicit device records are deferred until device enrollment, revocation, browser extension, or
+mobile-client work requires them. The MVP should still avoid single-device assumptions through
+session tracking, encrypted key wrapping, and revision-based sync.
+
 ## Lock And Unlock Direction
 
 Login and unlock are separate product states:
@@ -168,7 +173,8 @@ Account recovery codes are MFA recovery codes. They should let a user recover fr
 device and re-enroll MFA. They must not silently become a vault decrypt path.
 
 The product should decide separately whether to include a zero-knowledge-compatible vault recovery
-key in MVP. If not included, losing the vault unlock secret means losing vault access.
+key in MVP. If not included, losing the vault unlock secret or account secret key means losing vault
+access.
 
 See [Auth And MFA Lifecycle](auth-mfa-lifecycle.md).
 
@@ -204,7 +210,7 @@ Deployment is planned through GitOps. Direct cluster mutation from this reposito
 - Primary database: PostgreSQL.
 - Kubernetes database operator: CloudNativePG.
 - PostgreSQL replication: quorum synchronous replication is the target for real user data, with
-  `required` versus `preferred` durability mode to be validated before deployment.
+  `dataDurability: required` recommended for real user data.
 - CI: GitHub Actions on GitHub-hosted runners.
 - Image registry: GHCR.
 - Deployment: Helm chart plus Argo CD.
@@ -229,15 +235,16 @@ TOTP seed encryption. It must not be the database or decrypt service for user va
 
 1. Threat model v1.
 2. Auth/login and key-derivation protocol.
+   This includes deciding whether account secret key / two-secret key derivation is mandatory in
+   MVP.
 3. Browser KDF and crypto v1 payload format.
 4. TOTP seed custody and MFA hardening.
 5. PostgreSQL HA, replication mode, backup, and restore design.
 6. GitHub ruleset and public repository safety gates.
-7. GitHub Project creation after the active token has the full `project` scope.
-8. Single-device vs multi-device MVP.
-9. Plaintext metadata boundary.
-10. Recovery key vs account recovery codes.
-11. Item revision and delta-sync protocol.
+7. Multi-device-capable account, key-wrap, and sync model.
+8. Plaintext metadata boundary.
+9. Recovery key vs account recovery codes.
+10. Item revision and delta-sync protocol.
 
 The auth and crypto decision must explicitly define server storage of client-derived auth material,
 AES-GCM nonce budgets, and the one-pass KDF plus HKDF domain-separation model.
