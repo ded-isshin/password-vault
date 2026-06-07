@@ -1,0 +1,354 @@
+# MVP Implementation Plan
+
+Status: draft. Created for milestone `v0.2-working-mvp`.
+
+## Active Context
+
+Task: deliver a working browser-first MVP and prepare deployment through GitHub, GHCR, Helm, and
+Argo CD.
+
+Active repositories:
+
+- `password-vault`: product code, product docs, CI, Helm chart, product issues and PRs.
+- `infrastructure-home`: read-only analysis now; future GitOps PR only after a dedicated approval
+  point.
+
+Repositories out of scope:
+
+- `hiringtrace-site`
+- `hiringtrace-site-archive`
+- unrelated products
+
+Risk level: high. This product handles authentication, client-side encryption, TOTP MFA, database
+state, public CI, and public deployment.
+
+## Goal
+
+Build a deployed MVP where a personal user can:
+
+1. register an account;
+2. enroll TOTP MFA;
+3. log in from a browser;
+4. unlock the vault locally;
+5. create, read, update, delete, and sync encrypted vault items;
+6. use a Kubernetes-deployed instance with health checks, CI, rollback docs, and public-safety
+   review.
+
+## Non-Goals
+
+- Organization or team vaults.
+- Sharing between users.
+- Chrome extension implementation.
+- iOS/mobile/desktop clients.
+- KeePass/KDBX import.
+- Billing.
+- Admin recovery that can decrypt a user's vault.
+- Accepting real user secrets before backup, restore, and deployment gates are proven.
+
+## Current GitHub Control Plane
+
+- Project: <https://github.com/users/ded-isshin/projects/2>
+- Research milestone: `v0.1-research`
+- Delivery milestone: `v0.2-working-mvp`
+- Delivery epic: #11
+
+Existing blockers:
+
+- #2 Auth/login and key-derivation protocol ADR.
+- #3 Browser KDF and crypto v1 format ADR.
+- #4 TOTP seed custody and MFA hardening.
+- #5 PostgreSQL HA, backup, and restore ADR.
+- #7 Branch ruleset and public repository safety gates.
+- #9 Multi-device client and browser extension roadmap.
+- #24 OPAQUE browser/Rust library compatibility spike.
+
+Delivery issues:
+
+- #12 MVP implementation plan and dependency graph.
+- #13 `/v1` API contract for MVP auth, devices, and vault sync.
+- #14 Rust API service scaffold.
+- #15 PostgreSQL schema and migrations.
+- #16 Auth sessions and TOTP MFA server flows.
+- #17 Browser crypto package and encrypted payload test vectors.
+- #18 Encrypted vault item API and sync conflict checks.
+- #19 Browser web app.
+- #20 Docker build, CI tests, and GHCR release workflow.
+- #21 Helm chart.
+- #22 GitOps application in `infrastructure-home`.
+- #23 Deploy, backup, restore, and rollback runbook.
+- #24 OPAQUE browser/Rust library compatibility spike.
+- #25 Vault revision freshness and rollback-resistance.
+- #26 Rust build environment for MVP implementation.
+
+## Dependency Graph
+
+```text
+Threat model and foundation docs
+  -> #24 OPAQUE/browser compatibility spike
+  -> #2 auth/login ADR
+  -> #3 browser KDF/crypto ADR
+  -> #4 TOTP custody/MFA research
+  -> #9 multi-device roadmap
+  -> #25 vault revision freshness and rollback-resistance
+  -> #13 /v1 API contract
+  -> #15 database schema
+  -> #26 Rust build environment
+  -> #14 backend scaffold
+  -> #16 auth/session/TOTP implementation
+  -> #17 browser crypto package
+  -> #18 encrypted vault CRUD/sync API
+  -> #19 browser web MVP
+  -> #20 CI/image/GHCR
+  -> #21 Helm chart
+  -> #5 PostgreSQL HA/backup ADR
+  -> #22 infrastructure-home GitOps PR
+  -> #23 deploy/rollback/restore runbook
+  -> explicit human approval for Argo CD sync or any cluster mutation
+  -> deployed smoke test
+```
+
+Parallel tracks:
+
+- #7 GitHub branch ruleset and public-safety gates can proceed while auth/crypto research runs.
+- #5 PostgreSQL HA/backup can proceed while product scaffolding starts.
+- #26 Rust build environment can proceed while #24/#2/#3 are still open.
+- Backend health/readiness scaffold can start before final crypto implementation, but it must not
+  implement security-sensitive auth until #2, #3, #4, and #24 are resolved.
+- Frontend layout can start after the API contract draft exists, but crypto and login behavior must
+  wait for accepted security decisions.
+
+## Recommended MVP Stack
+
+- Backend: Rust, Axum, Tokio, SQLx.
+- Frontend: TypeScript, React, Vite.
+- Browser crypto: WebCrypto for AES-GCM/HKDF; Argon2id via reviewed WASM only after #3/#24.
+- Authentication direction: derived-auth-key remains the documented MVP default unless #24 proves
+  OPAQUE is practical for the selected Rust/browser stack. OPAQUE is preferred security direction,
+  but it must not become an indefinite blocker or an untested protocol dependency.
+- MFA: TOTP as login MFA, not as a vault encryption factor.
+- Database: PostgreSQL.
+- Kubernetes database direction: CloudNativePG, with backup/restore and failover gates before real
+  user secrets.
+- CI/CD: GitHub Actions on GitHub-hosted runners, GHCR images, GitOps deployment through
+  `infrastructure-home` and Argo CD.
+
+## Critical Decisions Before Security-Sensitive Code
+
+### Auth/Login
+
+Issue #2 must decide:
+
+- whether #24 justifies OPAQUE in the MVP or confirms the temporary derived-auth-key default;
+- exact registration/login message sequence;
+- whether the backend stores an OPAQUE credential record or a weaker temporary verifier;
+- account enumeration behavior;
+- session creation point and MFA challenge sequencing;
+- required tests.
+
+### Browser Crypto
+
+Issue #3 must decide:
+
+- KDF and parameters;
+- browser/WASM dependency choice and supply-chain review;
+- key hierarchy and domain separation;
+- AES-GCM envelope format;
+- nonce strategy;
+- associated data;
+- test vectors.
+
+Issue #3 and #13 must also define rollback/freshness protection for encrypted item sync. Binding an
+item payload to `revision_id` in AAD proves the ciphertext belongs to a revision; it does not prove
+that the server returned the latest revision. The MVP needs an explicit design for stale revision
+replay, such as a per-vault monotonic counter, client-verifiable hash chain, or another accepted
+freshness signal.
+
+### TOTP MFA
+
+Issue #4 must decide:
+
+- TOTP seed custody;
+- encryption-at-rest for server-owned TOTP seeds;
+- time-step and drift window;
+- replay denial;
+- recovery code storage and rotation;
+- rate limits and audit events.
+
+### Database/Backup
+
+Issue #5 must decide:
+
+- CloudNativePG mode;
+- synchronous versus asynchronous replication;
+- backup target and credentials contract;
+- restore drill;
+- real-user-data gate.
+
+## Implementation Sequence
+
+### Phase 1: Design Closure
+
+Target issues: #12, #13, #24, #25, #26, #2, #3, #4, #5, #7, #9.
+
+Outputs:
+
+- MVP implementation plan.
+- Official-docs research note.
+- OPAQUE/browser spike.
+- Auth/crypto/TOTP/database ADRs.
+- Updated API contract.
+- GitHub public-safety settings proposal.
+
+### Phase 2: Product Scaffold
+
+Target issues: #14, #15, #20.
+
+Outputs:
+
+- Rust workspace and backend service.
+- Health/readiness endpoints.
+- Database migration skeleton and local test harness.
+- Initial CI for Rust, TypeScript, docs, YAML, and secret-pattern checks.
+
+Entry gate: choose a build/test environment for Rust before #14. Local `rustc` and `cargo` are not
+currently installed, so the project needs an approved local toolchain install, dev container, or
+container/CI-based build path.
+
+Security constraint: product scaffold must not create a fake auth protocol just to move faster.
+
+### Phase 3: Auth, Crypto, Vault Sync
+
+Target issues: #16, #17, #18.
+
+Outputs:
+
+- Registration/login/session implementation.
+- TOTP enrollment/verification/recovery codes.
+- Browser crypto package.
+- Encrypted item CRUD/sync API.
+- Cross-account isolation tests.
+- No-plaintext persistence tests.
+
+### Phase 4: Browser MVP
+
+Target issue: #19.
+
+Outputs:
+
+- Register/login/TOTP/unlock flow.
+- Vault item list/create/edit/delete.
+- In-browser decrypt/search after unlock.
+- Browser e2e happy path.
+
+Frontend/design review: run Claude Code before marking the UI PR review-ready.
+
+### Phase 5: Packaging And GitOps Handoff
+
+Target issues: #20, #21, #22, #23.
+
+Outputs:
+
+- Container image build and GHCR release workflow.
+- Product-owned Helm chart.
+- `infrastructure-home` GitOps PR modeled after the existing application handoff pattern.
+- Deploy/rollback/restore/smoke-test runbook.
+
+Cluster mutation gate: do not run `kubectl apply`, `helm upgrade`, Argo CD sync, or equivalent
+deployment commands without explicit human approval.
+
+## GitOps Deployment Shape
+
+The current infrastructure pattern uses an Argo CD `Application` with:
+
+- Helm chart source from the product repository;
+- production values from `infrastructure-home` via Argo CD multi-source values;
+- a namespace dedicated to the app;
+- `CreateNamespace=true`;
+- image tag pinned in values.
+
+For `password-vault`, the expected future infra files are:
+
+- `kubernetes/gitops/prod/apps/password-vault/application.yaml`
+- `kubernetes/gitops/prod/apps/password-vault/kustomization.yaml`
+- `kubernetes/gitops/prod/apps/password-vault/values-prod.yaml`
+- `kubernetes/gitops/prod/apps/password-vault/README.md`
+- update to `kubernetes/gitops/prod/apps/kustomization.yaml`
+
+Potential platform/data files may be needed if CloudNativePG is not already installed.
+
+## Public Safety Gates
+
+Before each public-facing PR:
+
+- no secrets, tokens, private keys, kubeconfigs, real `.env` values, private hostnames, private IPs,
+  private domains, or sensitive logs;
+- redaction placeholders for infrastructure details;
+- no self-hosted runner dependency for public CI;
+- minimal GitHub Actions permissions;
+- no unsafe `pull_request_target` workflow;
+- third-party actions reviewed and pinned/trusted where practical.
+
+Before deployment:
+
+- runtime secrets provisioned outside Git;
+- GHCR visibility and pull secret contract decided;
+- ingress host/path/port recorded without private details in public docs;
+- backup target and restore process validated before real user data.
+
+## Agent Coordination
+
+Codex remains the orchestrator and final integrator.
+
+Default model:
+
+- reviewer/advisor agents are report-only;
+- writer agents may edit only explicitly assigned, disjoint scopes;
+- shared ADRs and architecture docs have a single writer at a time;
+- Claude Code is used for architecture/security/frontend/GitOps review and must be allowed to
+  finish unless blocked or unsafe.
+
+## Validation Plan
+
+MVP validation must include:
+
+- Rust unit/integration tests.
+- SQL migration validation.
+- API contract tests.
+- TOTP RFC-vector or deterministic validation tests.
+- Browser crypto test vectors.
+- Cross-account access denial tests.
+- Stale revision conflict tests.
+- No-plaintext persistence test.
+- Frontend e2e happy path: register, enroll TOTP, login, unlock, create item, reload, decrypt.
+- Helm template validation.
+- GitOps render validation.
+- Deployed smoke test after explicit approval.
+
+## Current Risks
+
+- OPAQUE may be correct architecturally but impractical if browser/server library maturity is not
+  sufficient. Current default remains derived-auth-key until #24 proves OPAQUE practical.
+- Local Rust tooling is not currently available on the mini-PC: `rustc` and `cargo` were not found
+  during the initial implementation-readiness check. We need either an approved local Rust toolchain
+  installation, a dev container, or CI/container-based builds before Rust implementation can be
+  validated locally.
+- Browser-delivered JavaScript remains a residual risk for a web password manager.
+- Argon2id in browser likely introduces a WASM dependency that needs supply-chain review.
+- TOTP seeds are server-owned secrets and must be protected separately from user vault data.
+- Database rollback/replay can expose stale encrypted state unless revision/conflict handling is
+  strong.
+- The infrastructure repository currently has unrelated dirty work; future GitOps changes require
+  a clean branch/worktree plan.
+
+## Approval Points
+
+Routine GitHub issues, branches, PRs, and safe docs/code changes can proceed under the current
+orchestrator workflow.
+
+Explicit human approval is still required before:
+
+- GitHub repository settings/secrets/deploy keys are changed;
+- any runtime secret is created or exposed;
+- any `kubectl`, `helm`, `terraform`, `lxc`, or Argo CD command mutates infrastructure;
+- deployment-impacting infrastructure PR is merged or synced;
+- real user secrets are accepted into the MVP instance.
