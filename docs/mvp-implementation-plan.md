@@ -2,6 +2,19 @@
 
 Status: draft. Created for milestone `v0.2-working-mvp`.
 
+Current implementation status, 2026-06-07:
+
+- Deployed browser preview, health/readiness/metrics, PostgreSQL, Helm/GitOps, and Grafana
+  dashboard exist.
+- `/v1/auth/register/start`, `/v1/auth/login/start`, and `/v1/auth/register/finish` are
+  implemented.
+- `register/finish` creates the account, encrypted account keyset metadata, initial vault, encrypted
+  vault key wrap, device record, and setup session.
+- TOTP enrollment/confirmation, login finish, CSRF endpoint, authenticated session inspection, vault
+  item CRUD/sync, and browser-side crypto/unlock remain unimplemented.
+- The live preview is plain HTTP, so the secure session cookie contract is not a complete browser
+  login UX until HTTPS ingress/LB behavior is added.
+
 ## Active Context
 
 Task: deliver a working browser-first MVP and prepare deployment through GitHub, GHCR, Helm, and

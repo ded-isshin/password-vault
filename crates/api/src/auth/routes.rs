@@ -12,7 +12,7 @@ use rand::{RngCore, rngs::OsRng};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row, types::Json as SqlJson};
 use time::{Duration, OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
@@ -20,25 +20,37 @@ use uuid::Uuid;
 use crate::{
     AppState,
     auth::{
-        encoding::{decode_base64url_array, encode_base64url},
+        encoding::{decode_base64url, decode_base64url_array, encode_base64url},
         scram::{DEFAULT_ITERATIONS, DEFAULT_SALT_BYTES, PROFILE_ID},
+        tokens,
     },
 };
 
 const AUTH_PROTOCOL: &str = "derived-auth-v1";
-const AUTH_BODY_LIMIT_BYTES: usize = 16 * 1024;
+const AUTH_BODY_LIMIT_BYTES: usize = 128 * 1024;
 const CLIENT_NONCE_BYTES: usize = 32;
 const SERVER_NONCE_BYTES: usize = 32;
+const AUTH_KEY_BYTES: usize = 32;
+const AEAD_NONCE_BYTES: usize = 12;
+const MAX_ENCRYPTED_ENVELOPE_BYTES: usize = 64 * 1024;
 const MAX_LOGIN_HANDLE_BYTES: usize = 320;
+const MAX_DEVICE_LABEL_BYTES: usize = 128;
+const MAX_DEVICE_PUBLIC_METADATA_BYTES: usize = 2048;
 const AUTH_CHALLENGE_RATE_LIMIT: i64 = 20;
 const AUTH_CHALLENGE_RATE_LIMIT_WINDOW: Duration = Duration::minutes(5);
 const REGISTER_CHALLENGE_TTL: Duration = Duration::minutes(10);
 const LOGIN_CHALLENGE_TTL: Duration = Duration::minutes(5);
+const SESSION_IDLE_TTL: Duration = Duration::minutes(30);
+const SESSION_ABSOLUTE_TTL: Duration = Duration::hours(12);
+const ACCOUNT_KEYSET_CRYPTO_VERSION: &str = "account-keyset-v1";
+const VAULT_KEY_WRAP_CRYPTO_VERSION: &str = "vault-key-wrap-v1";
+const VAULT_CRYPTO_PROFILE_ID: &str = "vault-crypto-v1";
 type HmacSha256 = Hmac<Sha256>;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/auth/register/start", post(register_start))
+        .route("/v1/auth/register/finish", post(register_finish))
         .route("/v1/auth/login/start", post(login_start))
         .layer(DefaultBodyLimit::max(AUTH_BODY_LIMIT_BYTES))
         .layer(middleware::from_fn(add_no_store_header))
@@ -61,6 +73,57 @@ struct RegisterStartResponse {
     auth_verifier_salt: String,
     auth_verifier_iterations: u32,
     expires_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterFinishRequest {
+    registration_id: Uuid,
+    auth_protocol: String,
+    auth_stored_key: String,
+    auth_server_key: String,
+    encrypted_account_keyset: EncryptedEnvelopeRequest,
+    initial_vault: InitialVaultRequest,
+    device: DeviceRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EncryptedEnvelopeRequest {
+    crypto_version: String,
+    key_id: String,
+    nonce: String,
+    ciphertext: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InitialVaultRequest {
+    vault_id: Uuid,
+    encrypted_vault_key: EncryptedEnvelopeRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DeviceRequest {
+    label: String,
+    client_type: String,
+    public_metadata: Value,
+}
+
+#[derive(Serialize)]
+struct RegisterFinishResponse {
+    account_id: Uuid,
+    session: SessionResponse,
+    next_step: &'static str,
+}
+
+#[derive(Serialize)]
+struct SessionResponse {
+    state: &'static str,
+    vault_access: bool,
+    idle_expires_at: String,
+    absolute_expires_at: String,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +190,14 @@ impl ApiError {
             message: "Too many requests.",
         }
     }
+
+    fn registration_unavailable() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            code: "registration_unavailable",
+            message: "Registration is unavailable.",
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -161,7 +232,7 @@ async fn register_start(
     let metadata = RegisterChallengeMetadata {
         kdf_profile: default_kdf_profile(),
         account_salt: encode_base64url(&account_salt),
-        auth_verifier_profile: PROFILE_ID,
+        auth_verifier_profile: PROFILE_ID.to_string(),
         auth_verifier_salt: encode_base64url(&auth_verifier_salt),
         auth_verifier_iterations: DEFAULT_ITERATIONS,
     };
@@ -192,6 +263,297 @@ async fn register_start(
             expires_at: format_rfc3339(expires_at)?,
         },
     ))
+}
+
+async fn register_finish(
+    State(state): State<AppState>,
+    StrictJson(request): StrictJson<RegisterFinishRequest>,
+) -> Result<Response, ApiError> {
+    ensure_supported_protocol(&request.auth_protocol)?;
+    let pool = database_pool(&state)?;
+    let auth_stored_key = decode_base64url_array::<AUTH_KEY_BYTES>(&request.auth_stored_key)
+        .map_err(|_| ApiError::bad_request())?;
+    let auth_server_key = decode_base64url_array::<AUTH_KEY_BYTES>(&request.auth_server_key)
+        .map_err(|_| ApiError::bad_request())?;
+    if auth_stored_key == auth_server_key {
+        return Err(ApiError::bad_request());
+    }
+    let encrypted_account_keyset = ValidatedEncryptedEnvelope::from_request(
+        &request.encrypted_account_keyset,
+        ACCOUNT_KEYSET_CRYPTO_VERSION,
+    )?;
+    let encrypted_vault_key = ValidatedEncryptedEnvelope::from_request(
+        &request.initial_vault.encrypted_vault_key,
+        VAULT_KEY_WRAP_CRYPTO_VERSION,
+    )?;
+    if encrypted_account_keyset.key_id != encrypted_vault_key.key_id {
+        return Err(ApiError::bad_request());
+    }
+    let device = ValidatedDevice::from_request(&request.device)?;
+
+    let now = now_utc_second()?;
+    let idle_expires_at = now + SESSION_IDLE_TTL;
+    let absolute_expires_at = now + SESSION_ABSOLUTE_TTL;
+    let account_id = Uuid::new_v4();
+    let account_keyset_id = Uuid::new_v4();
+    let vault_key_wrap_id = Uuid::new_v4();
+    let device_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    let session_token = tokens::random_token();
+    let session_token_hash = tokens::sha256_verifier(&session_token);
+    let genesis_head_hash = genesis_head_hash(request.initial_vault.vault_id);
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let challenge = sqlx::query(
+        "
+        SELECT login_handle_normalized, public_metadata
+        FROM auth_challenges
+        WHERE id = $1
+          AND challenge_type = 'register'
+          AND auth_protocol = $2
+          AND consumed_at IS NULL
+          AND expires_at >= $3
+        FOR UPDATE
+        ",
+    )
+    .bind(request.registration_id)
+    .bind(AUTH_PROTOCOL)
+    .bind(now)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(challenge) = challenge else {
+        return Err(ApiError::registration_unavailable());
+    };
+
+    let login_handle_normalized = challenge
+        .try_get::<String, _>("login_handle_normalized")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let public_metadata = challenge
+        .try_get::<SqlJson<Value>, _>("public_metadata")
+        .map_err(|_| ApiError::service_unavailable())?
+        .0;
+    let challenge_metadata = decode_register_challenge_metadata(public_metadata)?;
+    let account_salt =
+        decode_base64url_array::<DEFAULT_SALT_BYTES>(&challenge_metadata.account_salt)
+            .map_err(|_| ApiError::service_unavailable())?;
+    let auth_verifier_salt =
+        decode_base64url_array::<DEFAULT_SALT_BYTES>(&challenge_metadata.auth_verifier_salt)
+            .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO accounts (
+            id,
+            login_handle_normalized,
+            auth_protocol,
+            kdf_profile,
+            account_salt,
+            auth_verifier_profile,
+            auth_verifier_salt,
+            auth_verifier_iterations,
+            auth_stored_key,
+            auth_server_key
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ",
+    )
+    .bind(account_id)
+    .bind(&login_handle_normalized)
+    .bind(AUTH_PROTOCOL)
+    .bind(SqlJson(challenge_metadata.kdf_profile.clone()))
+    .bind(account_salt.as_slice())
+    .bind(PROFILE_ID)
+    .bind(auth_verifier_salt.as_slice())
+    .bind(challenge_metadata.auth_verifier_iterations as i32)
+    .bind(auth_stored_key.as_slice())
+    .bind(auth_server_key.as_slice())
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| {
+        if is_unique_violation(&error) {
+            ApiError::registration_unavailable()
+        } else {
+            ApiError::service_unavailable()
+        }
+    })?;
+
+    sqlx::query(
+        "
+        INSERT INTO account_keysets (
+            id,
+            account_id,
+            crypto_version,
+            key_id,
+            nonce,
+            ciphertext
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ",
+    )
+    .bind(account_keyset_id)
+    .bind(account_id)
+    .bind(&encrypted_account_keyset.crypto_version)
+    .bind(&encrypted_account_keyset.key_id)
+    .bind(encrypted_account_keyset.nonce.as_slice())
+    .bind(encrypted_account_keyset.ciphertext.as_slice())
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO devices (
+            id,
+            account_id,
+            display_name,
+            user_agent_hash,
+            client_type,
+            public_metadata
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ",
+    )
+    .bind(device_id)
+    .bind(account_id)
+    .bind(&device.label)
+    .bind(Option::<Vec<u8>>::None)
+    .bind(&device.client_type)
+    .bind(SqlJson(device.public_metadata))
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO vaults (
+            id,
+            account_id,
+            crypto_profile_id,
+            genesis_head_hash,
+            head_hash
+        ) VALUES ($1, $2, $3, $4, $5)
+        ",
+    )
+    .bind(request.initial_vault.vault_id)
+    .bind(account_id)
+    .bind(VAULT_CRYPTO_PROFILE_ID)
+    .bind(genesis_head_hash.as_slice())
+    .bind(genesis_head_hash.as_slice())
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| {
+        if is_unique_violation(&error) {
+            ApiError::registration_unavailable()
+        } else {
+            ApiError::service_unavailable()
+        }
+    })?;
+
+    sqlx::query(
+        "
+        INSERT INTO vault_key_wraps (
+            id,
+            vault_id,
+            account_id,
+            key_id,
+            crypto_version,
+            nonce,
+            ciphertext
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ",
+    )
+    .bind(vault_key_wrap_id)
+    .bind(request.initial_vault.vault_id)
+    .bind(account_id)
+    .bind(&encrypted_vault_key.key_id)
+    .bind(&encrypted_vault_key.crypto_version)
+    .bind(encrypted_vault_key.nonce.as_slice())
+    .bind(encrypted_vault_key.ciphertext.as_slice())
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO sessions (
+            id,
+            account_id,
+            device_id,
+            session_token_hash,
+            csrf_token_hash,
+            session_state,
+            expires_at,
+            idle_expires_at,
+            absolute_expires_at
+        ) VALUES ($1, $2, $3, $4, $5, 'mfa_enrollment_required', $6, $6, $7)
+        ",
+    )
+    .bind(session_id)
+    .bind(account_id)
+    .bind(device_id)
+    .bind(session_token_hash.as_slice())
+    .bind(Option::<&[u8]>::None)
+    .bind(idle_expires_at)
+    .bind(absolute_expires_at)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query(
+        "
+        INSERT INTO audit_events (
+            account_id,
+            actor_device_id,
+            event_type,
+            event_metadata
+        ) VALUES ($1, $2, 'account_registered', $3)
+        ",
+    )
+    .bind(account_id)
+    .bind(device_id)
+    .bind(SqlJson(json!({
+        "auth_protocol": AUTH_PROTOCOL,
+        "session_state": "mfa_enrollment_required"
+    })))
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    sqlx::query("UPDATE auth_challenges SET consumed_at = $1 WHERE id = $2")
+        .bind(now)
+        .bind(request.registration_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let mut response = no_store_json(
+        StatusCode::CREATED,
+        RegisterFinishResponse {
+            account_id,
+            session: SessionResponse {
+                state: "mfa_enrollment_required",
+                vault_access: false,
+                idle_expires_at: format_rfc3339(idle_expires_at)?,
+                absolute_expires_at: format_rfc3339(absolute_expires_at)?,
+            },
+            next_step: "enroll_totp",
+        },
+    );
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&session_cookie(&session_token))
+            .map_err(|_| ApiError::service_unavailable())?,
+    );
+
+    Ok(response)
 }
 
 async fn login_start(
@@ -266,11 +628,11 @@ struct LoginMetadata {
     auth_verifier_iterations: u32,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 struct RegisterChallengeMetadata {
     kdf_profile: Value,
     account_salt: String,
-    auth_verifier_profile: &'static str,
+    auth_verifier_profile: String,
     auth_verifier_salt: String,
     auth_verifier_iterations: u32,
 }
@@ -332,6 +694,118 @@ async fn cleanup_expired_challenges(pool: &PgPool) -> Result<(), ApiError> {
         .await
         .map_err(|_| ApiError::service_unavailable())?;
     Ok(())
+}
+
+struct ValidatedEncryptedEnvelope {
+    crypto_version: String,
+    key_id: String,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+}
+
+impl ValidatedEncryptedEnvelope {
+    fn from_request(
+        request: &EncryptedEnvelopeRequest,
+        expected_crypto_version: &'static str,
+    ) -> Result<Self, ApiError> {
+        if request.crypto_version != expected_crypto_version {
+            return Err(ApiError::bad_request());
+        }
+        let key_id = validate_short_text(&request.key_id, 128)?;
+        let nonce = decode_base64url_array::<AEAD_NONCE_BYTES>(&request.nonce)
+            .map_err(|_| ApiError::bad_request())?
+            .to_vec();
+        let ciphertext =
+            decode_base64url(&request.ciphertext).map_err(|_| ApiError::bad_request())?;
+        if ciphertext.is_empty() || ciphertext.len() > MAX_ENCRYPTED_ENVELOPE_BYTES {
+            return Err(ApiError::bad_request());
+        }
+
+        Ok(Self {
+            crypto_version: request.crypto_version.clone(),
+            key_id,
+            nonce,
+            ciphertext,
+        })
+    }
+}
+
+struct ValidatedDevice {
+    label: String,
+    client_type: String,
+    public_metadata: Value,
+}
+
+impl ValidatedDevice {
+    fn from_request(request: &DeviceRequest) -> Result<Self, ApiError> {
+        let label = validate_short_text(&request.label, MAX_DEVICE_LABEL_BYTES)?;
+        if !matches!(
+            request.client_type.as_str(),
+            "browser" | "browser-extension" | "ios" | "android" | "cli"
+        ) {
+            return Err(ApiError::bad_request());
+        }
+        if !request.public_metadata.is_object() {
+            return Err(ApiError::bad_request());
+        }
+        let metadata_len = serde_json::to_vec(&request.public_metadata)
+            .map_err(|_| ApiError::bad_request())?
+            .len();
+        if metadata_len > MAX_DEVICE_PUBLIC_METADATA_BYTES {
+            return Err(ApiError::bad_request());
+        }
+
+        Ok(Self {
+            label,
+            client_type: request.client_type.clone(),
+            public_metadata: request.public_metadata.clone(),
+        })
+    }
+}
+
+fn decode_register_challenge_metadata(value: Value) -> Result<RegisterChallengeMetadata, ApiError> {
+    let metadata = serde_json::from_value::<RegisterChallengeMetadata>(value)
+        .map_err(|_| ApiError::service_unavailable())?;
+    if metadata.kdf_profile != default_kdf_profile()
+        || metadata.auth_verifier_profile != PROFILE_ID
+        || metadata.auth_verifier_iterations != DEFAULT_ITERATIONS
+    {
+        return Err(ApiError::service_unavailable());
+    }
+    Ok(metadata)
+}
+
+fn validate_short_text(value: &str, max_bytes: usize) -> Result<String, ApiError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.len() > max_bytes || trimmed.chars().any(char::is_control) {
+        return Err(ApiError::bad_request());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn genesis_head_hash(vault_id: Uuid) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"password-vault/vault-genesis/v1");
+    hasher.update([0]);
+    hasher.update(vault_id.as_bytes());
+    hasher.finalize().into()
+}
+
+fn session_cookie(session_token: &[u8; tokens::TOKEN_LEN]) -> String {
+    format!(
+        "__Host-pv_session={}; Path=/; Secure; HttpOnly; SameSite=Strict",
+        encode_base64url(session_token)
+    )
+}
+
+fn is_unique_violation(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::Database(database_error) => database_error
+            .code()
+            .as_deref()
+            .is_some_and(|code| code == "23505"),
+        _ => false,
+    }
 }
 
 async fn enforce_challenge_rate_limit(

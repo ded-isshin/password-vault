@@ -231,6 +231,19 @@ Response headers set `__Host-pv_session` when a session is created.
 Duplicate or expired registration returns a generic failure such as `registration_unavailable`.
 The implementation must rate-limit registration attempts by source and normalized handle.
 
+Implementation status:
+
+- `register/start` and `register/finish` are implemented as the first registration foundation slice.
+- `register/finish` stores only encrypted account keyset and vault key-wrap ciphertext metadata.
+- The initial vault `genesis_head_hash` is currently a deterministic server-side SHA-256 domain
+  hash over the vault id because the request does not yet carry a client-supplied genesis hash.
+- The client-supplied `initial_vault.vault_id` remains part of the contract for now; collisions are
+  handled as a generic registration failure.
+- The setup session is created with `mfa_enrollment_required`, but TOTP enrollment, CSRF issuance,
+  and vault item APIs are not implemented yet.
+- The `__Host-pv_session` cookie is intentionally `Secure`; a plain-HTTP browser preview will not
+  behave like the final HTTPS deployment for cookie persistence.
+
 ## Login
 
 ### `POST /v1/auth/login/start`

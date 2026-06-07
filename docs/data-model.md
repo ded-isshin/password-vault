@@ -1,8 +1,10 @@
 # Data Model Draft
 
-Status: bootstrap implementation draft. The first PostgreSQL migration exists in
-`migrations/202606070001_initial_schema.sql`, but auth, sync, and vault-item runtime flows are not
-implemented yet.
+Status: bootstrap implementation draft. The PostgreSQL migrations live in `migrations/`.
+The first migration creates the base account/auth/session/vault schema, and the second migration
+adds the registration-finish key-material tables and session/device metadata required by the first
+runtime auth slice. Login, MFA enrollment, sync, and vault-item runtime flows are not implemented
+yet.
 
 This document records the product data boundaries and the first implemented schema direction. The
 schema can still change while the auth, key-derivation, recovery, and sync implementation is built.
@@ -56,6 +58,8 @@ devices
   account_id
   display_name
   user_agent_hash
+  client_type
+  public_metadata
   created_at
   last_seen_at
   revoked_at
@@ -106,7 +110,19 @@ sessions
   created_at
   last_seen_at
   expires_at
+  idle_expires_at
+  absolute_expires_at
   revoked_at
+
+account_keysets
+  id
+  account_id
+  crypto_version
+  key_id
+  nonce
+  ciphertext
+  created_at
+  updated_at
 
 vaults
   id
@@ -115,6 +131,17 @@ vaults
   head_seq
   genesis_head_hash
   head_hash
+  created_at
+  updated_at
+
+vault_key_wraps
+  id
+  vault_id
+  account_id
+  key_id
+  crypto_version
+  nonce
+  ciphertext
   created_at
   updated_at
 
@@ -166,6 +193,17 @@ The migration deliberately does not include plaintext item columns such as `titl
 - `sessions(account_id, device_id)` references `devices(account_id, id)` so a session cannot attach
   another account's device when a device is present.
 - `sessions.session_state` stores whether the session can access vault APIs.
+- `sessions.idle_expires_at` and `sessions.absolute_expires_at` implement the ADR 0005 session
+  lifetime shape; `expires_at` remains as the current effective expiry for compatibility with the
+  initial migration and index.
+- `devices.client_type` and `devices.public_metadata` support the API contract without storing raw
+  user-agent or private client details.
+- `account_keysets` stores encrypted account key material only as ciphertext, nonce, key id, and
+  crypto version. It does not store plaintext account secret keys.
+- `vault_key_wraps(account_id, vault_id)` references `vaults(account_id, id)` so a vault key wrap
+  cannot be attached to another account's vault.
+- `vault_key_wraps(account_id, key_id)` references `account_keysets(account_id, key_id)` so the
+  server-visible key wrap metadata remains account scoped.
 - `vault_items(vault_id, id)` is unique and item revisions reference that composite key.
 - `vault_item_revisions` is append-only data with `operation` limited to `create`, `update`, and
   `delete`.
@@ -193,11 +231,15 @@ authorization and optimistic concurrency.
 - Whether `login_handle` is email, username, or both.
 - Whether email verification is required before TOTP enrollment.
 - Whether device records are soft audit records in MVP or full cryptographic enrollments.
-- Whether `vault_members.wrapped_vault_key` exists in MVP or only after device/sharing design.
+- Whether future sharing uses `vault_members` or extends `vault_key_wraps`; the single-user MVP uses
+  `vault_key_wraps`.
 - Whether recovery-key wrapping is included from day one.
 - TOTP seed protection: app-level encryption, Vault/OpenBao Transit, or another KMS path.
 - Exact encrypted item envelope JSON shape and canonical encoding.
 - Exact migration-job versus startup-migration deployment pattern.
+- Whether the server should generate the initial vault id. The current API contract accepts a
+  client-supplied `initial_vault.vault_id`; server code must map collisions to a generic
+  registration failure and never leak whether a vault id already exists.
 
 ## Device Direction
 

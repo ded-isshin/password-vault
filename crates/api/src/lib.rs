@@ -378,8 +378,11 @@ fn unmatched_endpoint_label(_: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use axum::{body::Body, body::to_bytes, http::Request};
     use serde_json::Value;
+    use tokio::sync::{Mutex, MutexGuard};
     use tower::ServiceExt;
 
     use crate::{
@@ -388,6 +391,8 @@ mod tests {
     };
 
     use super::{ApiConfig, app, build_app};
+
+    static DB_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     #[tokio::test]
     async fn healthz_returns_ok_without_database() {
@@ -615,6 +620,7 @@ mod tests {
             eprintln!("skipping auth route database test because PV_TEST_DATABASE_URL is not set");
             return;
         };
+        let _guard = db_test_guard().await;
 
         let pool = db::connect(&database_url)
             .await
@@ -744,6 +750,125 @@ mod tests {
         assert_auth_start_rate_limit(&router).await;
     }
 
+    #[tokio::test]
+    async fn auth_register_finish_creates_account_key_material_and_setup_session() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping register finish database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let start_response = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/register/start",
+                r#"{"login_handle":"finish@example.com","auth_protocol":"derived-auth-v1"}"#,
+            ))
+            .await
+            .expect("register start returns a response");
+        assert_eq!(start_response.status(), 200);
+        let start_body = response_json(start_response).await;
+        let registration_id = start_body["registration_id"]
+            .as_str()
+            .expect("registration id is present");
+
+        let account_keyset_nonce = encode_base64url(&[0x11; 12]);
+        let account_keyset_ciphertext = encode_base64url(&[0x22; 48]);
+        let vault_key_nonce = encode_base64url(&[0x33; 12]);
+        let vault_key_ciphertext = encode_base64url(&[0x44; 48]);
+        let auth_stored_key = encode_base64url(&[0x55; 32]);
+        let auth_server_key = encode_base64url(&[0x66; 32]);
+        let vault_id = "00000000-0000-4000-8000-000000000777";
+        let finish_request = format!(
+            r#"{{
+                "registration_id":"{registration_id}",
+                "auth_protocol":"derived-auth-v1",
+                "auth_stored_key":"{auth_stored_key}",
+                "auth_server_key":"{auth_server_key}",
+                "encrypted_account_keyset":{{
+                    "crypto_version":"account-keyset-v1",
+                    "key_id":"user-key-v1",
+                    "nonce":"{account_keyset_nonce}",
+                    "ciphertext":"{account_keyset_ciphertext}"
+                }},
+                "initial_vault":{{
+                    "vault_id":"{vault_id}",
+                    "encrypted_vault_key":{{
+                        "crypto_version":"vault-key-wrap-v1",
+                        "key_id":"user-key-v1",
+                        "nonce":"{vault_key_nonce}",
+                        "ciphertext":"{vault_key_ciphertext}"
+                    }}
+                }},
+                "device":{{
+                    "label":"Firefox on laptop",
+                    "client_type":"browser",
+                    "public_metadata":{{"platform_hint":"web"}}
+                }}
+            }}"#
+        );
+
+        let finish_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/register/finish", &finish_request))
+            .await
+            .expect("register finish returns a response");
+        assert_eq!(finish_response.status(), http::StatusCode::CREATED);
+        assert_eq!(
+            finish_response.headers().get("cache-control").unwrap(),
+            "no-store"
+        );
+        let set_cookie = finish_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("register finish sets a session cookie");
+        assert!(set_cookie.starts_with("__Host-pv_session="));
+        assert!(set_cookie.contains("Path=/"));
+        assert!(set_cookie.contains("Secure"));
+        assert!(set_cookie.contains("HttpOnly"));
+        assert!(set_cookie.contains("SameSite=Strict"));
+        assert!(!set_cookie.contains("Domain="));
+
+        let finish_body = response_json(finish_response).await;
+        assert_eq!(finish_body["session"]["state"], "mfa_enrollment_required");
+        assert_eq!(finish_body["session"]["vault_access"], false);
+        assert_eq!(finish_body["next_step"], "enroll_totp");
+        assert_register_finish_persisted(&pool, "finish@example.com", vault_id).await;
+
+        let reused_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/register/finish", &finish_request))
+            .await
+            .expect("reused register finish returns a response");
+        assert_eq!(reused_response.status(), http::StatusCode::CONFLICT);
+        let reused_body = response_json(reused_response).await;
+        assert_eq!(reused_body["error"]["code"], "registration_unavailable");
+        assert_eq!(account_count(&pool).await, 1);
+    }
+
     fn json_request(uri: &str, body: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
@@ -751,6 +876,10 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .expect("test request builds")
+    }
+
+    async fn db_test_guard() -> MutexGuard<'static, ()> {
+        DB_TEST_LOCK.get_or_init(|| Mutex::new(())).lock().await
     }
 
     async fn response_json(response: axum::response::Response) -> Value {
@@ -849,6 +978,118 @@ mod tests {
         assert_eq!(row.2, 32);
     }
 
+    async fn assert_register_finish_persisted(
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        vault_id: &str,
+    ) {
+        let account_id: uuid::Uuid =
+            sqlx::query_scalar("SELECT id FROM accounts WHERE login_handle_normalized = $1")
+                .bind(login_handle)
+                .fetch_one(pool)
+                .await
+                .expect("registered account exists");
+
+        let account_keysets: i64 = sqlx::query_scalar(
+            "
+            SELECT COUNT(*)
+            FROM account_keysets
+            WHERE account_id = $1
+              AND crypto_version = 'account-keyset-v1'
+              AND key_id = 'user-key-v1'
+              AND octet_length(nonce) = 12
+              AND octet_length(ciphertext) = 48
+            ",
+        )
+        .bind(account_id)
+        .fetch_one(pool)
+        .await
+        .expect("account keyset query succeeds");
+        assert_eq!(account_keysets, 1);
+
+        let vault_key_wraps: i64 = sqlx::query_scalar(
+            "
+            SELECT COUNT(*)
+            FROM vault_key_wraps
+            WHERE account_id = $1
+              AND vault_id = $2::uuid
+              AND crypto_version = 'vault-key-wrap-v1'
+              AND key_id = 'user-key-v1'
+              AND octet_length(nonce) = 12
+              AND octet_length(ciphertext) = 48
+            ",
+        )
+        .bind(account_id)
+        .bind(vault_id)
+        .fetch_one(pool)
+        .await
+        .expect("vault key wrap query succeeds");
+        assert_eq!(vault_key_wraps, 1);
+
+        let device: (String, String, Value) = sqlx::query_as(
+            "
+            SELECT display_name, client_type, public_metadata
+            FROM devices
+            WHERE account_id = $1
+            ",
+        )
+        .bind(account_id)
+        .fetch_one(pool)
+        .await
+        .expect("device row exists");
+        assert_eq!(device.0, "Firefox on laptop");
+        assert_eq!(device.1, "browser");
+        assert_eq!(device.2["platform_hint"], "web");
+
+        let session: (String, i64, bool, bool) = sqlx::query_as(
+            "
+            SELECT
+                session_state,
+                octet_length(session_token_hash)::bigint,
+                csrf_token_hash IS NULL,
+                idle_expires_at <= absolute_expires_at
+            FROM sessions
+            WHERE account_id = $1
+            ",
+        )
+        .bind(account_id)
+        .fetch_one(pool)
+        .await
+        .expect("session row exists");
+        assert_eq!(session.0, "mfa_enrollment_required");
+        assert_eq!(session.1, 32);
+        assert!(session.2);
+        assert!(session.3);
+
+        let challenge_consumed: bool = sqlx::query_scalar(
+            "
+            SELECT consumed_at IS NOT NULL
+            FROM auth_challenges
+            WHERE login_handle_normalized = $1
+              AND challenge_type = 'register'
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("challenge row exists");
+        assert!(challenge_consumed);
+
+        let audit_events: i64 = sqlx::query_scalar(
+            "
+            SELECT COUNT(*)
+            FROM audit_events
+            WHERE account_id = $1
+              AND event_type = 'account_registered'
+            ",
+        )
+        .bind(account_id)
+        .fetch_one(pool)
+        .await
+        .expect("audit event query succeeds");
+        assert_eq!(audit_events, 1);
+    }
+
     async fn account_count(pool: &sqlx::PgPool) -> i64 {
         sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
             .fetch_one(pool)
@@ -895,6 +1136,11 @@ mod tests {
                 sessions,
                 recovery_codes,
                 totp_factors,
+                vault_key_wraps,
+                account_keysets,
+                vault_item_revisions,
+                vault_items,
+                vaults,
                 devices,
                 accounts
             RESTART IDENTITY CASCADE

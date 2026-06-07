@@ -132,6 +132,12 @@ server stores:
 The registration response must not cause the raw password, account secret key, account unlock key, or
 unwrapped vault key to reach the backend.
 
+Implementation note: the first runtime registration slice implements `register/finish` as one
+transaction that consumes the registration challenge, creates the account, stores encrypted account
+keyset metadata, creates the initial vault, stores the encrypted vault key wrap, creates the device
+record, and creates a setup session in `mfa_enrollment_required` state. CSRF token issuance remains a
+later `GET /v1/csrf` slice.
+
 Registration must not become a login-handle enumeration endpoint. In the MVP, duplicate
 `register/start` requests return the same `200` response shape as new-handle requests and create a
 short-lived registration challenge with generated metadata. The server does not create an account at
