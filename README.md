@@ -22,8 +22,9 @@ documentation, logs, and CI output as public.
   user-vault core.
 - Public routing direction: edge reverse proxy to Kubernetes ingress/service; exact host, port,
   TLS, and network details belong in the infrastructure repository.
-- Current blocker: security-sensitive auth, crypto, database, and deployment implementation remains
-  gated by the accepted docs and follow-up specs.
+- Current blocker: security-sensitive auth, crypto, frontend, container, and deployment
+  implementation remains gated by accepted docs and follow-up specs. The Rust API scaffold and first
+  PostgreSQL migration exist, but auth and vault-sync runtime flows are not implemented yet.
 
 ## MVP Scope
 

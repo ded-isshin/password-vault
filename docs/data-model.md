@@ -1,9 +1,11 @@
 # Data Model Draft
 
-Status: draft. This is not a migration plan.
+Status: bootstrap implementation draft. The first PostgreSQL migration exists in
+`migrations/202606070001_initial_schema.sql`, but auth, sync, and vault-item runtime flows are not
+implemented yet.
 
-This document records the first product data boundaries. The final schema depends on the auth,
-key-derivation, recovery, and sync ADRs.
+This document records the product data boundaries and the first implemented schema direction. The
+schema can still change while the auth, key-derivation, recovery, and sync implementation is built.
 
 ## Security Boundary
 
@@ -28,97 +30,145 @@ Recommended MVP boundary:
 Consequence: the server cannot search or sort by title, URL, username, or tags. Search must be
 client-side after unlock.
 
-## Draft Tables
+## Implemented MVP Migration Tables
 
 ```text
-users
+accounts
   id
-  login_handle
-  auth_protocol_version
-  auth_public_metadata
+  login_handle_normalized
+  auth_protocol
+  auth_migration_status
+  kdf_profile
+  account_salt
+  derived_auth_hash
+  server_auth_hash_profile
+  opaque_credential_record
+  failed_auth_count
+  locked_until
   created_at
-  disabled_at
-
-sessions
-  id
-  user_id
-  device_id
-  created_at
-  expires_at
-  revoked_at
-  user_agent_hash
-  ip_hash
+  updated_at
 
 devices
   id
-  user_id
-  device_label_ciphertext
-  client_type
-  first_seen_at
+  account_id
+  display_name
+  user_agent_hash
+  created_at
   last_seen_at
   revoked_at
 
-mfa_totp
+auth_challenges
   id
-  user_id
-  encrypted_seed
-  seed_protection_version
-  verified_at
-  last_used_step
+  account_id
+  login_handle_normalized
+  challenge_type
+  auth_protocol
+  server_nonce
+  public_metadata
+  attempts
+  expires_at
+  consumed_at
   created_at
-  disabled_at
+
+totp_factors
+  account_id
+  seed_ciphertext
+  seed_nonce
+  seed_key_id
+  algorithm
+  digits
+  period_seconds
+  last_accepted_step
+  verified_at
+  created_at
+  updated_at
 
 recovery_codes
   id
-  user_id
+  account_id
   code_hash
-  used_at
   created_at
+  used_at
+
+sessions
+  id
+  account_id
+  device_id
+  session_token_hash
+  csrf_token_hash
+  created_at
+  last_seen_at
+  expires_at
+  revoked_at
 
 vaults
   id
-  owner_user_id
-  vault_type
+  account_id
+  crypto_profile_id
+  head_seq
+  genesis_head_hash
+  head_hash
   created_at
-  archived_at
+  updated_at
 
-vault_members
-  id
-  vault_id
-  user_id
-  role
-  wrapped_vault_key
-  wrapping_version
-  created_at
-
-items
+vault_items
   id
   vault_id
   latest_revision_id
+  latest_revision_seq
   deleted_at
   created_at
   updated_at
 
-item_revisions
+vault_item_revisions
   id
-  item_id
   vault_id
+  item_id
+  operation
   revision_seq
-  change_seq
+  base_revision_seq
+  head_seq
+  base_head_seq
+  base_head_hash
+  previous_head_hash
+  head_hash
+  change_mac
+  key_id
   crypto_version
-  ciphertext
-  associated_data_hash
-  created_by_user_id
+  envelope_hash
+  encrypted_item_envelope
   created_at
 
 audit_events
   id
-  user_id
-  vault_id
+  account_id
+  actor_device_id
   event_type
   event_metadata
   created_at
 ```
+
+The migration deliberately does not include plaintext item columns such as `title`, `url`,
+`username`, `password`, `notes`, or `tags`.
+
+## Schema Guardrails Implemented
+
+- `accounts.login_handle_normalized` is unique.
+- `sessions(account_id, device_id)` references `devices(account_id, id)` so a session cannot attach
+  another account's device.
+- `vault_items(vault_id, id)` is unique and item revisions reference that composite key.
+- `vault_item_revisions` is append-only data with `operation` limited to `create`, `update`, and
+  `delete`.
+- `vault_item_revisions(vault_id, head_seq)` is unique for one ordered vault change stream.
+- `vault_items.latest_revision_id` references a revision for the same `(vault_id, item_id)`.
+- Hashes and MACs are constrained to expected byte lengths where the current protocol already
+  defines those lengths.
+- TOTP seeds are stored as ciphertext plus protection metadata, and recovery codes are stored as
+  one-way hashes.
+
+The database still cannot validate client-side cryptographic correctness for `head_hash` or
+`change_mac`; unlocked clients must verify those values, and backend transaction code must enforce
+authorization and optimistic concurrency.
 
 ## Authorization Rules
 
@@ -136,6 +186,8 @@ audit_events
 - Whether `vault_members.wrapped_vault_key` exists in MVP or only after device/sharing design.
 - Whether recovery-key wrapping is included from day one.
 - TOTP seed protection: app-level encryption, Vault/OpenBao Transit, or another KMS path.
+- Exact encrypted item envelope JSON shape and canonical encoding.
+- Exact migration-job versus startup-migration deployment pattern.
 
 ## Device Direction
 

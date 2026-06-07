@@ -1,4 +1,4 @@
-use password_vault_api::{ApiConfig, app, init_tracing};
+use password_vault_api::{ApiConfig, build_app, init_tracing};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -6,14 +6,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let config = ApiConfig::from_env()?;
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
+    let bind_addr = config.bind_addr;
+    let database_configured = config.database_url_present();
+    let app = build_app(config).await?;
 
     tracing::info!(
-        bind_addr = %config.bind_addr,
+        bind_addr = %bind_addr,
+        database_configured,
         service = "password-vault-api",
         "starting API service"
     );
 
-    axum::serve(listener, app(config))
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 

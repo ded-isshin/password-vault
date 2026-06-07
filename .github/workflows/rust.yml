@@ -26,6 +26,39 @@ jobs:
           rustup component add rustfmt clippy
           rustc --version
           cargo --version
+          cargo fetch --locked
           cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace
+
+  postgres-migrations:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1.85-bookworm
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: password_vault_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d password_vault_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PV_TEST_DATABASE_URL: postgres://postgres:postgres@postgres:5432/password_vault_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test PostgreSQL migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH=/usr/local/cargo/bin:$PATH
+          rustc --version
+          cargo --version
+          cargo fetch --locked
+          cargo test --locked --workspace --test migrations
