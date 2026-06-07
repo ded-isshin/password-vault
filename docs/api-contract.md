@@ -45,27 +45,57 @@ Breaking API changes require a versioning or migration decision before implement
 
 Readiness must be safe for Kubernetes and must not expose private infrastructure details.
 
-### Registration And Login Metadata
+### Registration And Login
 
-- `POST /v1/auth/registration`
-- `POST /v1/auth/login-metadata`
-- `POST /v1/auth/login`
+- `POST /v1/auth/register/start`
+- `POST /v1/auth/register/finish`
+- `POST /v1/auth/login/start`
+- `POST /v1/auth/login/finish`
+- `POST /v1/auth/mfa/totp/verify`
 - `POST /v1/auth/logout`
-- `GET /v1/auth/session`
+- `GET /v1/session`
+- `GET /v1/csrf`
 
-`login-metadata` must use constant-shape responses and generic errors so it does not become an
-account-enumeration endpoint.
+The MVP auth protocol is `derived-auth-v1`. OPAQUE remains a future protocol:
 
-### MFA And Recovery Codes
+```text
+auth_protocol = "derived-auth-v1" | "opaque-rfc9807-v1"
+```
 
-- `POST /v1/auth/totp/enrollment`
-- `POST /v1/auth/totp/verification`
-- `DELETE /v1/auth/totp`
-- `POST /v1/auth/recovery-codes`
-- `POST /v1/auth/recovery-codes/verification`
+Auth start endpoints must use protocol-neutral names so the future OPAQUE migration can reuse the
+same public API shape.
+
+`login/start` must use constant-shape responses and generic errors so it does not become an
+account-enumeration endpoint. Unknown accounts use deterministic synthetic KDF/auth metadata.
+
+`login/start` must not return pre-authenticated MFA enrollment status. The server reveals whether
+TOTP is required only after `login/finish` succeeds.
+
+Registration endpoints must also avoid trivial account enumeration. Duplicate login-handle behavior
+must be generic until the implementation spec defines an accepted mitigation.
+
+Sensitive boundary:
+
+- raw master password: never sent to backend;
+- account secret key: never sent to backend;
+- account unlock key: never sent to backend;
+- unwrapped vault key: never sent to backend;
+- `client_auth_secret`: password-equivalent; allowed only as the documented `derived-auth-v1`
+  challenge-bound proof input and never stored or sent raw;
+- TOTP code: sent only to MFA verification endpoint and never logged.
+
+### TOTP Enrollment And Recovery Codes
+
+- `POST /v1/mfa/totp/enroll/start`
+- `POST /v1/mfa/totp/enroll/confirm`
+- `POST /v1/mfa/totp/disable`
+- `POST /v1/mfa/recovery-codes/rotate`
+- `POST /v1/auth/mfa/recovery-code/verify`
 
 Recovery codes recover login-factor access only. They must not become a vault-decryption recovery
 path.
+
+TOTP is login MFA only. It is not part of vault item encryption.
 
 ### Devices And Sessions
 
@@ -127,6 +157,8 @@ codes, or private infrastructure details.
 ## Open Decisions
 
 - Exact registration and login message shapes.
+- Exact derived-auth-v1 challenge-bound proof construction and test vectors.
+- Exact duplicate-registration non-enumeration behavior.
 - Exact account secret key UX and new-device flow.
 - Exact TOTP replay and rate-limit behavior.
 - Exact encrypted item payload format.

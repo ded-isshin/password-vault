@@ -10,24 +10,24 @@ This document describes intended account, session, TOTP, and account-recovery fl
 - Unlock establishes local browser access to vault decryption.
 - A valid server session does not imply vault unlock.
 - TOTP protects login. TOTP is not a vault encryption key.
-- A future account secret key may strengthen password-derived authentication and unlock material,
-  but it is not required for the first MVP unless a later ADR accepts the UX and recovery tradeoff.
+- The MVP uses an account secret key as a second KDF input. It strengthens password-derived
+  authentication and unlock material, but it makes new-device and lost-secret behavior a hard UX
+  requirement.
 - Recovery codes recover account MFA access only. They do not decrypt vault data.
 
 ## Registration Flow
 
 ```text
-user enters login handle and master password / unlock secret
-client performs approved key-derivation flow
+user enters login handle, master password, and account secret key
+client performs derived-auth-v1 key-derivation flow
 client creates or wraps vault key according to crypto design
 server stores account auth metadata and encrypted vault metadata
 server starts session or requires first login
 user is prompted to enroll TOTP
 ```
 
-Open blocker: the exact login/key-derivation protocol is not finalized. The current MVP
-recommendation is derived-auth-key plus TOTP, with account secret key as the recommended second KDF
-input after UX, recovery, and new-device behavior are defined.
+The MVP auth protocol is `derived-auth-v1`. OPAQUE remains a preferred future migration path after a
+separate browser/Rust interoperability proof-of-concept.
 
 The final protocol must define when and how KDF salt and parameters are created, stored, and returned
 to the client. The login metadata endpoint must not reveal whether an account exists.
@@ -59,17 +59,22 @@ Recommended staged direction:
 ## Login Flow
 
 ```text
-user submits login handle and approved auth proof/material
+user submits login handle
+client obtains constant-shape login metadata
+client derives and submits a challenge-bound derived-auth-v1 proof
 server validates account authentication
-server asks for TOTP if enabled
+server creates a pre-MFA challenge if TOTP is enabled
 user submits TOTP code
 server checks replay/rate-limit state
 server creates server-side session
 client performs local vault unlock if needed
 ```
 
-Before this flow can be implemented, the product needs a pre-login metadata flow that returns KDF
-salt and parameters without making account existence easy to enumerate.
+The pre-login metadata flow must return KDF salt and parameters without making account existence easy
+to enumerate.
+
+The pre-login metadata flow must not reveal whether TOTP is enrolled. MFA requirement is revealed
+only after password/auth proof succeeds.
 
 ## Recovery Code Flow
 
@@ -90,8 +95,10 @@ Recovery codes must be labeled as account MFA recovery, not vault recovery.
 - Replayed TOTP step is rejected.
 - Rate limits apply to password/auth and TOTP attempts.
 - Login metadata lookup does not expose account existence through response shape.
+- Login metadata lookup does not expose MFA enrollment status before auth proof succeeds.
+- Registration duplicate-handle behavior does not trivially enumerate accounts.
 - Expensive server-side auth verification is protected by rate limits.
-- If account secret key is added later, it is not persisted server-side in plaintext.
+- Account secret key is not persisted server-side in plaintext.
 - Used recovery code cannot be reused.
 - Recovery code does not reveal or change vault decryption material.
 - Logs never include TOTP seeds or recovery codes.
@@ -104,4 +111,4 @@ Recovery codes must be labeled as account MFA recovery, not vault recovery.
 - TOTP allowed time window.
 - Whether recovery key is included in MVP.
 - Exact pre-login KDF metadata behavior.
-- Future account secret key UX: emergency kit only, remember-device option, or both.
+- Account secret key UX: emergency kit only, remember-device option, or both.
