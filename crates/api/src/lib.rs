@@ -2,12 +2,16 @@ use std::{env, net::SocketAddr};
 
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Serialize;
+use sqlx::PgPool;
+
+pub mod db;
 
 #[derive(Clone, Debug)]
 pub struct ApiConfig {
     pub bind_addr: SocketAddr,
-    pub database_url_present: bool,
+    database_url: Option<String>,
     pub require_database: bool,
+    pub run_migrations_on_startup: bool,
 }
 
 impl ApiConfig {
@@ -22,14 +26,18 @@ impl ApiConfig {
             Err(_) => false,
         };
 
-        let database_url_present = env::var("PV_DATABASE_URL")
-            .map(|value| !value.trim().is_empty())
-            .unwrap_or(false);
+        let database_url_present = env::var("PV_DATABASE_URL").ok().and_then(nonempty_string);
+
+        let run_migrations_on_startup = match env::var("PV_RUN_MIGRATIONS_ON_STARTUP") {
+            Ok(value) => parse_bool(&value).ok_or(ConfigError::InvalidRunMigrationsOnStartup)?,
+            Err(_) => false,
+        };
 
         Ok(Self {
             bind_addr,
-            database_url_present,
+            database_url: database_url_present,
             require_database,
+            run_migrations_on_startup,
         })
     }
 
@@ -38,9 +46,19 @@ impl ApiConfig {
             bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
-            database_url_present,
+            database_url: database_url_present
+                .then(|| "postgres://test:test@127.0.0.1:5432/test".to_string()),
             require_database,
+            run_migrations_on_startup: false,
         }
+    }
+
+    pub fn database_url_present(&self) -> bool {
+        self.database_url.is_some()
+    }
+
+    fn database_url(&self) -> Option<&str> {
+        self.database_url.as_deref()
     }
 }
 
@@ -48,6 +66,7 @@ impl ApiConfig {
 pub enum ConfigError {
     InvalidBindAddr,
     InvalidRequireDatabase,
+    InvalidRunMigrationsOnStartup,
 }
 
 impl std::fmt::Display for ConfigError {
@@ -57,22 +76,89 @@ impl std::fmt::Display for ConfigError {
             Self::InvalidRequireDatabase => {
                 write!(formatter, "PV_REQUIRE_DATABASE must be true or false")
             }
+            Self::InvalidRunMigrationsOnStartup => {
+                write!(
+                    formatter,
+                    "PV_RUN_MIGRATIONS_ON_STARTUP must be true or false"
+                )
+            }
         }
     }
 }
 
 impl std::error::Error for ConfigError {}
 
+#[derive(Debug)]
+pub enum ApiInitError {
+    Database(sqlx::Error),
+    Migration(sqlx::migrate::MigrateError),
+}
+
+impl std::fmt::Display for ApiInitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Database(_) => write!(formatter, "database connection failed"),
+            Self::Migration(_) => write!(formatter, "database migration failed"),
+        }
+    }
+}
+
+impl std::error::Error for ApiInitError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Database(error) => Some(error),
+            Self::Migration(error) => Some(error),
+        }
+    }
+}
+
+impl From<sqlx::Error> for ApiInitError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<sqlx::migrate::MigrateError> for ApiInitError {
+    fn from(error: sqlx::migrate::MigrateError) -> Self {
+        Self::Migration(error)
+    }
+}
+
 #[derive(Clone)]
 struct AppState {
     config: ApiConfig,
+    database: Option<PgPool>,
 }
 
 pub fn app(config: ApiConfig) -> Router {
+    router(AppState {
+        config,
+        database: None,
+    })
+}
+
+pub async fn build_app(config: ApiConfig) -> Result<Router, ApiInitError> {
+    let database = if let Some(database_url) = config.database_url() {
+        let pool = if config.run_migrations_on_startup {
+            let pool = db::connect(database_url).await?;
+            db::run_migrations(&pool).await?;
+            pool
+        } else {
+            db::connect_lazy(database_url)?
+        };
+        Some(pool)
+    } else {
+        None
+    };
+
+    Ok(router(AppState { config, database }))
+}
+
+fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .with_state(AppState { config })
+        .with_state(state)
 }
 
 #[derive(Serialize)]
@@ -103,7 +189,8 @@ struct ReadyCheck {
 }
 
 async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<ReadyResponse>) {
-    let database_ready = !state.config.require_database || state.config.database_url_present;
+    let database_status = database_readiness(&state).await;
+    let database_ready = matches!(database_status, "ok");
 
     let status = if database_ready {
         StatusCode::OK
@@ -112,7 +199,6 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<ReadyRespons
     };
 
     let body_status = if database_ready { "ready" } else { "not_ready" };
-    let database_status = if database_ready { "ok" } else { "missing" };
 
     (
         status,
@@ -126,12 +212,34 @@ async fn readyz(State(state): State<AppState>) -> (StatusCode, Json<ReadyRespons
     )
 }
 
+async fn database_readiness(state: &AppState) -> &'static str {
+    if let Some(pool) = &state.database {
+        return match db::ping(pool).await {
+            Ok(()) => "ok",
+            Err(_) => "unavailable",
+        };
+    }
+
+    if state.config.require_database && state.config.database_url_present() {
+        "unavailable"
+    } else if state.config.require_database {
+        "missing"
+    } else {
+        "ok"
+    }
+}
+
 fn parse_bool(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" => Some(true),
         "0" | "false" | "no" => Some(false),
         _ => None,
     }
+}
+
+fn nonempty_string(value: String) -> Option<String> {
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
 }
 
 pub fn init_tracing() {
@@ -145,7 +253,7 @@ mod tests {
     use axum::{body::Body, body::to_bytes, http::Request};
     use tower::ServiceExt;
 
-    use super::{ApiConfig, app};
+    use super::{ApiConfig, app, build_app};
 
     #[tokio::test]
     async fn healthz_returns_ok_without_database() {
@@ -202,5 +310,54 @@ mod tests {
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(body.contains("\"status\":\"not_ready\""));
         assert!(body.contains("\"status\":\"missing\""));
+    }
+
+    #[tokio::test]
+    async fn readyz_returns_503_when_required_database_url_has_no_pool() {
+        let response = app(ApiConfig::local_test(true, true))
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 503);
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("\"status\":\"not_ready\""));
+        assert!(body.contains("\"status\":\"unavailable\""));
+    }
+
+    #[tokio::test]
+    async fn readyz_returns_503_when_configured_database_is_unreachable() {
+        let config = ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some("postgres://test:test@127.0.0.1:1/test".to_string()),
+            require_database: true,
+            run_migrations_on_startup: false,
+        };
+
+        let response = build_app(config)
+            .await
+            .expect("lazy database pool should not require an immediate connection")
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 503);
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("\"status\":\"not_ready\""));
+        assert!(body.contains("\"status\":\"unavailable\""));
     }
 }
