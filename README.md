@@ -1,6 +1,6 @@
 # password-vault
 
-Status: product bootstrap draft. No production code exists yet.
+Status: MVP implementation scaffold. No production deployment exists yet.
 
 `password-vault` is a planned Kubernetes-native, zero-knowledge password manager.
 The first milestone is a personal vault MVP with registration, login, TOTP MFA,
@@ -22,7 +22,8 @@ documentation, logs, and CI output as public.
   user-vault core.
 - Public routing direction: edge reverse proxy to Kubernetes ingress/service; exact host, port,
   TLS, and network details belong in the infrastructure repository.
-- Current blocker: login/key-derivation and cryptographic design are not finalized.
+- Current blocker: security-sensitive auth, crypto, database, and deployment implementation remains
+  gated by the accepted docs and follow-up specs.
 
 ## MVP Scope
 
