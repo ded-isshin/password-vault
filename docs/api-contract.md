@@ -551,6 +551,17 @@ Authenticated state-changing requests send:
 X-PV-CSRF: <token>
 ```
 
+Implementation status:
+
+- Implemented.
+- Each successful `GET /v1/csrf` rotates the session CSRF token by replacing
+  `sessions.csrf_token_hash`; the raw token is returned once and is not stored.
+- The current contract is single-slot: fetching a new CSRF token invalidates the previous token for
+  that session.
+- The returned `expires_at` is the current effective idle expiry.
+- CSRF validation is enforced for `POST /v1/auth/logout`; future authenticated unsafe routes must
+  use the same session, CSRF, Origin, and Fetch Metadata checks.
+
 ### `GET /v1/session`
 
 Response `200`:
@@ -575,6 +586,16 @@ Response `200` without a session:
 }
 ```
 
+Implementation status:
+
+- Implemented.
+- A valid session requires a valid `__Host-pv_session` cookie, matching session token hash, no
+  revocation, non-revoked device, `idle_expires_at > now()`, and `absolute_expires_at > now()`.
+- Successful authenticated access refreshes `last_seen_at`, `idle_expires_at`, and compatibility
+  `expires_at` to at most the absolute expiry.
+- Missing, malformed, duplicate, expired, or stale cookies return `authenticated: false`; stale
+  cookies are cleared.
+
 Session states:
 
 | State | Vault access | Meaning |
@@ -594,6 +615,13 @@ Request:
 Response `204`.
 
 The server deletes the current session and clears `__Host-pv_session`.
+
+Implementation status:
+
+- Implemented.
+- No valid session is idempotent: the response is `204` and clears the cookie.
+- A valid session requires the current `X-PV-CSRF` token before the session row is deleted.
+- Cross-site Fetch Metadata or mismatched `Origin` is rejected with `csrf_required`.
 
 ## Devices
 

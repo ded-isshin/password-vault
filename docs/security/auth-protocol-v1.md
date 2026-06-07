@@ -252,6 +252,11 @@ State-changing browser requests require CSRF protection:
 - Fetch Metadata checks where available;
 - non-GET methods for mutations.
 
+Implementation note: `GET /v1/session`, `GET /v1/csrf`, and `POST /v1/auth/logout` are implemented
+as the session foundation for TOTP enrollment. CSRF tokens are random 32-byte values returned once
+and stored only as SHA-256 verifiers. `GET /v1/csrf` rotates the verifier. Logout is idempotent
+without a valid session but requires a current CSRF token when a valid session exists.
+
 ## Vault Unlock Boundary
 
 Server session:

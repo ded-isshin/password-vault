@@ -386,7 +386,10 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
-        auth::encoding::{decode_base64url, encode_base64url},
+        auth::{
+            encoding::{decode_base64url, encode_base64url},
+            tokens,
+        },
         db,
     };
 
@@ -869,6 +872,396 @@ mod tests {
         assert_eq!(account_count(&pool).await, 1);
     }
 
+    #[tokio::test]
+    async fn session_csrf_and_logout_routes_use_hashed_session_state() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping session csrf database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let unauthenticated_response = router
+            .clone()
+            .oneshot(get_request("/v1/session"))
+            .await
+            .expect("session request returns a response");
+        assert_eq!(unauthenticated_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            unauthenticated_response
+                .headers()
+                .get("cache-control")
+                .unwrap(),
+            "no-store"
+        );
+        let unauthenticated_body = response_json(unauthenticated_response).await;
+        assert_eq!(unauthenticated_body["authenticated"], false);
+        assert!(unauthenticated_body.get("account_id").is_none());
+
+        let csrf_without_session = router
+            .clone()
+            .oneshot(get_request("/v1/csrf"))
+            .await
+            .expect("csrf request returns a response");
+        assert_eq!(
+            csrf_without_session.status(),
+            http::StatusCode::UNAUTHORIZED
+        );
+        let csrf_without_session_body = response_json(csrf_without_session).await;
+        assert_eq!(
+            csrf_without_session_body["error"]["code"],
+            "session_required"
+        );
+
+        let set_cookie = register_account_and_return_set_cookie(
+            &router,
+            "session-csrf@example.com",
+            "00000000-0000-4000-8000-000000000778",
+        )
+        .await;
+        let cookie = cookie_pair(&set_cookie);
+
+        let session_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/session", &cookie))
+            .await
+            .expect("authenticated session request returns a response");
+        assert_eq!(session_response.status(), http::StatusCode::OK);
+        let session_body = response_json(session_response).await;
+        assert_eq!(session_body["authenticated"], true);
+        assert_eq!(session_body["session_state"], "mfa_enrollment_required");
+        assert_eq!(session_body["vault_access"], false);
+        assert!(session_body["account_id"].as_str().is_some());
+        assert!(session_body["device_id"].as_str().is_some());
+
+        let csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &cookie))
+            .await
+            .expect("authenticated csrf request returns a response");
+        assert_eq!(csrf_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            csrf_response.headers().get("cache-control").unwrap(),
+            "no-store"
+        );
+        let csrf_body = response_json(csrf_response).await;
+        let csrf_token = csrf_body["csrf_token"]
+            .as_str()
+            .expect("csrf token is present");
+        let csrf_token_bytes =
+            decode_base64url(csrf_token).expect("csrf token is base64url encoded");
+        assert_eq!(csrf_token_bytes.len(), 32);
+        assert!(csrf_body["expires_at"].as_str().is_some());
+        assert_csrf_hash_persisted(&pool, "session-csrf@example.com", &csrf_token_bytes).await;
+
+        let rotated_csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &cookie))
+            .await
+            .expect("second csrf request returns a response");
+        assert_eq!(rotated_csrf_response.status(), http::StatusCode::OK);
+        let rotated_csrf_body = response_json(rotated_csrf_response).await;
+        let rotated_csrf_token = rotated_csrf_body["csrf_token"]
+            .as_str()
+            .expect("rotated csrf token is present");
+        assert_ne!(csrf_token, rotated_csrf_token);
+        let rotated_csrf_token_bytes =
+            decode_base64url(rotated_csrf_token).expect("rotated csrf token is base64url encoded");
+        assert_csrf_hash_persisted(&pool, "session-csrf@example.com", &rotated_csrf_token_bytes)
+            .await;
+
+        let stale_csrf_logout_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/auth/logout",
+                "{}",
+                &cookie,
+                csrf_token,
+            ))
+            .await
+            .expect("stale csrf logout request returns a response");
+        assert_eq!(
+            stale_csrf_logout_response.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        let stale_csrf_logout_body = response_json(stale_csrf_logout_response).await;
+        assert_eq!(stale_csrf_logout_body["error"]["code"], "csrf_required");
+        assert_eq!(session_count(&pool).await, 1);
+
+        let cross_site_logout_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_csrf_and_fetch_site(
+                "/v1/auth/logout",
+                "{}",
+                &cookie,
+                rotated_csrf_token,
+                "cross-site",
+            ))
+            .await
+            .expect("cross-site logout request returns a response");
+        assert_eq!(
+            cross_site_logout_response.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        let cross_site_logout_body = response_json(cross_site_logout_response).await;
+        assert_eq!(cross_site_logout_body["error"]["code"], "csrf_required");
+        assert_eq!(session_count(&pool).await, 1);
+
+        let missing_csrf_logout_response = router
+            .clone()
+            .oneshot(json_request_with_cookie("/v1/auth/logout", "{}", &cookie))
+            .await
+            .expect("missing csrf logout request returns a response");
+        assert_eq!(
+            missing_csrf_logout_response.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        assert_eq!(session_count(&pool).await, 1);
+
+        let logout_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/auth/logout",
+                "{}",
+                &cookie,
+                rotated_csrf_token,
+            ))
+            .await
+            .expect("logout request returns a response");
+        assert_eq!(logout_response.status(), http::StatusCode::NO_CONTENT);
+        let clear_cookie = logout_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("logout clears session cookie");
+        assert!(clear_cookie.starts_with("__Host-pv_session=;"));
+        assert!(clear_cookie.contains("Max-Age=0"));
+        assert!(clear_cookie.contains("Secure"));
+        assert!(clear_cookie.contains("HttpOnly"));
+        assert!(clear_cookie.contains("SameSite=Strict"));
+        assert_eq!(session_count(&pool).await, 0);
+
+        let session_after_logout = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/session", &cookie))
+            .await
+            .expect("post-logout session request returns a response");
+        assert_eq!(session_after_logout.status(), http::StatusCode::OK);
+        let stale_clear_cookie = session_after_logout
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("stale cookie is cleared");
+        assert!(stale_clear_cookie.contains("Max-Age=0"));
+        let session_after_logout_body = response_json(session_after_logout).await;
+        assert_eq!(session_after_logout_body["authenticated"], false);
+    }
+
+    #[tokio::test]
+    async fn session_invalidations_and_origin_csrf_edges_fail_closed() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping session invalidation database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let idle_expired_cookie = register_account_and_return_set_cookie(
+            &router,
+            "idle-expired@example.com",
+            "00000000-0000-4000-8000-000000000781",
+        )
+        .await;
+        expire_session_idle(&pool, "idle-expired@example.com").await;
+        let idle_expired_response = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                "/v1/session",
+                &cookie_pair(&idle_expired_cookie),
+            ))
+            .await
+            .expect("idle expired session request returns a response");
+        assert_eq!(idle_expired_response.status(), http::StatusCode::OK);
+        assert!(idle_expired_response.headers().get("set-cookie").is_some());
+        assert_eq!(
+            response_json(idle_expired_response).await["authenticated"],
+            false
+        );
+        assert_session_revoked(&pool, "idle-expired@example.com").await;
+
+        let absolute_expired_cookie = register_account_and_return_set_cookie(
+            &router,
+            "absolute-expired@example.com",
+            "00000000-0000-4000-8000-000000000782",
+        )
+        .await;
+        expire_session_absolute(&pool, "absolute-expired@example.com").await;
+        let absolute_expired_response = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                "/v1/session",
+                &cookie_pair(&absolute_expired_cookie),
+            ))
+            .await
+            .expect("absolute expired session request returns a response");
+        assert_eq!(absolute_expired_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            response_json(absolute_expired_response).await["authenticated"],
+            false
+        );
+        assert_session_revoked(&pool, "absolute-expired@example.com").await;
+
+        let revoked_device_cookie = register_account_and_return_set_cookie(
+            &router,
+            "revoked-device@example.com",
+            "00000000-0000-4000-8000-000000000783",
+        )
+        .await;
+        revoke_device(&pool, "revoked-device@example.com").await;
+        let revoked_device_response = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                "/v1/session",
+                &cookie_pair(&revoked_device_cookie),
+            ))
+            .await
+            .expect("revoked device session request returns a response");
+        assert_eq!(revoked_device_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            response_json(revoked_device_response).await["authenticated"],
+            false
+        );
+        assert_session_revoked(&pool, "revoked-device@example.com").await;
+
+        let refresh_cap_cookie = register_account_and_return_set_cookie(
+            &router,
+            "refresh-cap@example.com",
+            "00000000-0000-4000-8000-000000000784",
+        )
+        .await;
+        cap_session_absolute_soon(&pool, "refresh-cap@example.com").await;
+        let refresh_cap_response = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                "/v1/session",
+                &cookie_pair(&refresh_cap_cookie),
+            ))
+            .await
+            .expect("refresh cap session request returns a response");
+        assert_eq!(refresh_cap_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            response_json(refresh_cap_response).await["authenticated"],
+            true
+        );
+        assert_idle_refresh_was_capped_at_absolute(&pool, "refresh-cap@example.com").await;
+
+        let csrf_null_cookie = register_account_and_return_set_cookie(
+            &router,
+            "csrf-null@example.com",
+            "00000000-0000-4000-8000-000000000785",
+        )
+        .await;
+        let csrf_null_cookie = cookie_pair(&csrf_null_cookie);
+        let random_csrf = encode_base64url(&[0x77; 32]);
+        let csrf_null_logout_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/auth/logout",
+                "{}",
+                &csrf_null_cookie,
+                &random_csrf,
+            ))
+            .await
+            .expect("csrf null logout request returns a response");
+        assert_eq!(
+            csrf_null_logout_response.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            session_count_for_login(&pool, "csrf-null@example.com").await,
+            1
+        );
+
+        let origin_cookie = register_account_and_return_set_cookie(
+            &router,
+            "origin-mismatch@example.com",
+            "00000000-0000-4000-8000-000000000786",
+        )
+        .await;
+        let origin_cookie = cookie_pair(&origin_cookie);
+        let origin_csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", &origin_cookie))
+            .await
+            .expect("origin csrf request returns a response");
+        let origin_csrf_body = response_json(origin_csrf_response).await;
+        let origin_csrf = origin_csrf_body["csrf_token"]
+            .as_str()
+            .expect("origin csrf token is present");
+        let origin_mismatch_logout_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_csrf_and_origin(
+                "/v1/auth/logout",
+                "{}",
+                &origin_cookie,
+                origin_csrf,
+                "app.example.test",
+                "https://evil.example.test",
+            ))
+            .await
+            .expect("origin mismatch logout request returns a response");
+        assert_eq!(
+            origin_mismatch_logout_response.status(),
+            http::StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            session_count_for_login(&pool, "origin-mismatch@example.com").await,
+            1
+        );
+    }
+
     fn json_request(uri: &str, body: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
@@ -876,6 +1269,95 @@ mod tests {
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
             .expect("test request builds")
+    }
+
+    fn json_request_with_cookie(uri: &str, body: &str, cookie: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("cookie", cookie)
+            .body(Body::from(body.to_string()))
+            .expect("test request with cookie builds")
+    }
+
+    fn json_request_with_cookie_and_csrf(
+        uri: &str,
+        body: &str,
+        cookie: &str,
+        csrf_token: &str,
+    ) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("cookie", cookie)
+            .header("x-pv-csrf", csrf_token)
+            .body(Body::from(body.to_string()))
+            .expect("test request with cookie and csrf builds")
+    }
+
+    fn json_request_with_cookie_csrf_and_fetch_site(
+        uri: &str,
+        body: &str,
+        cookie: &str,
+        csrf_token: &str,
+        fetch_site: &str,
+    ) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("cookie", cookie)
+            .header("x-pv-csrf", csrf_token)
+            .header("sec-fetch-site", fetch_site)
+            .body(Body::from(body.to_string()))
+            .expect("test request with cookie csrf and fetch site builds")
+    }
+
+    fn json_request_with_cookie_csrf_and_origin(
+        uri: &str,
+        body: &str,
+        cookie: &str,
+        csrf_token: &str,
+        host: &str,
+        origin: &str,
+    ) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .header("cookie", cookie)
+            .header("x-pv-csrf", csrf_token)
+            .header("host", host)
+            .header("origin", origin)
+            .body(Body::from(body.to_string()))
+            .expect("test request with cookie csrf and origin builds")
+    }
+
+    fn get_request(uri: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(Body::empty())
+            .expect("test GET request builds")
+    }
+
+    fn get_request_with_cookie(uri: &str, cookie: &str) -> Request<Body> {
+        Request::builder()
+            .method("GET")
+            .uri(uri)
+            .header("cookie", cookie)
+            .body(Body::empty())
+            .expect("test GET request with cookie builds")
+    }
+
+    fn cookie_pair(set_cookie: &str) -> String {
+        set_cookie
+            .split(';')
+            .next()
+            .expect("set-cookie has a cookie pair")
+            .to_string()
     }
 
     async fn db_test_guard() -> MutexGuard<'static, ()> {
@@ -1090,11 +1572,234 @@ mod tests {
         assert_eq!(audit_events, 1);
     }
 
+    async fn register_account_and_return_set_cookie(
+        router: &axum::Router,
+        login_handle: &str,
+        vault_id: &str,
+    ) -> String {
+        let start_response = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/register/start",
+                &format!(
+                    r#"{{
+                    "login_handle":"{login_handle}",
+                    "auth_protocol":"derived-auth-v1"
+                }}"#
+                ),
+            ))
+            .await
+            .expect("register start returns a response");
+        assert_eq!(start_response.status(), http::StatusCode::OK);
+        let start_body = response_json(start_response).await;
+        let registration_id = start_body["registration_id"]
+            .as_str()
+            .expect("registration id is present");
+
+        let finish_request = format!(
+            r#"{{
+                "registration_id":"{registration_id}",
+                "auth_protocol":"derived-auth-v1",
+                "auth_stored_key":"{auth_stored_key}",
+                "auth_server_key":"{auth_server_key}",
+                "encrypted_account_keyset":{{
+                    "crypto_version":"account-keyset-v1",
+                    "key_id":"user-key-v1",
+                    "nonce":"{account_keyset_nonce}",
+                    "ciphertext":"{account_keyset_ciphertext}"
+                }},
+                "initial_vault":{{
+                    "vault_id":"{vault_id}",
+                    "encrypted_vault_key":{{
+                        "crypto_version":"vault-key-wrap-v1",
+                        "key_id":"user-key-v1",
+                        "nonce":"{vault_key_nonce}",
+                        "ciphertext":"{vault_key_ciphertext}"
+                    }}
+                }},
+                "device":{{
+                    "label":"Firefox on laptop",
+                    "client_type":"browser",
+                    "public_metadata":{{"platform_hint":"web"}}
+                }}
+            }}"#,
+            account_keyset_nonce = encode_base64url(&[0x11; 12]),
+            account_keyset_ciphertext = encode_base64url(&[0x22; 48]),
+            vault_key_nonce = encode_base64url(&[0x33; 12]),
+            vault_key_ciphertext = encode_base64url(&[0x44; 48]),
+            auth_stored_key = encode_base64url(&[0x55; 32]),
+            auth_server_key = encode_base64url(&[0x66; 32])
+        );
+
+        let finish_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/register/finish", &finish_request))
+            .await
+            .expect("register finish returns a response");
+        assert_eq!(finish_response.status(), http::StatusCode::CREATED);
+        finish_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("register finish sets a session cookie")
+            .to_string()
+    }
+
+    async fn assert_csrf_hash_persisted(
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        csrf_token: &[u8],
+    ) {
+        let expected_hash = tokens::sha256_verifier(csrf_token);
+        let stored_hash: Vec<u8> = sqlx::query_scalar(
+            "
+            SELECT s.csrf_token_hash
+            FROM sessions s
+            JOIN accounts a ON a.id = s.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("csrf hash query succeeds");
+        assert_eq!(stored_hash, expected_hash);
+        assert_ne!(stored_hash, csrf_token);
+    }
+
     async fn account_count(pool: &sqlx::PgPool) -> i64 {
         sqlx::query_scalar("SELECT COUNT(*) FROM accounts")
             .fetch_one(pool)
             .await
             .expect("account count query succeeds")
+    }
+
+    async fn session_count(pool: &sqlx::PgPool) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+            .fetch_one(pool)
+            .await
+            .expect("session count query succeeds")
+    }
+
+    async fn session_count_for_login(pool: &sqlx::PgPool, login_handle: &str) -> i64 {
+        sqlx::query_scalar(
+            "
+            SELECT COUNT(*)
+            FROM sessions s
+            JOIN accounts a ON a.id = s.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("session count by login query succeeds")
+    }
+
+    async fn expire_session_idle(pool: &sqlx::PgPool, login_handle: &str) {
+        update_session_time_state(
+            pool,
+            login_handle,
+            "now() - interval '1 minute'",
+            "now() + interval '1 hour'",
+            "now() - interval '1 minute'",
+        )
+        .await;
+    }
+
+    async fn expire_session_absolute(pool: &sqlx::PgPool, login_handle: &str) {
+        update_session_time_state(
+            pool,
+            login_handle,
+            "now() - interval '1 minute'",
+            "now() - interval '1 minute'",
+            "now() + interval '1 hour'",
+        )
+        .await;
+    }
+
+    async fn cap_session_absolute_soon(pool: &sqlx::PgPool, login_handle: &str) {
+        update_session_time_state(
+            pool,
+            login_handle,
+            "now() + interval '1 minute'",
+            "now() + interval '5 minutes'",
+            "now() + interval '1 minute'",
+        )
+        .await;
+    }
+
+    async fn update_session_time_state(
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        idle_expression: &str,
+        absolute_expression: &str,
+        expires_expression: &str,
+    ) {
+        let sql = format!(
+            "
+            UPDATE sessions s
+            SET idle_expires_at = {idle_expression},
+                absolute_expires_at = {absolute_expression},
+                expires_at = {expires_expression}
+            FROM accounts a
+            WHERE a.id = s.account_id
+              AND a.login_handle_normalized = $1
+            "
+        );
+        sqlx::query(&sql)
+            .bind(login_handle)
+            .execute(pool)
+            .await
+            .expect("session time state update succeeds");
+    }
+
+    async fn revoke_device(pool: &sqlx::PgPool, login_handle: &str) {
+        sqlx::query(
+            "
+            UPDATE devices d
+            SET revoked_at = now()
+            FROM accounts a
+            WHERE a.id = d.account_id
+              AND a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .execute(pool)
+        .await
+        .expect("device revoke update succeeds");
+    }
+
+    async fn assert_session_revoked(pool: &sqlx::PgPool, login_handle: &str) {
+        let revoked: bool = sqlx::query_scalar(
+            "
+            SELECT s.revoked_at IS NOT NULL
+            FROM sessions s
+            JOIN accounts a ON a.id = s.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("session revoked query succeeds");
+        assert!(revoked);
+    }
+
+    async fn assert_idle_refresh_was_capped_at_absolute(pool: &sqlx::PgPool, login_handle: &str) {
+        let capped: bool = sqlx::query_scalar(
+            "
+            SELECT s.idle_expires_at = s.absolute_expires_at
+            FROM sessions s
+            JOIN accounts a ON a.id = s.account_id
+            WHERE a.login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("session cap query succeeds");
+        assert!(capped);
     }
 
     async fn assert_auth_start_rate_limit(router: &axum::Router) {
