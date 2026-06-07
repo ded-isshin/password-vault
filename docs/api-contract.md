@@ -84,9 +84,38 @@ later ADR.
 - `GET /v1/vaults/{vault_id}/sync`
 - `POST /v1/vaults/{vault_id}/items`
 - `POST /v1/vaults/{vault_id}/items/{item_id}/revisions`
-- `DELETE /v1/vaults/{vault_id}/items/{item_id}`
 
 Item payloads are encrypted client-side. The API stores ciphertext and allowed sync metadata only.
+
+Write requests for item create, revision create, and delete must include:
+
+- `base_head_seq`
+- `base_head_hash`
+- `new_head_hash`
+- `change_mac`
+
+Revision-create and deletion requests must also include `base_revision_seq`.
+
+Deletion is represented as a signed deletion revision through
+`POST /v1/vaults/{vault_id}/items/{item_id}/revisions` with `operation=delete`. The MVP should not
+use a bare `DELETE` endpoint because the client must authenticate the deletion change.
+
+Sync responses must include:
+
+- `from_head`
+- `to_head`
+- ordered encrypted changes with each change's `head_seq`, `previous_head_hash`, `head_hash`, and
+  `change_mac`
+- all fields required to recompute `change_mac`, including operation, item/revision identifiers,
+  base revision sequence, base head, key ID, crypto version, and envelope hash
+
+The backend checks authorization and optimistic concurrency. The unlocked client verifies the
+client-keyed change MACs and state hash chain before trusting or decrypting returned item envelopes.
+
+Stale writes return `409 Conflict` with a generic conflict code and the current visible vault head.
+Sync requests include both sequence and hash so a stale or forked cursor can return `409 Conflict`.
+Client-side rollback/fork detection must be represented as a local client error state; it is not
+resolved by the backend.
 
 ### Audit Events
 
@@ -102,5 +131,5 @@ codes, or private infrastructure details.
 - Exact TOTP replay and rate-limit behavior.
 - Exact encrypted item payload format.
 - Exact optimistic concurrency and conflict response shape.
+- Exact canonical encoding for envelope hashes, `change_mac`, and head-hash inputs.
 - Whether OpenAPI or another typed contract format is the first machine-readable source of truth.
-
