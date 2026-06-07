@@ -43,6 +43,10 @@ Password Vault still needs one of these access paths:
 Do not publish Password Vault through a broad reverse proxy until `/metrics` is either on a separate
 internal listener or blocked by the edge/ingress layer.
 
+Self-signed TLS is acceptable for operator-only Grafana/Argo preview paths, but it is not acceptable
+for a password-manager user experience. A CA-valid certificate, or a deliberately trusted internal
+CA for a private preview, is a precondition before real users or real secrets.
+
 ## PostgreSQL direction
 
 The current single-replica PostgreSQL is acceptable only for preview and disposable MVP testing.
@@ -58,6 +62,7 @@ There is no architectural conflict with another product database as long as each
 
 The stable direction is CloudNativePG:
 
+- install and manage the CloudNativePG operator through the infrastructure GitOps platform layer;
 - three PostgreSQL instances;
 - one primary plus two hot standbys;
 - pods spread across worker nodes;
@@ -86,6 +91,11 @@ PostgreSQL 18 is the preferred target for a new CloudNativePG-managed cluster if
 operator and operand image catalog support it. Do not upgrade the current single-instance runtime by
 blindly changing the image tag.
 
+Replica count does not replace backup. Three instances on node-local storage can survive a worker
+failure, but they do not protect against physical host loss, operator mistakes, bad migrations, or
+logical corruption. Off-node encrypted backups and restore drills are a higher priority than claiming
+HA from replicas alone.
+
 ## Migration policy
 
 Database migrations are not PostgreSQL upgrades. They are application schema versioning.
@@ -107,6 +117,11 @@ Stable policy:
 - require backup/restore readiness before risky or destructive migrations.
 
 `runMigrationsOnStartup` remains a preview/bootstrap shortcut only.
+
+SQLx migrations use a database-side migration ledger and locking, so the main risk is not concurrent
+startup corruption. The stable-production risk is rollout coupling: a bad migration can block or
+crash all new API pods during rollout. A GitOps migration Job should run first, then API pods should
+start with startup migrations disabled.
 
 ## Technical observability
 
@@ -131,6 +146,10 @@ Recommended next low-cardinality metrics:
 - TOTP verification outcomes by phase and outcome.
 - Vault item create/update/delete/sync counters after vault CRUD exists.
 - Sync conflict/retry counters after sync exists.
+
+The current stack is VictoriaMetrics with `vmalert` and VMAlertmanager, not vanilla Prometheus.
+Dashboard queries can use PromQL, but alert resources should be expressed as VictoriaMetrics
+`VMRule` objects in the infrastructure repository.
 
 ## Product and business observability
 
@@ -187,6 +206,9 @@ Start with simple, actionable alerts:
 - No application traffic or no metrics when traffic is expected.
 - Version skew after rollout.
 
+Alerting is not complete until VMAlertmanager has a real notification receiver. A blackhole or
+placeholder receiver is useful for testing configuration shape only; it is not operational alerting.
+
 ## Stabilization backlog
 
 1. Add Password Vault edge HTTPS route with `/metrics` protected.
@@ -195,12 +217,16 @@ Start with simple, actionable alerts:
 4. Implement browser-side crypto/unlock and real app shell.
 5. Implement vault item CRUD and sync.
 6. Replace single PostgreSQL `StatefulSet` with CloudNativePG.
-7. Add WAL archiving, scheduled base backups, and restore drill.
+7. Add off-node encrypted WAL archiving, scheduled base backups, and restore drill.
 8. Replace startup migrations with a controlled migration Job.
 9. Add namespace NetworkPolicy/RBAC hardening.
 10. Extend metrics, dashboards, and VMRule alerts to cover technical and product signals.
 11. Extend k6 scenarios for registration/MFA funnel, soak, spike, and rollout-under-load.
 12. Run a public-safety review before any broader public exposure.
+
+The CloudNativePG CRDs may exist in a cluster from previous bootstrap, but that is not the same as a
+GitOps-managed operator and product database cluster. Treat the operator installation and ownership
+model as an explicit platform task.
 
 ## Anti-waste gate
 
