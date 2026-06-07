@@ -211,8 +211,8 @@ Outputs:
 - Initial CI for Rust, TypeScript, docs, YAML, and secret-pattern checks.
 
 Entry gate: choose a build/test environment for Rust before #14. Local `rustc` and `cargo` are not
-currently installed, so the project needs an approved local toolchain install, dev container, or
-container/CI-based build path.
+currently installed. The selected MVP default is container/CI-based Rust builds, documented in
+[Development Environment](development.md).
 
 Security constraint: product scaffold must not create a fake auth protocol just to move faster.
 
@@ -329,9 +329,8 @@ MVP validation must include:
 - OPAQUE may be correct architecturally but impractical if browser/server library maturity is not
   sufficient. Current default remains derived-auth-key until #24 proves OPAQUE practical.
 - Local Rust tooling is not currently available on the mini-PC: `rustc` and `cargo` were not found
-  during the initial implementation-readiness check. We need either an approved local Rust toolchain
-  installation, a dev container, or CI/container-based builds before Rust implementation can be
-  validated locally.
+  during the initial implementation-readiness check. The MVP default is container/CI-based builds;
+  a host Rust installation remains a separate approval point.
 - Browser-delivered JavaScript remains a residual risk for a web password manager.
 - Argon2id in browser likely introduces a WASM dependency that needs supply-chain review.
 - TOTP seeds are server-owned secrets and must be protected separately from user vault data.
