@@ -57,15 +57,16 @@ MVP policy:
 - seed is displayed once during enrollment as QR/manual code;
 - default TOTP profile is SHA1, 6 digits, 30 second period, `T0 = 0`;
 - seed is stored encrypted with application-level AEAD under a runtime key;
-- `PV_TOTP_SEED_KEY_B64` and `PV_TOTP_SEED_KEY_ID` are runtime secrets, never repository content;
-- stored seed metadata includes key ID and AEAD profile for future rotation;
+- `PV_TOTP_SEED_KEY_B64` is a runtime secret, never repository content;
+- stored seed metadata includes key ID `app-totp-seed-key-v1` and AEAD profile
+  `xchacha20poly1305-v1` for future rotation;
 - Vault/OpenBao Transit or another KMS path is a future infrastructure/platform decision.
 
 The provisioning URI follows the Google Authenticator `otpauth://totp/...` format for the MVP
 browser flow.
 
-Pending enrollment expires after 10 minutes. A pending factor is not usable for login until
-confirmation succeeds.
+Pending enrollment is bound to the setup/recovery session and its idle/absolute expiry. A pending
+factor is not usable for login until confirmation succeeds.
 
 ## Login Flow
 

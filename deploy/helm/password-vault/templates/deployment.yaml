@@ -78,6 +78,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.syntheticMetadata.keySecret.name }}
                   key: {{ .Values.syntheticMetadata.keySecret.key }}
+            - name: PV_TOTP_SEED_KEY_B64
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.totpSeed.keySecret.name }}
+                  key: {{ .Values.totpSeed.keySecret.key }}
           readinessProbe:
             httpGet:
               path: /readyz

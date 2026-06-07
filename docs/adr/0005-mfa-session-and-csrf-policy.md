@@ -52,8 +52,10 @@ Runtime secret direction:
 
 ```text
 PV_TOTP_SEED_KEY_B64=<base64url 32-byte key>
-PV_TOTP_SEED_KEY_ID=<operator-chosen key id>
 ```
+
+The MVP implementation stores key id `app-totp-seed-key-v1` with rows encrypted by this runtime key.
+Future key rotation can introduce operator-selected active/retired key IDs.
 
 Vault/OpenBao Transit or another KMS may replace application-level AEAD later, but that is a
 platform decision in the infrastructure repository. Vault/OpenBao must not be used to decrypt user

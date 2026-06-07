@@ -135,8 +135,8 @@ unwrapped vault key to reach the backend.
 Implementation note: the first runtime registration slice implements `register/finish` as one
 transaction that consumes the registration challenge, creates the account, stores encrypted account
 keyset metadata, creates the initial vault, stores the encrypted vault key wrap, creates the device
-record, and creates a setup session in `mfa_enrollment_required` state. CSRF token issuance remains a
-later `GET /v1/csrf` slice.
+record, and creates a setup session in `mfa_enrollment_required` state. Session inspection, CSRF
+issuance, logout, and TOTP enrollment/confirmation are now implemented as follow-up slices.
 
 Registration must not become a login-handle enumeration endpoint. In the MVP, duplicate
 `register/start` requests return the same `200` response shape as new-handle requests and create a
@@ -229,6 +229,11 @@ server creates post-MFA server session
 
 TOTP seed protection is server-owned secret management and is defined by
 [ADR 0005](../adr/0005-mfa-session-and-csrf-policy.md). TOTP does not affect vault encryption.
+
+Implementation note: setup-session TOTP enrollment endpoints are implemented. Enrollment start
+creates a pending encrypted seed under `PV_TOTP_SEED_KEY_B64`; confirmation verifies the submitted
+code, returns one-time recovery codes, rotates the session token, and upgrades the session to
+`mfa_verified`. Login-finish and login-time TOTP verification remain planned.
 
 ## Session Flow
 

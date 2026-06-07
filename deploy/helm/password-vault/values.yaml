@@ -31,6 +31,11 @@ syntheticMetadata:
     name: password-vault-auth
     key: synthetic-metadata-key-b64
 
+totpSeed:
+  keySecret:
+    name: password-vault-auth
+    key: totp-seed-key-b64
+
 resources:
   requests:
     cpu: 100m
