@@ -28,7 +28,6 @@ item contents.
 
 - user can register
 - user can log in
-- user receives and can use an account secret key if two-secret key derivation is accepted for MVP
 - user can enroll and verify TOTP
 - user can recover from lost TOTP using recovery codes
 - user can create encrypted vault items
@@ -42,7 +41,7 @@ item contents.
 ## Current Design Blockers
 
 - login and key-derivation protocol
-- account secret key UX and recovery implications
+- future account secret key UX and recovery implications, if accepted later
 - reviewed browser Argon2id/WASM dependency and concrete KDF parameters
 - cryptographic item format
 - browser-delivered JavaScript residual risk
@@ -56,6 +55,7 @@ item contents.
 ## Planned Post-MVP
 
 - WebAuthn/passkeys
+- 1Password-style account secret key / emergency kit if accepted after UX and recovery review
 - zero-knowledge-compatible vault recovery key if not included in MVP
 - KeePass/KDBX import
 - organizations

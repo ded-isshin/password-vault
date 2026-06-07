@@ -70,8 +70,8 @@ MVP recommendation: use this as the first implementation path, with strict ADR c
 Minimum guardrails:
 
 - one expensive password KDF per unlock/login attempt;
-- consider a high-entropy account secret key mixed into the KDF, similar to 1Password's two-secret
-  key derivation model;
+- keep high-entropy account secret key as an optional future hardening path, similar to 1Password's
+  two-secret key derivation model;
 - HKDF domain separation for auth and vault-unlock material;
 - server stores only a slow server-side hash of the client-derived auth secret;
 - server never stores raw client-derived auth material;
@@ -132,8 +132,7 @@ be added as MFA first and possibly as a login method later.
 MVP:
 
 - derived-auth-key login;
-- account secret key as the recommended additional input to the KDF, pending final UX and recovery
-  decision;
+- account secret key deferred as an optional hardening path pending final UX and recovery decision;
 - TOTP as required MFA for the first public web MVP;
 - opaque server sessions stored server-side;
 - client-side vault unlock and encryption;
@@ -171,9 +170,10 @@ Costs:
 - web storage of the account secret key is a local-device risk;
 - losing both existing devices and the account secret key can make vault data unrecoverable.
 
-MVP recommendation: include the account secret key in the protocol design and ADR. The UX can start
-simple: generate it at registration, show it once, require it for first login on a new browser, and
-allow a user-controlled "remember this device" option only after local-storage risk is documented.
+Current recommendation: do not require the account secret key for the first MVP. Keep it documented
+as a future hardening option. If accepted later, the UX can start simple: generate it at
+registration, show it once, require it for first login on a new browser, and allow a user-controlled
+"remember this device" option only after local-storage risk is documented.
 
 ## Tests Required Before Implementation Is Trusted
 
@@ -199,7 +199,7 @@ allow a user-controlled "remember this device" option only after local-storage r
 - Exact HKDF labels and key hierarchy.
 - Exact server auth verifier storage format.
 - Whether TOTP is mandatory for MVP accounts.
-- Whether account secret key / two-secret key derivation is mandatory for MVP accounts.
+- Whether account secret key / two-secret key derivation is accepted later as optional hardening.
 - Whether WebAuthn is MFA-only first or also a future login method.
 - Device enrollment model.
 - Account recovery versus vault recovery boundary.

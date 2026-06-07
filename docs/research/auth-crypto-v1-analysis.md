@@ -35,9 +35,9 @@ The practical MVP fallback is a derived-auth-key flow:
 - avoid storing a database value that enables cheap offline guessing after DB compromise;
 - document and test every protocol step.
 
-The current recommended strengthening is to add a high-entropy account secret key to the KDF input.
-This follows the same security idea as 1Password-style two-secret key derivation: a stolen server
-database should not be enough for normal password-only offline guessing.
+Future hardening option: add a high-entropy account secret key to the KDF input. This follows the
+same security idea as 1Password-style two-secret key derivation, but it adds onboarding and recovery
+complexity and is not a first-MVP requirement unless a later ADR accepts it.
 
 Simple password-over-TLS is rejected for the public MVP direction. It may be easy, but it weakens
 the product's zero-knowledge posture and increases logging/mishandling risk.
@@ -51,6 +51,9 @@ vectors, supply-chain controls, and bundle-integrity review.
 If the project falls back to WebCrypto-native PBKDF2 for an early prototype, that must be explicitly
 documented as a tradeoff and not represented as the final security target.
 
+PBKDF2 must not be a silent production fallback. Argon2id/WASM is the production target unless a
+future ADR explicitly accepts a degraded mode.
+
 ### Item Encryption
 
 For the browser MVP, AES-GCM is the likely first AEAD candidate because it is available through
@@ -60,7 +63,7 @@ WebCrypto. The final crypto ADR must define:
 - vault key wrapping;
 - item payload format;
 - AEAD algorithm;
-- nonce generation, uniqueness guarantees, per-key encryption budget, and rekey trigger;
+- per-revision content-key derivation or another explicit nonce-budget/rekey strategy;
 - associated data;
 - version fields;
 - migration strategy.
@@ -98,8 +101,8 @@ message shapes, database columns, test vectors, threat analysis, and explicit re
 - Which browser Argon2id implementation, if any?
 - AES-GCM versus another AEAD for non-browser clients later?
 - Exact key hierarchy and wrapping strategy.
-- Whether the MVP supports multiple devices at launch.
-- Whether account secret key / two-secret key derivation is mandatory in MVP.
+- Exact pre-login KDF metadata behavior without user enumeration.
+- Account secret key / two-secret key derivation as future optional hardening.
 - How much metadata may remain plaintext for sync and UI.
 
 ## Sources

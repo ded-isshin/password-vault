@@ -46,7 +46,8 @@ zero-knowledge.
 
 Current recommendation:
 
-- derived-auth-key login with account secret key for MVP, OPAQUE later after library review;
+- derived-auth-key login for MVP, OPAQUE later after library review;
+- account secret key only as future optional hardening after UX and recovery review;
 - Argon2id/WASM target with PBKDF2 fallback only by explicit decision;
 - CloudNativePG synchronous replication with one synchronous standby and `dataDurability: required`
   for real user data;

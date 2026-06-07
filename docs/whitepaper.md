@@ -17,8 +17,8 @@ The target security model is zero-knowledge for vault item contents:
 - the server stores ciphertext and synchronization metadata;
 - the server does not receive plaintext vault item contents;
 - the server does not receive or persist unwrapped user vault keys;
-- an account secret key is recommended as a second KDF input so a stolen database is not enough for
-  normal password-only offline guessing;
+- a future account secret key may be added as a second KDF input so a stolen database is less useful
+  for password-only offline guessing, but it is not required for the first MVP;
 - TOTP protects account login, not vault decryption;
 - forgotten vault unlock material is unrecoverable unless a future zero-knowledge recovery design is
   approved.
@@ -173,8 +173,9 @@ Account recovery codes are MFA recovery codes. They should let a user recover fr
 device and re-enroll MFA. They must not silently become a vault decrypt path.
 
 The product should decide separately whether to include a zero-knowledge-compatible vault recovery
-key in MVP. If not included, losing the vault unlock secret or account secret key means losing vault
-access.
+key in MVP. If not included, losing the vault unlock secret means losing vault access. If a future
+account secret key is accepted, losing it may also affect vault access depending on the recovery
+design.
 
 See [Auth And MFA Lifecycle](auth-mfa-lifecycle.md).
 
@@ -235,8 +236,8 @@ TOTP seed encryption. It must not be the database or decrypt service for user va
 
 1. Threat model v1.
 2. Auth/login and key-derivation protocol.
-   This includes deciding whether account secret key / two-secret key derivation is mandatory in
-   MVP.
+   This includes deciding whether account secret key / two-secret key derivation is accepted later
+   as optional hardening.
 3. Browser KDF and crypto v1 payload format.
 4. TOTP seed custody and MFA hardening.
 5. PostgreSQL HA, replication mode, backup, and restore design.

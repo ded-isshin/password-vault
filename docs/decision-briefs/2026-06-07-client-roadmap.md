@@ -50,7 +50,7 @@ ships only a browser client.
 Recommended first-device model:
 
 - user can log in from more than one browser;
-- each browser derives the required unlock material from the user's password and account secret key;
+- each browser derives the required unlock material from the user's password and KDF metadata;
 - server stores encrypted vault key wraps, never plaintext vault keys;
 - server stores sessions and audit events separately from vault unlock state;
 - sync uses `change_seq` cursors and immutable item revisions.
