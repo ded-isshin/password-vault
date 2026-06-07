@@ -158,7 +158,7 @@ server-owned TOTP seed encryption. It must not decrypt user vault item payloads.
 ## Sources
 
 - https://cloudnative-pg.io/docs/1.29/architecture/
-- https://cloudnative-pg.io/docs/1.27/replication/
+- https://cloudnative-pg.io/docs/1.29/replication/
 - https://cloudnative-pg.io/docs/1.29/scheduling/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/

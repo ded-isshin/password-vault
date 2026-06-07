@@ -16,8 +16,8 @@ clients of the same sync and encryption model, not separate products with separa
 Recommended baseline:
 
 - Auth/login: derived-auth-key MVP, OPAQUE as long-term candidate after implementation review.
-- Account secret key: recommended MVP strengthening to reduce password-only offline guessing risk
-  after database compromise, pending a final ADR and UX acceptance.
+- Account secret key: recommended second KDF input for MVP to reduce password-only offline guessing
+  risk after database compromise. The final ADR must define UX, recovery, and device onboarding.
 - Vault unlock: separate from login; local client unlock is required to decrypt vault items.
 - KDF: Argon2id in browser through a reviewed pinned WASM dependency as the target.
 - Key separation: one expensive KDF pass, then HKDF domain separation.
@@ -55,9 +55,9 @@ Decision: rejected for public MVP.
 
 #### Derived-Auth-Key Flow
 
-The browser derives authentication material locally from the user's password and, if accepted, an
-account secret key, then sends an auth secret or proof-like value to the backend. The backend treats
-this value as password-equivalent and stores only a slow server-side hash.
+The browser derives authentication material locally from the user's password and account secret key,
+then sends an auth secret or proof-like value to the backend. The backend treats this value as
+password-equivalent and stores only a slow server-side hash.
 
 The browser also derives separate unlock material for wrapping/unwrapping user vault keys. This
 separation is critical: compromising the auth database should not directly reveal vault item keys.
@@ -65,9 +65,9 @@ separation is critical: compromising the auth database should not directly revea
 Decision: recommended MVP path, but it still needs a full protocol spec before code.
 
 Recommended strengthening: generate a high-entropy account secret key during registration and never
-store it server-side in plaintext. This can make a stolen database less useful for password-only
-offline guessing, but it adds onboarding and recovery complexity and needs explicit ADR acceptance
-before implementation.
+store it server-side in plaintext. A stolen database should not be enough for normal password-only
+offline guessing. The cost is onboarding and recovery complexity, so the implementation ADR must
+define emergency-kit, new-device, and lost-secret behavior before code.
 
 The protocol must also define a safe pre-login metadata flow. The browser needs KDF salt and
 parameters before it can derive client-side auth material. A naive `GET /login-metadata?email=...`
@@ -102,8 +102,8 @@ sequenceDiagram
   participant API
   participant DB as PostgreSQL
 
-  User->>Browser: enter email + password (+ account secret key if accepted)
-  Browser->>Browser: Argon2id(password + optional account secret key, salt, params)
+  User->>Browser: enter email + password + account secret key
+  Browser->>Browser: Argon2id(password + account secret key, salt, params)
   Browser->>Browser: HKDF(auth) and HKDF(unlock)
   Browser->>API: login using client-derived auth secret
   API->>API: verify slow server-side hash
@@ -230,8 +230,8 @@ Meaning:
 - browser extension and iOS app become future clients of the same API and crypto format.
 
 For the first MVP, multiple browser sessions can unlock the same vault by deriving the same account
-unlock material from the user's password, optional account secret key, and KDF metadata. Strong
-per-device cryptographic enrollment can wait until WebAuthn/passkeys or native clients are designed.
+unlock material from the user's password, account secret key, and KDF metadata. Strong per-device
+cryptographic enrollment can wait until WebAuthn/passkeys or native clients are designed.
 
 This avoids redesigning the product when the Chrome extension arrives.
 
@@ -311,7 +311,7 @@ Product code should wait for these artifacts:
 
 - threat model v1;
 - auth/login protocol ADR with registration and login message shapes;
-- account secret key UX and recovery implications, if accepted in the MVP ADR;
+- account secret key UX and recovery implications;
 - pre-login salt and KDF-parameter delivery design, including user-enumeration behavior;
 - crypto v1 spec with KDF, HKDF labels, AEAD payload format, nonce/rekey rules, and tests;
 - Argon2id browser dependency review and concrete memory/time parameters;
@@ -337,7 +337,7 @@ Product code should wait for these artifacts:
 - https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
 - https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html
 - https://cheatsheetseries.owasp.org/cheatsheets/Key_Management_Cheat_Sheet.html
-- https://cloudnative-pg.io/docs/1.27/replication/
+- https://cloudnative-pg.io/docs/1.29/replication/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/
 - https://cloudnative-pg.io/docs/1.29/scheduling/

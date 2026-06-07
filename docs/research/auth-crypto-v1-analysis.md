@@ -35,9 +35,9 @@ The practical MVP fallback is a derived-auth-key flow:
 - avoid storing a database value that enables cheap offline guessing after DB compromise;
 - document and test every protocol step.
 
-Future hardening option: add a high-entropy account secret key to the KDF input. This follows the
+Recommended MVP hardening: add a high-entropy account secret key to the KDF input. This follows the
 same security idea as 1Password-style two-secret key derivation, but it adds onboarding and recovery
-complexity and is not a first-MVP requirement unless a later ADR accepts it.
+complexity, so the implementation ADR must define the UX before code.
 
 Simple password-over-TLS is rejected for the public MVP direction. It may be easy, but it weakens
 the product's zero-knowledge posture and increases logging/mishandling risk.
@@ -102,7 +102,7 @@ message shapes, database columns, test vectors, threat analysis, and explicit re
 - AES-GCM versus another AEAD for non-browser clients later?
 - Exact key hierarchy and wrapping strategy.
 - Exact pre-login KDF metadata behavior without user enumeration.
-- Account secret key / two-secret key derivation as future optional hardening.
+- Account secret key / two-secret key derivation UX and recovery behavior.
 - How much metadata may remain plaintext for sync and UI.
 
 ## Sources

@@ -41,7 +41,7 @@ item contents.
 ## Current Design Blockers
 
 - login and key-derivation protocol
-- future account secret key UX and recovery implications, if accepted later
+- account secret key UX, recovery, and new-device implications
 - reviewed browser Argon2id/WASM dependency and concrete KDF parameters
 - cryptographic item format
 - browser-delivered JavaScript residual risk
@@ -55,7 +55,6 @@ item contents.
 ## Planned Post-MVP
 
 - WebAuthn/passkeys
-- 1Password-style account secret key / emergency kit if accepted after UX and recovery review
 - zero-knowledge-compatible vault recovery key if not included in MVP
 - KeePass/KDBX import
 - organizations

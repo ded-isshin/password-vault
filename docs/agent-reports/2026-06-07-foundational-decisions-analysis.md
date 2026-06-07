@@ -14,8 +14,8 @@ Clarify the initial architecture discussion for `password-vault` before product 
 
 - Explained and documented the difference between login, session, and vault unlock.
 - Reconfirmed derived-auth-key flow as the MVP authentication candidate.
-- Moved account secret key / two-secret key derivation to future hardening instead of first-MVP
-  requirement.
+- Reconfirmed account secret key / two-secret key derivation as the recommended MVP baseline, with
+  UX, recovery, and new-device behavior still requiring a dedicated ADR before code.
 - Kept OPAQUE as a long-term candidate, not the immediate MVP default.
 - Reconfirmed Argon2id/WASM as the browser KDF target and PBKDF2 only as an explicitly approved
   prototype/degraded mode, not a silent fallback.
@@ -32,6 +32,7 @@ Clarify the initial architecture discussion for `password-vault` before product 
 - Clarified GitHub Project views and GitHub Flow usage.
 - Created GitHub issue #9 for multi-device client and browser-extension roadmap.
 - Added issue #9 to the public GitHub Project.
+- Moved closed issue #6 to `Done` in the public GitHub Project.
 - Added decision briefs for auth/crypto, clients, GitHub workflow, and PostgreSQL HA/backup.
 - Evaluated Claude Code's independent review and recorded accepted/rejected findings.
 
@@ -63,6 +64,7 @@ Clarify the initial architecture discussion for `password-vault` before product 
 - `gh issue create --title "[ADR]: Multi-device client and browser extension roadmap" ...`
 - `gh project item-add 2 --owner ded-isshin --url https://github.com/ded-isshin/password-vault/issues/9`
 - `gh project item-list 2 --owner ded-isshin --format json --limit 20`
+- `gh project field-list 2 --owner ded-isshin --format json`
 - `claude -p --permission-mode plan --tools Read --no-session-persistence --model opus --effort high ...`
 - `gh project item-edit ... --single-select-option-id 98236657`
 - `git diff --check`
@@ -149,7 +151,6 @@ Not tested:
 - Which object storage target will be used for backups?
 - Should Vault/OpenBao be adopted for app/TOTP secrets before or after MVP?
 - Which GitHub Project views should be created in the UI/API first?
-- Should closed issue #6 be moved to Done in the public Project?
 
 ## Next Steps
 

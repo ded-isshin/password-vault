@@ -18,8 +18,8 @@ Define a zero-knowledge vault cryptography design before implementation.
 
 ### Login And Key Derivation
 
-Working candidate: derived-auth-key MVP with a high-entropy account secret key, and OPAQUE as a
-future authentication-layer migration.
+Working candidate: derived-auth-key MVP with account secret key as the recommended second KDF input,
+and OPAQUE as a future authentication-layer migration.
 
 Rejected for public MVP: sending the master password to the server and hashing it there.
 
@@ -169,7 +169,7 @@ Open, but the recommended MVP default is conservative:
 - server-side test proving raw client auth secret is not stored
 - server-side rate-limit and anti-DoS tests around slow auth-secret hashing
 - pre-login metadata tests for constant-shape responses and non-enumeration behavior
-- account secret key or device-enrollment requirement only if approved in a future multi-device ADR
+- account secret key, emergency-kit, and new-device requirements
 - negative test that backend code cannot decrypt a stored item payload
 
 ## Sources

@@ -18,8 +18,9 @@ The MVP must not send the raw master password to the backend. The backend should
 authentication material derived on the client, and must store that value only behind a slow
 server-side password hash. Vault item payloads remain encrypted client-side.
 
-A 1Password-style account secret key is a future hardening option, not a first-MVP requirement,
-unless a dedicated ADR accepts the UX, onboarding, and recovery tradeoffs.
+A 1Password-style account secret key is the recommended MVP baseline. It reduces the value of a
+copied authentication database for normal password-only offline guessing. It also adds onboarding
+and recovery complexity, so the implementation ADR must define that UX before code.
 
 ## Industry Baseline
 
@@ -47,7 +48,8 @@ Use this direction for the implementation design:
 
 ```text
 user password
-  -> Argon2id(password, salt, params) -> master secret
+  + account secret key
+  -> Argon2id(combined input, salt, params) -> master secret
 
 master secret
   -> HKDF("password-vault/auth/v1") -> client auth secret
@@ -90,6 +92,19 @@ risk. For the MVP, the project should avoid being blocked by:
 
 The MVP key hierarchy should keep OPAQUE migration possible by keeping authentication separate from
 vault key wrapping.
+
+## Account Secret Key Direction
+
+Use a high-entropy account secret key as the recommended second input to the browser KDF for the
+MVP. The server must not store this secret in plaintext.
+
+Reason: a copied authentication database should not be enough for normal password-only offline
+guessing. This is a deliberate UX/security tradeoff similar to the two-secret direction used by
+mature password managers.
+
+Cost: new-device login requires the account secret key or a future approved recovery/enrollment
+flow. The implementation ADR must define emergency-kit display, local storage policy, recovery
+limits, and lost-secret behavior before code.
 
 ## Browser Crypto Constraints
 

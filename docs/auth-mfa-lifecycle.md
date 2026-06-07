@@ -26,8 +26,8 @@ user is prompted to enroll TOTP
 ```
 
 Open blocker: the exact login/key-derivation protocol is not finalized. The current MVP
-recommendation is derived-auth-key plus TOTP, with account secret key left as a future hardening
-option.
+recommendation is derived-auth-key plus TOTP, with account secret key as the recommended second KDF
+input after UX, recovery, and new-device behavior are defined.
 
 The final protocol must define when and how KDF salt and parameters are created, stored, and returned
 to the client. The login metadata endpoint must not reveal whether an account exists.

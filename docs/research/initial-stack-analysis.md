@@ -47,7 +47,7 @@ zero-knowledge.
 Current recommendation:
 
 - derived-auth-key login for MVP, OPAQUE later after library review;
-- account secret key only as future optional hardening after UX and recovery review;
+- account secret key as recommended second KDF input, with UX and recovery review before code;
 - Argon2id/WASM target with PBKDF2 fallback only by explicit decision;
 - CloudNativePG synchronous replication with one synchronous standby and `dataDurability: required`
   for real user data;
@@ -61,7 +61,7 @@ Current recommendation:
 - https://www.w3.org/TR/webcrypto/
 - https://www.rfc-editor.org/info/rfc6238/
 - https://cloudnative-pg.io/docs/1.29/architecture/
-- https://cloudnative-pg.io/docs/1.27/replication/
+- https://cloudnative-pg.io/docs/1.29/replication/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/
 - https://developer.hashicorp.com/vault/docs/about-vault/how-vault-works

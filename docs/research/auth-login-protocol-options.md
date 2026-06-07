@@ -70,7 +70,7 @@ MVP recommendation: use this as the first implementation path, with strict ADR c
 Minimum guardrails:
 
 - one expensive password KDF per unlock/login attempt;
-- keep high-entropy account secret key as an optional future hardening path, similar to 1Password's
+- use a high-entropy account secret key as the recommended second KDF input, similar to 1Password's
   two-secret key derivation model;
 - HKDF domain separation for auth and vault-unlock material;
 - server stores only a slow server-side hash of the client-derived auth secret;
@@ -170,10 +170,9 @@ Costs:
 - web storage of the account secret key is a local-device risk;
 - losing both existing devices and the account secret key can make vault data unrecoverable.
 
-Current recommendation: do not require the account secret key for the first MVP. Keep it documented
-as a future hardening option. If accepted later, the UX can start simple: generate it at
-registration, show it once, require it for first login on a new browser, and allow a user-controlled
-"remember this device" option only after local-storage risk is documented.
+Current recommendation: include the account secret key in the MVP protocol design. The UX can start
+simple: generate it at registration, show it once, require it for first login on a new browser, and
+allow a user-controlled "remember this device" option only after local-storage risk is documented.
 
 ## Tests Required Before Implementation Is Trusted
 

@@ -88,10 +88,10 @@ Do not implement simple password-over-TLS for the public MVP.
 Use a derived-auth-key design as the working MVP candidate, while keeping the key hierarchy
 independent enough that OPAQUE can replace the authentication layer later.
 
-Keep a high-entropy account secret key as a future hardening option, not a first-MVP requirement.
-It follows the same security idea as 1Password-style two-secret key derivation, but it changes UX,
-device onboarding, and recovery. The first MVP should not silently require it without a dedicated
-human-approved ADR.
+Use a high-entropy account secret key as the recommended second input to the browser KDF for the
+MVP. It follows the same security idea as 1Password-style two-secret key derivation, but it changes
+UX, device onboarding, and recovery. The first MVP must define that behavior in a dedicated
+human-approved ADR before implementation.
 
 OPAQUE remains the preferred long-term authentication protocol, but it should not be implemented
 until Rust and browser library maturity, interoperability, and test strategy are reviewed.
@@ -106,8 +106,7 @@ Working direction:
 - KDF target: Argon2id in the browser through a reviewed, pinned WASM dependency.
 - KDF fallback: PBKDF2-HMAC-SHA-256 through WebCrypto only as an explicitly approved prototype or
   degraded-mode decision; not as a silent production fallback.
-- KDF input target: user password for first MVP; account secret key remains a future hardening
-  option.
+- KDF input target: user password plus high-entropy account secret key.
 - Key separation: run one expensive password KDF, then use HKDF domain separation for
   authentication and vault-unlock material.
 - Server auth storage: any client-derived auth secret received by the server is treated as a
@@ -152,7 +151,8 @@ Required direction:
 
 ```text
 user password
-  -> Argon2id(password, salt, params) -> master secret
+  + account secret key
+  -> Argon2id(combined input, salt, params) -> master secret
 
 master secret
   -> HKDF("password-vault/auth/v1") -> client auth secret
@@ -219,8 +219,8 @@ TOTP design must include:
 Proposed, not final:
 
 - Derived-auth-key flow is the MVP recommended login candidate.
-- Account secret key / two-secret key derivation is a future hardening option, pending UX and
-  recovery acceptance.
+- Account secret key / two-secret key derivation is the recommended MVP baseline, pending final UX,
+  recovery, and new-device behavior.
 - OPAQUE is the preferred long-term authentication candidate after library review.
 - Simple password-over-TLS is not acceptable for the public MVP.
 - WebAuthn/passkeys are post-MVP authentication and MFA candidates, not the first MVP blocker.
@@ -243,7 +243,7 @@ Proposed, not final:
 - Server stores only a slow hash of received auth secret, not the raw auth secret.
 - Pre-login metadata response non-enumeration tests.
 - Server-side slow-hash rate-limit and anti-DoS tests.
-- If account secret key is added later, registration does not persist it server-side in plaintext.
+- Registration generates an account secret key and does not persist it server-side in plaintext.
 - AES-GCM round-trip and tamper rejection.
 - AES-GCM nonce uniqueness and rekey-budget tests.
 - Associated-data tamper rejection.

@@ -4,6 +4,10 @@ Date: 2026-06-07.
 
 Status: documentation and architecture follow-up for draft PR #8.
 
+Superseded note: later review reaffirmed `account secret key / two-secret key derivation` as the
+recommended MVP baseline, while requiring a dedicated ADR for UX, recovery, and new-device behavior
+before code.
+
 ## Goal
 
 Clarify authentication/login options, multi-device direction, PostgreSQL replication recommendation,
@@ -91,7 +95,7 @@ Rejected or deferred suggestions:
   https://agilebits.github.io/security-design/key-security-features.html
 - Bitwarden Security Whitepaper:
   https://bitwarden.com/help/bitwarden-security-white-paper/
-- CloudNativePG replication: https://cloudnative-pg.io/docs/1.27/replication/
+- CloudNativePG replication: https://cloudnative-pg.io/docs/1.29/replication/
 - CloudNativePG recovery: https://cloudnative-pg.io/docs/1.29/recovery/
 - Barman Cloud Plugin: https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/
 - GitHub Flow: https://docs.github.com/en/get-started/using-github/github-flow

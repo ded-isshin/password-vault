@@ -84,7 +84,7 @@ stateDiagram-v2
 ```mermaid
 flowchart LR
   P[User password] --> KDF[Client KDF]
-  SK[Future account secret key] -. optional hardening .-> KDF
+  SK[Account secret key] --> KDF
   KDF --> AUTH[Client auth secret]
   KDF --> UNLOCK[Vault unlock material]
   AUTH --> HASH[Server-side slow hash]
