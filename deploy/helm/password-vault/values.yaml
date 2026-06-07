@@ -12,6 +12,7 @@ imagePullSecrets: []
 replicaCount: 3
 
 service:
+  type: ClusterIP
   port: 8080
 
 config:

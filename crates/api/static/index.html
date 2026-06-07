@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Password Vault</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="intro" aria-label="Product status">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" role="img">
+              <path d="M16 3.8 6.8 7.1v7.1c0 6 3.8 11.6 9.2 14 5.4-2.4 9.2-8 9.2-14V7.1L16 3.8Z" />
+              <path d="M12.1 15.7 15 18.6l5.3-6" />
+            </svg>
+          </div>
+          <div>
+            <p class="eyebrow">Password Vault</p>
+            <h1>Secure challenge preview</h1>
+          </div>
+        </div>
+        <p class="intro-copy">
+          This MVP establishes a real authentication challenge with the API. Full sign-in,
+          sessions, and vault item storage are the next implementation step.
+        </p>
+        <div class="status-grid">
+          <div>
+            <span class="status-label">API</span>
+            <strong id="healthStatus">Checking...</strong>
+          </div>
+          <div>
+            <span class="status-label">Database</span>
+            <strong id="readyStatus">Checking...</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="auth-surface" aria-label="Authentication preview">
+        <div class="mode-tabs" role="tablist" aria-label="Authentication mode">
+          <button id="registerTab" class="mode-tab active" type="button" role="tab" aria-selected="true">
+            Create account
+          </button>
+          <button id="loginTab" class="mode-tab" type="button" role="tab" aria-selected="false">
+            Unlock
+          </button>
+        </div>
+
+        <form id="challengeForm" class="challenge-form">
+          <div class="form-heading">
+            <h2 id="formTitle">Create your vault</h2>
+            <p id="formCopy">
+              Start a server challenge and receive the KDF profile needed for client-side
+              key derivation.
+            </p>
+          </div>
+
+          <label for="loginHandle">Login handle</label>
+          <input
+            id="loginHandle"
+            name="loginHandle"
+            type="text"
+            autocomplete="username"
+            spellcheck="false"
+            placeholder="you@example.com"
+            required
+          />
+
+          <button id="submitButton" class="primary-action" type="submit">
+            Continue
+          </button>
+
+          <p id="statusMessage" class="status-message" role="status" aria-live="polite">
+            Your master password is never sent by this preview screen.
+          </p>
+        </form>
+
+        <section id="resultPanel" class="result-panel" hidden>
+          <div class="result-heading">
+            <h3>Challenge established</h3>
+            <span id="resultMode" class="result-pill">register/start</span>
+          </div>
+          <p>
+            The server returned public challenge metadata. The missing finish step is not
+            implemented yet, so this preview stops here.
+          </p>
+          <dl id="resultList" class="result-list"></dl>
+        </section>
+      </section>
+    </main>
+
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>
