@@ -9,3 +9,4 @@ They are used to explain tradeoffs in plain engineering terms before implementat
 - [Client and multi-device roadmap](2026-06-07-client-roadmap.md)
 - [GitHub workflow](2026-06-07-github-workflow.md)
 - [PostgreSQL HA and backup](2026-06-07-postgresql-ha-backup.md)
+- [Web UI design direction](2026-06-07-web-ui-design-direction.md)
