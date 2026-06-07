@@ -1,0 +1,17 @@
+[workspace]
+members = ["crates/api"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.dependencies]
+axum = "0.8.9"
+http = "1.4.0"
+serde = { version = "1.0.228", features = ["derive"] }
+tokio = { version = "1.52.3", features = ["macros", "net", "rt-multi-thread", "signal"] }
+tower = { version = "0.5.2", features = ["util"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

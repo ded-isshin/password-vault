@@ -1,10 +1,11 @@
 # Architecture
 
-Status: bootstrap draft.
+Status: MVP architecture draft.
 
 ## Current State
 
-No product code exists yet. This document records the intended architecture direction.
+The repository now contains the first Rust API scaffold with health and readiness endpoints. Auth,
+crypto, database, frontend, Helm, and GitOps deployment implementation are not present yet.
 
 ## High-Level Architecture
 

@@ -1,6 +1,6 @@
 # Threat Model
 
-Status: v1 draft for web MVP. No product code exists yet.
+Status: v1 draft for web MVP. Product code is currently limited to the Rust API scaffold.
 
 ## Scope
 
