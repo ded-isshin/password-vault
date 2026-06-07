@@ -205,7 +205,8 @@ password-vault:item-revision:v1:<vault_id>:<item_id>:<revision_id>:<key_id>
 
 TOTP is a login factor only. It is not a vault encryption key.
 
-TOTP design must include:
+TOTP, recovery-code, session, and CSRF policy is accepted for MVP implementation planning in
+[ADR 0005](0005-mfa-session-and-csrf-policy.md). The implementation must include:
 
 - RFC 6238-compatible test vectors;
 - accepted time-step window;
@@ -234,10 +235,12 @@ Accepted for MVP planning:
 - AES-256-GCM is the web MVP AEAD target.
 - The MVP must be multi-device-capable in data model and protocol even if the first client is only
   the browser web app.
+- Use ADR 0005 for TOTP seed custody, recovery-code, session, and CSRF policy.
 
 ## Consequences
 
-- Product code should not start until the auth and crypto v1 design is accepted.
+- Auth/session/MFA product code should follow the accepted API contract, auth protocol direction,
+  and ADR 0005.
 - Data model details such as `vault_key_wraps` depend on the final key hierarchy.
 - TOTP seed custody is a server-owned secret-management decision, not a user-vault decrypt decision.
 - Browser-delivered JavaScript remains an accepted residual risk and must be mitigated, not hidden.

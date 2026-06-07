@@ -137,10 +137,10 @@ Threat focus:
 - TOTP replay and seed exposure.
 - CSRF and session fixation for cookie-authenticated APIs.
 
-Open blocker: #2 must choose the exact login message shape. A derived-auth-key-over-TLS flow can
-expose replayable password-equivalent auth material to a live compromised backend. A PAKE such as
-OPAQUE may reduce that risk but needs library and browser review. Until #2 decides, the live-backend
-auth-channel risk remains open.
+MVP direction: `derived-auth-v1` uses the `pv-scram-sha-256-v1` verifier/proof profile documented
+in [auth-protocol-v1.md](security/auth-protocol-v1.md). OPAQUE may reduce verifier and live-backend
+auth-channel risk later, but needs library and browser review. The remaining implementation gate is
+exact code-level transcript encoding and test vectors in #16.
 
 ### Vault Item Write
 
@@ -208,7 +208,7 @@ Threat focus:
 | Raw master password reaches backend | Breaks zero-knowledge boundary | Reject password-over-TLS design; tests prove backend never receives raw password | #2, #3 |
 | Account secret key stored server-side in plaintext | Enables password-only database attacks | Generate client-side, show/save through UX, never persist plaintext server-side | #2 |
 | Pre-login metadata reveals account existence | Account enumeration | Constant-shape responses, synthetic metadata for unknown accounts, generic errors, rate limits | #2 |
-| Copied auth database enables cheap guessing | Vault/account compromise risk | Argon2id target, account secret key, slow server-side hash, rate limits | #2, #3 |
+| Copied auth database enables guessing | Vault/account compromise risk | Argon2id target, account secret key, SCRAM-like verifier material, rate limits | Auth protocol, #3 |
 | Silent KDF downgrade | Weakens unlock/auth security | No silent PBKDF2 fallback; explicit degraded-mode decision and migration plan | #3 |
 | Browser-delivered JavaScript is malicious | Unlock material theft | Accepted residual risk; pinned/reviewed dependencies, no third-party auth scripts, service-worker/cache policy, future stronger clients | #3, #9 |
 | AES-GCM nonce/key misuse | Payload confidentiality/integrity failure | Per-revision content keys or strict nonce budget/rekey spec and tests | #3 |
@@ -216,14 +216,14 @@ Threat focus:
 | Malicious server swaps ciphertext, key wraps, or crypto metadata | Wrong data decrypts or downgrade succeeds | AAD binds user, vault, item, revision, key epoch, algorithm/version; downgrade rejection tests | #3 |
 | Backend authorization bug exposes another user's records | Cross-user data exposure | Authorization tests for every account/vault/device/session path | #2, API contract |
 | Backend decrypt path is introduced | Zero-knowledge failure | Negative tests proving backend-only code cannot decrypt item payloads | #3 |
-| Live compromised backend observes replayable auth material | Account/session compromise | #2 decides PAKE versus derived-auth channel; document residual replay risk and channel binding | #2 |
-| TOTP seed exposure | MFA bypass | Encrypt TOTP seeds at rest; decide app-level AEAD versus Vault/OpenBao/KMS | #4 |
-| Replayed TOTP step | MFA bypass | Track last accepted timestep, narrow window, rate limits | #4 |
+| Live compromised backend abuses auth flow | Account/session compromise | Keep OPAQUE as future migration path; document residual runtime risk | Auth protocol |
+| TOTP seed exposure | MFA bypass | Encrypt TOTP seeds at rest with app-level AEAD runtime key; keep Vault/OpenBao/KMS as future hardening | ADR 0005 |
+| Replayed TOTP step | MFA bypass | Track last accepted timestep, use narrow window, enforce rate limits | ADR 0005 |
 | Synthetic metadata secret compromise | Account enumeration or metadata prediction | Secret custody, backup, rotation, and synthetic-response tests | #2 |
-| Recovery code decrypts vault data | Zero-knowledge failure | Recovery codes only recover login-factor access; store as one-way verifiers | #4 |
-| Stolen session cookie | Account API access | HttpOnly, Secure, SameSite cookies; session rotation, expiry, revocation, audit | #2 |
-| CSRF against cookie-authenticated `/v1` mutations | Unauthorized state changes | `SameSite=Strict` where viable, origin checks, required custom header or equivalent CSRF token, tests | #2, API contract |
-| Session fixation or weak session state transition | MFA/session bypass | Pre-MFA and post-MFA states, rotation after MFA/recovery, idle/absolute expiry, revoke-all semantics | #2 |
+| Recovery code decrypts vault data | Zero-knowledge failure | Recovery codes only recover login-factor access; store as one-way verifiers | ADR 0005 |
+| Stolen session cookie | Account API access | HttpOnly, Secure, SameSite Strict cookies; session rotation, expiry, revocation, audit | ADR 0005 |
+| CSRF against cookie-authenticated `/v1` mutations | Unauthorized state changes | `SameSite=Strict`, origin checks, Fetch Metadata, required `X-PV-CSRF`, tests | ADR 0005, API contract |
+| Session fixation or weak session state transition | MFA/session bypass | Pre-MFA and post-MFA states, rotation after MFA/recovery, idle/absolute expiry, revoke-all semantics | ADR 0005 |
 | Public PR abuses GitHub Actions | Secret or supply-chain exposure | GitHub-hosted runners only, minimal permissions, no secrets for untrusted PRs | #7 |
 | Workflow or ruleset tampering | Review and CI bypass | Branch rulesets, required checks, CODEOWNERS for sensitive paths | #7 |
 | Third-party Action or dependency compromise | Supply-chain compromise | Prefer trusted/pinned Actions, dependency review, Dependabot, release hardening | #7 |
@@ -349,15 +349,13 @@ code or images are trusted for real secrets.
 
 ## Open Decisions
 
-- #2: Auth/login protocol and key-derivation message shapes.
-- #2: PAKE versus derived-auth channel and live-backend auth-secret replay risk.
-- #2: Session policy, CSRF controls, and account lockout versus denial-of-service balance.
+- #16: Exact `pv-scram-sha-256-v1` transcript encoding and test vectors.
+- #16: Implementation of session, CSRF, rate-limit, and lockout behavior from ADR 0005.
 - #3: Browser KDF, crypto payload format, nonce/rekey policy, and dependency review.
 - #3: Revision rollback protection, AAD fields, key hierarchy, and crypto payload versioning.
 - #3: Browser bundle integrity, service-worker/cache policy, and WASM dependency gates before real
   secrets.
-- #4: TOTP seed custody, recovery codes, replay window, and rate limits.
-- #4: TOTP seed-protection-key custody, backup, restore, and rotation.
+- Runtime operations: TOTP seed-protection-key backup, restore, and rotation drill before real users.
 - #5: PostgreSQL HA, backup target, restore drill, and failover plan.
 - #5: Kubernetes namespace/RBAC/NetworkPolicy/ingress assumptions and CloudNativePG operator risk.
 - #7: Branch ruleset, CODEOWNERS, and public repository safety gates.

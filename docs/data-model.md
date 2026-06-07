@@ -40,8 +40,11 @@ accounts
   auth_migration_status
   kdf_profile
   account_salt
-  derived_auth_hash
-  server_auth_hash_profile
+  auth_verifier_profile
+  auth_verifier_salt
+  auth_verifier_iterations
+  auth_stored_key
+  auth_server_key
   opaque_credential_record
   failed_auth_count
   locked_until
@@ -71,10 +74,12 @@ auth_challenges
   created_at
 
 totp_factors
+  id
   account_id
   seed_ciphertext
   seed_nonce
   seed_key_id
+  seed_aead
   algorithm
   digits
   period_seconds
@@ -86,6 +91,7 @@ totp_factors
 recovery_codes
   id
   account_id
+  code_salt
   code_hash
   created_at
   used_at
@@ -96,6 +102,7 @@ sessions
   device_id
   session_token_hash
   csrf_token_hash
+  session_state
   created_at
   last_seen_at
   expires_at
@@ -154,8 +161,11 @@ The migration deliberately does not include plaintext item columns such as `titl
 ## Schema Guardrails Implemented
 
 - `accounts.login_handle_normalized` is unique.
+- `sessions.account_id` references `accounts(id)` with cascade delete so account removal revokes
+  sessions.
 - `sessions(account_id, device_id)` references `devices(account_id, id)` so a session cannot attach
-  another account's device.
+  another account's device when a device is present.
+- `sessions.session_state` stores whether the session can access vault APIs.
 - `vault_items(vault_id, id)` is unique and item revisions reference that composite key.
 - `vault_item_revisions` is append-only data with `operation` limited to `create`, `update`, and
   `delete`.
@@ -164,7 +174,7 @@ The migration deliberately does not include plaintext item columns such as `titl
 - Hashes and MACs are constrained to expected byte lengths where the current protocol already
   defines those lengths.
 - TOTP seeds are stored as ciphertext plus protection metadata, and recovery codes are stored as
-  one-way hashes.
+  one-way salted verifiers.
 
 The database still cannot validate client-side cryptographic correctness for `head_hash` or
 `change_mac`; unlocked clients must verify those values, and backend transaction code must enforce

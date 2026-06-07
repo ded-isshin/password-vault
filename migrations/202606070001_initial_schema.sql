@@ -6,8 +6,11 @@ CREATE TABLE accounts (
     auth_migration_status text NOT NULL DEFAULT 'current',
     kdf_profile jsonb NOT NULL,
     account_salt bytea NOT NULL CONSTRAINT accounts_account_salt_len CHECK (octet_length(account_salt) >= 16),
-    derived_auth_hash bytea NOT NULL CONSTRAINT accounts_derived_auth_hash_len CHECK (octet_length(derived_auth_hash) >= 32),
-    server_auth_hash_profile jsonb NOT NULL,
+    auth_verifier_profile text NOT NULL,
+    auth_verifier_salt bytea NOT NULL CONSTRAINT accounts_auth_verifier_salt_len CHECK (octet_length(auth_verifier_salt) >= 16),
+    auth_verifier_iterations integer NOT NULL CONSTRAINT accounts_auth_verifier_iterations_positive CHECK (auth_verifier_iterations > 0),
+    auth_stored_key bytea NOT NULL CONSTRAINT accounts_auth_stored_key_len CHECK (octet_length(auth_stored_key) = 32),
+    auth_server_key bytea NOT NULL CONSTRAINT accounts_auth_server_key_len CHECK (octet_length(auth_server_key) = 32),
     opaque_credential_record bytea,
     failed_auth_count integer NOT NULL DEFAULT 0 CONSTRAINT accounts_failed_auth_count_nonnegative CHECK (failed_auth_count >= 0),
     locked_until timestamptz,
@@ -15,6 +18,7 @@ CREATE TABLE accounts (
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT accounts_login_handle_nonempty CHECK (length(btrim(login_handle_normalized)) > 0),
     CONSTRAINT accounts_auth_protocol_check CHECK (auth_protocol IN ('derived-auth-v1', 'opaque-rfc9807-v1')),
+    CONSTRAINT accounts_auth_verifier_profile_check CHECK (auth_verifier_profile IN ('pv-scram-sha-256-v1')),
     CONSTRAINT accounts_auth_migration_status_check CHECK (auth_migration_status IN ('current', 'migration_required', 'migration_in_progress'))
 );
 
@@ -60,10 +64,12 @@ CREATE INDEX auth_challenges_expires_at_idx
     ON auth_challenges (expires_at);
 
 CREATE TABLE totp_factors (
-    account_id uuid PRIMARY KEY REFERENCES accounts (id) ON DELETE CASCADE,
+    id uuid PRIMARY KEY,
+    account_id uuid NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
     seed_ciphertext bytea NOT NULL CONSTRAINT totp_factors_seed_ciphertext_nonempty CHECK (octet_length(seed_ciphertext) > 0),
     seed_nonce bytea NOT NULL CONSTRAINT totp_factors_seed_nonce_nonempty CHECK (octet_length(seed_nonce) >= 12),
     seed_key_id text NOT NULL,
+    seed_aead text NOT NULL,
     algorithm text NOT NULL DEFAULT 'SHA1',
     digits integer NOT NULL DEFAULT 6,
     period_seconds integer NOT NULL DEFAULT 30,
@@ -71,7 +77,9 @@ CREATE TABLE totp_factors (
     verified_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT totp_factors_account_id_uq UNIQUE (account_id),
     CONSTRAINT totp_factors_seed_key_id_nonempty CHECK (length(btrim(seed_key_id)) > 0),
+    CONSTRAINT totp_factors_seed_aead_nonempty CHECK (length(btrim(seed_aead)) > 0),
     CONSTRAINT totp_factors_algorithm_check CHECK (algorithm IN ('SHA1', 'SHA256', 'SHA512')),
     CONSTRAINT totp_factors_digits_check CHECK (digits IN (6, 8)),
     CONSTRAINT totp_factors_period_seconds_positive CHECK (period_seconds > 0),
@@ -81,6 +89,7 @@ CREATE TABLE totp_factors (
 CREATE TABLE recovery_codes (
     id uuid PRIMARY KEY,
     account_id uuid NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
+    code_salt bytea NOT NULL CONSTRAINT recovery_codes_code_salt_len CHECK (octet_length(code_salt) >= 16),
     code_hash bytea NOT NULL CONSTRAINT recovery_codes_code_hash_len CHECK (octet_length(code_hash) >= 32),
     created_at timestamptz NOT NULL DEFAULT now(),
     used_at timestamptz,
@@ -96,11 +105,13 @@ CREATE TABLE sessions (
     device_id uuid,
     session_token_hash bytea NOT NULL CONSTRAINT sessions_session_token_hash_len CHECK (octet_length(session_token_hash) = 32),
     csrf_token_hash bytea CONSTRAINT sessions_csrf_token_hash_len CHECK (csrf_token_hash IS NULL OR octet_length(csrf_token_hash) = 32),
+    session_state text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     last_seen_at timestamptz,
     expires_at timestamptz NOT NULL,
     revoked_at timestamptz,
-    CONSTRAINT sessions_account_device_fk FOREIGN KEY (account_id, device_id) REFERENCES devices (account_id, id) ON DELETE SET NULL (device_id)
+    CONSTRAINT sessions_account_device_fk FOREIGN KEY (account_id, device_id) REFERENCES devices (account_id, id) ON DELETE SET NULL (device_id),
+    CONSTRAINT sessions_session_state_check CHECK (session_state IN ('mfa_enrollment_required', 'mfa_recovery', 'mfa_verified'))
 );
 
 CREATE UNIQUE INDEX sessions_session_token_hash_uq
@@ -158,7 +169,7 @@ CREATE TABLE vault_item_revisions (
     head_hash bytea NOT NULL CONSTRAINT vault_item_revisions_head_hash_len CHECK (octet_length(head_hash) = 32),
     change_mac bytea NOT NULL CONSTRAINT vault_item_revisions_change_mac_len CHECK (octet_length(change_mac) = 32),
     key_id text NOT NULL,
-    crypto_version integer NOT NULL,
+    crypto_version text NOT NULL,
     envelope_hash bytea NOT NULL CONSTRAINT vault_item_revisions_envelope_hash_len CHECK (octet_length(envelope_hash) = 32),
     encrypted_item_envelope jsonb NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -174,7 +185,7 @@ CREATE TABLE vault_item_revisions (
     CONSTRAINT vault_item_revisions_head_seq_advances_check CHECK (head_seq = base_head_seq + 1),
     CONSTRAINT vault_item_revisions_base_hash_matches_previous_check CHECK (base_head_hash = previous_head_hash),
     CONSTRAINT vault_item_revisions_key_id_nonempty CHECK (length(btrim(key_id)) > 0),
-    CONSTRAINT vault_item_revisions_crypto_version_positive CHECK (crypto_version > 0),
+    CONSTRAINT vault_item_revisions_crypto_version_nonempty CHECK (length(btrim(crypto_version)) > 0),
     CONSTRAINT vault_item_revisions_revision_shape_check CHECK (
         (operation = 'create' AND revision_seq = 1 AND base_revision_seq = 0)
         OR

@@ -90,6 +90,14 @@ React/Vite app is scaffolded.
 Vite client environment variables are public build-time data. Do not place secrets in frontend
 environment variables.
 
+### PostgreSQL Version
+
+The MVP CI migration job uses `postgres:17-bookworm`.
+
+The current migration uses PostgreSQL column-specific `ON DELETE SET NULL (device_id)` on a composite
+foreign key, so supported PostgreSQL versions must be PostgreSQL 15 or newer. Keep CI on PostgreSQL
+17 unless a database-platform ADR explicitly changes the target.
+
 ### Kubernetes And GitOps Commands
 
 Local `kubectl` is available, but it must not be used for cluster mutation without explicit human

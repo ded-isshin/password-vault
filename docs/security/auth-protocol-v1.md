@@ -1,6 +1,6 @@
 # Auth Protocol V1
 
-Status: MVP implementation direction. Related issues: #2, #13, #24.
+Status: MVP implementation direction. Related issues: #2, #4, #13, #16, #24.
 
 ## Decision
 
@@ -16,7 +16,7 @@ handling.
 - Keep server login separate from local vault unlock.
 - Keep TOTP as login MFA only.
 - Keep the API protocol-neutral enough to migrate to OPAQUE later.
-- Store only a slow server-side hash of client-derived auth material.
+- Store only a verifier derived from client-derived auth material.
 - Keep vault key wrapping and item encryption client-side.
 
 ## Non-Goals
@@ -67,18 +67,30 @@ master secret
   -> HKDF("password-vault/unlock/v1") -> account unlock key
 ```
 
-`client auth secret` is password-equivalent. It may be sent to the backend only through the
-`derived-auth-v1` login/registration proof path and must never be logged or stored raw.
+`client auth secret` is password-equivalent. It must not be sent to the backend raw and must never
+be logged or stored raw.
 
-The backend stores:
+The MVP verifier profile is:
 
 ```text
-server_auth_hash = slow_hash(client_auth_secret, server_params)
+auth_verifier_profile = "pv-scram-sha-256-v1"
 ```
 
-The exact server-side slow hash algorithm and parameters are an implementation prerequisite. Argon2id
-is preferred if available in the backend build; otherwise a documented password-hashing alternative
-must be selected before code.
+`pv-scram-sha-256-v1` adapts the SCRAM-SHA-256 proof model to the HTTP `/v1` API. The browser uses
+`client_auth_secret` as the SCRAM password input and computes verifier material from a server-issued
+auth-verifier salt and iteration count. The backend stores:
+
+```text
+auth_verifier_salt
+auth_verifier_iterations
+auth_stored_key
+auth_server_key
+```
+
+The backend does not store the raw `client_auth_secret`. Login proof is bound to client/server
+nonces and the login challenge. A copied verifier database may still enable offline guessing, but
+the guessed input is the browser-derived `client_auth_secret`, which depends on the user's password
+and account secret key. OPAQUE remains the preferred future mitigation for this class of risk.
 
 ## Registration Flow
 
@@ -92,22 +104,27 @@ server returns:
   auth_protocol
   kdf_profile
   account_salt
+  auth_verifier_profile
+  auth_verifier_salt
+  auth_verifier_iterations
   csrf token or registration nonce if needed
 
 client derives master_secret, client_auth_secret, account_unlock_key
 client generates account_secret_key locally
+client derives pv-scram-sha-256-v1 verifier material from client_auth_secret
 client creates wrapped user/vault key material
 
 POST /v1/auth/register/finish
   registration_id
   auth_protocol
-  registration proof/material derived from client_auth_secret and registration_id
+  auth_stored_key
+  auth_server_key
   encrypted account/vault key metadata
   initial device metadata
 
 server stores:
   account record
-  server_auth_hash
+  auth verifier material
   encrypted key metadata
   initial device record
 ```
@@ -126,19 +143,28 @@ before code.
 POST /v1/auth/login/start
   login_handle
   auth_protocol
+  client_nonce
 
 server returns constant-shape metadata:
   login_challenge_id
   auth_protocol
   kdf_profile
   account_salt
+  auth_verifier_profile
+  auth_verifier_salt
+  auth_verifier_iterations
+  server_nonce
+  combined_nonce
 
-client derives client_auth_secret
+client derives client_auth_secret and pv-scram-sha-256-v1 client proof
 
 POST /v1/auth/login/finish
   login_challenge_id
   auth_protocol
-  challenge-bound auth proof derived from client_auth_secret and login_challenge_id
+  client_nonce
+  server_nonce
+  client_final_without_proof
+  client_proof
 
 server verifies auth material
 server returns one of:
@@ -154,7 +180,7 @@ response shape.
 only after `login/finish` succeeds.
 
 `derived-auth-v1` must not send the raw `client_auth_secret` as a reusable bearer credential. The
-client submits a challenge-bound proof derived from:
+client submits a `pv-scram-sha-256-v1` proof derived from:
 
 - `client_auth_secret`;
 - `login_challenge_id`;
@@ -162,11 +188,11 @@ client submits a challenge-bound proof derived from:
 - client nonce;
 - `auth_protocol`;
 - login handle;
-- optional future TLS exporter/channel-binding input if available and approved.
+- canonical request fields.
 
-The exact proof construction, nonce encoding, and server verifier behavior must be specified with
-test vectors before implementation. Until then, this document treats live-backend observation of
-derived auth material as an accepted residual risk.
+The implementation must define exact canonical encoding and include proof test vectors before #16 is
+merged. TLS exporter/channel-binding input is deferred until browser support and deployment behavior
+are reviewed.
 
 ## MFA Flow
 
@@ -182,8 +208,8 @@ server verifies TOTP, replay window, and rate limits
 server creates post-MFA server session
 ```
 
-TOTP seed protection is server-owned secret management and is decided by #4. TOTP does not affect
-vault encryption.
+TOTP seed protection is server-owned secret management and is defined by
+[ADR 0005](../adr/0005-mfa-session-and-csrf-policy.md). TOTP does not affect vault encryption.
 
 ## Session Flow
 
@@ -195,14 +221,14 @@ Cookie direction:
 name: __Host-pv_session
 Secure: true
 HttpOnly: true
-SameSite: Strict or Lax by explicit decision
+SameSite: Strict
 Path: /
 Domain: not set
 ```
 
 State-changing browser requests require CSRF protection:
 
-- CSRF token or signed double-submit token;
+- CSRF token bound to the server-side session and sent in `X-PV-CSRF`;
 - Origin check;
 - Fetch Metadata checks where available;
 - non-GET methods for mutations.
@@ -226,8 +252,11 @@ Local unlock:
 MVP schema should support:
 
 - `auth_protocol_version`;
-- `derived_auth_hash`;
-- server-side auth hash profile;
+- `auth_verifier_profile`;
+- `auth_verifier_salt`;
+- `auth_verifier_iterations`;
+- `auth_stored_key`;
+- `auth_server_key`;
 - `kdf_profile`;
 - `account_salt`;
 - nullable `opaque_credential_record`;
@@ -241,6 +270,8 @@ MVP schema should support:
 - Backend never receives the raw master password.
 - Backend never receives the account secret key.
 - Backend never stores raw `client_auth_secret`.
+- Registration stores verifier material, not raw `client_auth_secret`.
+- Login proof verifies against stored verifier material and is bound to login challenge nonces.
 - `login/start` returns constant-shape metadata for existing and unknown accounts.
 - `login/start` does not reveal MFA enrollment status.
 - Registration duplicate-handle behavior does not trivially enumerate accounts.
@@ -254,8 +285,17 @@ MVP schema should support:
 
 ## Accepted Residual Risk
 
-`derived-auth-v1` sends password-equivalent auth material to the backend. A live compromised backend
-that observes this material may be able to replay it until the account rotates credentials.
+`derived-auth-v1` stores verifier material that may enable offline guessing if an attacker obtains
+the authentication database. The account secret key and browser KDF are required mitigations. A live
+compromised backend may still abuse login flows or runtime secrets.
 
 OPAQUE is the preferred future mitigation for this specific auth-channel risk. The MVP keeps auth
 and vault unlock separate so migration does not require re-encrypting vault items.
+
+## Sources
+
+- https://www.rfc-editor.org/rfc/rfc5802.html
+- https://www.rfc-editor.org/rfc/rfc7677.html
+- https://www.rfc-editor.org/rfc/rfc9807.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
+- https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
