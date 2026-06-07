@@ -4,7 +4,7 @@ use axum::{
     Json, Router,
     extract::State,
     http::{StatusCode, header},
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::get,
 };
 use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
@@ -206,12 +206,36 @@ fn router(state: AppState) -> Router {
     let (metrics_layer, metrics_handle) = metrics_layer_and_handle();
 
     Router::new()
+        .route("/", get(index))
+        .route("/assets/app.css", get(app_css))
+        .route("/assets/app.js", get(app_js))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/metrics", get(move || metrics(metrics_handle.clone())))
         .merge(auth::routes::router())
         .with_state(state)
         .layer(metrics_layer)
+}
+
+async fn index() -> Html<&'static str> {
+    Html(include_str!("../static/index.html"))
+}
+
+async fn app_css() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        include_str!("../static/app.css"),
+    )
+}
+
+async fn app_js() -> impl IntoResponse {
+    (
+        [(
+            header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        include_str!("../static/app.js"),
+    )
 }
 
 #[derive(Serialize)]
@@ -440,6 +464,61 @@ mod tests {
         assert!(body.contains("method=\"GET\""));
         assert!(!body.contains("not-found-cardinality-probe"));
         assert!(!body.contains("login_handle"));
+    }
+
+    #[tokio::test]
+    async fn browser_preview_assets_are_served() {
+        let app = app(ApiConfig::local_test(false, false));
+
+        let index_response = app
+            .clone()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(index_response.status(), 200);
+        let index_body = to_bytes(index_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let index_body = String::from_utf8(index_body.to_vec()).unwrap();
+        assert!(index_body.contains("Password Vault"));
+        assert!(index_body.contains("/assets/app.css"));
+
+        let css_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/app.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(css_response.status(), 200);
+        assert_eq!(
+            css_response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("text/css; charset=utf-8")
+        );
+
+        let js_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/assets/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(js_response.status(), 200);
+        assert_eq!(
+            js_response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("application/javascript; charset=utf-8")
+        );
     }
 
     #[tokio::test]

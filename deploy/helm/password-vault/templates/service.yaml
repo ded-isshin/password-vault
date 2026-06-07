@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "password-vault.labels" . | nindent 4 }}
 spec:
+  type: {{ .Values.service.type }}
   selector:
     {{- include "password-vault.selectorLabels" . | nindent 4 }}
   ports:
