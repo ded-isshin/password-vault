@@ -62,8 +62,8 @@ deployment.
 - Use pinned image tags and avoid `latest` in CI/load/chart validation.
 - Split container CI into a read-only PR smoke job and a separate publish job with `packages`,
   `id-token`, and `attestations` permissions.
-- Add BuildKit SBOM/provenance for pushed images and GitHub artifact attestation bound to the image
-  digest.
+- Add GitHub artifact attestation bound to the pushed image digest. Inline BuildKit SBOM/provenance
+  requires a builder driver that supports attestations; the default Docker driver does not.
 - Prefer the default GitHub-hosted runner Buildx/BuildKit path for single-platform MVP builds instead
   of a separate containerized BuildKit builder. This reduces Docker Hub dependency during CI setup.
 - Use k6 as the first load-test tool. Locust and wrk/Vegeta are deferred.
@@ -86,7 +86,7 @@ deployment.
 
 ## Security Considerations
 
-- Container provenance and SBOM are only useful if deployment references immutable image digests.
+- Container provenance is only useful if deployment references immutable image digests.
 - Public repos must not use self-hosted runners with private home infrastructure credentials.
 - Build containers must not mount Docker socket, kubeconfig, SSH keys, or real `.env` secrets.
 - Metrics can leak metadata. Use route/status/method labels only for MVP HTTP metrics.
