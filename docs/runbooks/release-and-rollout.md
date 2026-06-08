@@ -156,16 +156,37 @@ been changed. Do not use Kubernetes/LXD `LoadBalancer` addresses as the default 
 clients. Those addresses are internal service-routing details unless the client machine has explicit
 routing into that network.
 
+Current topology note: the Kubernetes `LoadBalancer` services may show internal addresses for
+Grafana, Argo CD, and Password Vault. Those are backend targets for the mini-PC edge proxy, not the
+normal MacBook/browser entrypoints. The edge NGINX path listens on the mini-PC LAN address and
+proxies to the internal service addresses.
+
 Read-only edge checks from the mini-PC:
 
 ```bash
+ss -ltn | grep -E ':(11443|3000|9443)\\b'
 curl -kfsS https://<mini-pc-lan-ip>:11443/healthz >/dev/null
 curl -kfsS https://<mini-pc-lan-ip>:3000/api/health >/dev/null
 curl -kfsS https://<mini-pc-lan-ip>:9443/healthz >/dev/null
 ```
 
+The listeners should bind to a LAN-facing address such as `0.0.0.0` or the mini-PC LAN address, not
+only `127.0.0.1`.
+
 `-k` is a LAN/self-signed certificate convenience for the current home edge only. Remove it when a
 real trusted certificate model exists.
+
+Read-only checks from a MacBook or another LAN client:
+
+```bash
+curl -k -I https://<mini-pc-lan-ip>:11443/healthz
+curl -k -I https://<mini-pc-lan-ip>:3000/api/health
+curl -k -I https://<mini-pc-lan-ip>:9443/healthz
+```
+
+If the mini-PC checks pass but the MacBook checks fail, investigate client LAN reachability, VPN
+state, local firewall rules, and whether the browser used `https`. Do not start by changing
+Kubernetes Services or Argo CD.
 
 Do not commit concrete home-network IPs, hostnames, domains, cookies, tokens, or screenshots that
 show private runtime details.
@@ -174,6 +195,15 @@ show private runtime details.
 
 Use read-only checks first. Do not use direct `kubectl apply`, `kubectl patch`, Helm installs, or
 Terraform commands for normal rollout verification.
+
+After a new terminal/session starts, verify the Kubernetes context before interpreting `kubectl`
+errors. On this host the default kubeconfig may have no current context; use the production
+kubeconfig explicitly for read-only checks:
+
+```bash
+KUBECONFIG=<redacted-path> kubectl config current-context
+KUBECONFIG=<redacted-path> kubectl get nodes
+```
 
 Argo CD application state:
 

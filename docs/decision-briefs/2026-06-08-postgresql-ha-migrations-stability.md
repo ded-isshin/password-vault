@@ -22,6 +22,9 @@ Runtime state verified after the 2026-06-08 cutover:
 - CloudNativePG CRDs and the shared CloudNativePG operator are present in the Kubernetes cluster.
 - A product-owned `password-vault-cnpg` CloudNativePG `Cluster` exists with three PostgreSQL 18.4
   instances spread across the three worker nodes.
+- The active primary reported `synchronous_commit=on` and
+  `synchronous_standby_names=ANY 1 (...)`; `pg_stat_replication` reported both standbys in
+  `streaming` state with `sync_state=quorum`.
 - The live `password-vault` API is cut over to the `password-vault-cnpg` application Secret.
 - The legacy single PostgreSQL `StatefulSet` may remain briefly as rollback debt, but it is no
   longer the active API database.
@@ -59,6 +62,16 @@ spec:
       number: 1
       dataDurability: required
 ```
+
+When verifying this mode, prefer live PostgreSQL state over legacy-looking CRD defaults. In the
+current CNPG API shape, `.spec.postgresql.synchronous` is the intended configuration. Seeing
+`.spec.minSyncReplicas=0` and `.spec.maxSyncReplicas=0` is not by itself evidence that the database
+is asynchronous. Verify with:
+
+- `SHOW synchronous_commit`;
+- `SHOW synchronous_standby_names`;
+- `pg_stat_replication.state`;
+- `pg_stat_replication.sync_state`.
 
 Backups must include continuous WAL archiving plus physical base backups to an object-store-backed
 backup target before any real user secrets are accepted. Restore must be drilled into a separate
@@ -179,6 +192,9 @@ Expected tradeoff:
 
 - one worker failure should be tolerated when instances are spread across nodes;
 - if only the primary remains without a suitable standby, writes may pause;
+- with `dataDurability: required`, this write pause is intentional: the system should prefer
+  temporary write unavailability over acknowledging a saved secret that can be lost after primary
+  failure;
 - degraded write unavailability must alert loudly and be handled operationally;
 - this is acceptable for real secrets because durability is the higher priority.
 
@@ -279,6 +295,11 @@ The stable target is therefore:
 - production-like rollout using explicit migration jobs;
 - no implicit DDL from API pod startup;
 - no unmanaged manual schema edits.
+
+For MVP stabilization, the practical posture is a schema freeze by default: do not add new database
+migrations unless they directly support a required security invariant, recovery/durability gate,
+MVP user journey, or live-rollout safety fix. PostgreSQL minor-version maintenance remains a
+platform/database patching concern and should not be confused with product schema churn.
 
 ## How To Minimize Migration Churn
 

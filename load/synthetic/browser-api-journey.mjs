@@ -573,6 +573,63 @@ async function aesGcmDecrypt(keyBytes, envelope, aadBytes = null) {
   return JSON.parse(decoder.decode(plaintext));
 }
 
+async function assertAesGcmDecryptRejects(label, fn) {
+  try {
+    await fn();
+  } catch (error) {
+    assert(
+      error?.name === "OperationError",
+      `${label} rejected with unexpected error: ${error?.name || error?.constructor?.name || "unknown"}.`,
+    );
+    return;
+  }
+  throw new Error(`${label} unexpectedly succeeded.`);
+}
+
+function tamperBase64Url(value) {
+  const bytes = base64UrlToBytes(value);
+  assert(bytes.length > 0, "Cannot tamper empty base64url value.");
+  bytes[0] ^= 0x01;
+  return base64Url(bytes);
+}
+
+async function assertAesGcmTamperRejected() {
+  const keyBytes = randomBytes(32);
+  const aadFields = {
+    vaultId: randomUUID(),
+    itemId: randomUUID(),
+    revisionId: randomUUID(),
+    operation: "create",
+    baseRevisionSeq: 0,
+    baseHeadSeq: 0,
+    keyId: "vault-item-key-pbkdf2-sha256-browser-v1",
+  };
+  const aad = itemAad(aadFields);
+  try {
+    const plaintext = {
+      version: "item-plaintext-v1",
+      title: "Synthetic tamper self-test",
+      username: "synthetic-user",
+      password: "synthetic-only",
+    };
+    const envelope = await aesGcmEncrypt(keyBytes, plaintext, aad);
+    const roundTrip = await aesGcmDecrypt(keyBytes, envelope, aad);
+    assert(roundTrip.title === plaintext.title, "AES-GCM self-test round trip failed.");
+
+    await assertAesGcmDecryptRejects("AES-GCM tampered ciphertext", () =>
+      aesGcmDecrypt(keyBytes, { ...envelope, ciphertext: tamperBase64Url(envelope.ciphertext) }, aad),
+    );
+    await assertAesGcmDecryptRejects("AES-GCM tampered nonce", () =>
+      aesGcmDecrypt(keyBytes, { ...envelope, nonce: tamperBase64Url(envelope.nonce) }, aad),
+    );
+    await assertAesGcmDecryptRejects("AES-GCM tampered authenticated metadata", () =>
+      aesGcmDecrypt(keyBytes, envelope, itemAad({ ...aadFields, keyId: `${aadFields.keyId}-tampered` })),
+    );
+  } finally {
+    wipe(keyBytes);
+  }
+}
+
 async function buildEncryptedRegistrationPayload(startResponse, masterPassword, loginHandle) {
   const createdAt = new Date().toISOString();
   const accountSalt = base64UrlToBytes(startResponse.account_salt);
@@ -1172,6 +1229,11 @@ async function main() {
 
   try {
     assertAccountSecretKeyRoundTrip();
+    await assertAesGcmTamperRejected();
+    if (process.env.SYNTHETIC_SELF_TEST_ONLY === "true") {
+      console.log(JSON.stringify({ status: "ok", self_test: "browser_crypto_tamper_rejected" }));
+      return;
+    }
     logStep("checking health and readiness");
     await requestJson(config, "/healthz", { expectNoStore: false, label: "healthz" });
     await requestJson(config, "/readyz", { expectNoStore: false, label: "readyz" });

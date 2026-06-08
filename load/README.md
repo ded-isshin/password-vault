@@ -100,6 +100,17 @@ docker run --rm --network host \
   "$NODE_SYNTHETIC_IMAGE" node load/synthetic/browser-api-journey.mjs
 ```
 
+Run only the local browser-crypto self-test without creating an account or contacting an API:
+
+```bash
+SYNTHETIC_SELF_TEST_ONLY=true node load/synthetic/browser-api-journey.mjs
+```
+
+This checks account-secret display parsing and the browser crypto wiring that binds item metadata
+through AES-GCM associated data. It expects decrypt-time authentication failure for tampered
+ciphertext, nonce, and authenticated metadata. It is suitable for a fast local/CI syntax-and-crypto
+guard, but it does not replace the full protected-user journey.
+
 Run the same journey against an explicitly approved LAN/edge preview route:
 
 ```bash
