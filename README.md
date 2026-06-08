@@ -1,6 +1,7 @@
 # password-vault
 
-Status: MVP implementation scaffold. No production deployment exists yet.
+Status: MVP implementation preview. A Kubernetes/GitOps browser/API preview exists, but it is not
+approved for real user secrets yet.
 
 `password-vault` is a planned Kubernetes-native, zero-knowledge password manager.
 The first milestone is a personal vault MVP with registration, login, TOTP MFA,
@@ -14,7 +15,8 @@ documentation, logs, and CI output as public.
 - Product type: password manager for personal use first, with a path to organizations.
 - Security model: zero-knowledge, end-to-end encrypted vault data.
 - Backend direction: Rust, Axum, SQLx, PostgreSQL.
-- Frontend direction: TypeScript, React, Vite, WebCrypto.
+- Frontend direction: static browser MVP with WebCrypto first; TypeScript/React/Vite can be added
+  after the core auth, unlock, and vault flows are stable enough to justify a richer app shell.
 - Database direction: PostgreSQL, with CloudNativePG for production-like Kubernetes.
 - Deployment direction: GitHub Actions, GHCR, Helm, GitOps PR, Argo CD.
 - MFA direction: TOTP first, WebAuthn/passkeys later.
@@ -22,9 +24,10 @@ documentation, logs, and CI output as public.
   user-vault core.
 - Public routing direction: edge reverse proxy to Kubernetes ingress/service; exact host, port,
   TLS, and network details belong in the infrastructure repository.
-- Current blocker: security-sensitive auth, crypto, frontend, container, and deployment
-  implementation remains gated by accepted docs and follow-up specs. The Rust API scaffold and first
-  PostgreSQL migration exist, but auth and vault-sync runtime flows are not implemented yet.
+- Current blocker: vault unlock, encrypted vault item CRUD/sync, PostgreSQL HA/backup/restore, and
+  stricter internal metrics/network controls remain unfinished. Registration, setup-session,
+  TOTP enrollment, login finish, login-time TOTP verification, GHCR image publishing, Helm/GitOps,
+  and a basic Grafana dashboard are implemented for the current preview.
 
 ## MVP Scope
 
@@ -33,7 +36,7 @@ In scope:
 - personal user account
 - login
 - TOTP enrollment and verification
-- recovery codes
+- recovery codes for initial TOTP enrollment
 - personal vault
 - encrypted vault items
 - item revisions

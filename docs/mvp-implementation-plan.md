@@ -17,7 +17,10 @@ Current implementation status, 2026-06-07:
   `PV_TOTP_SEED_KEY_B64` key, and confirmation upgrades the setup session to `mfa_verified` while
   returning one-time recovery codes.
 - Login finish and login-time TOTP verification are merged and deployed in the current preview.
-  Recovery-code verification, vault item CRUD/sync, and browser-side crypto/unlock remain
+- The browser preview supports registration and TOTP enrollment, and the current implementation
+  adds the browser return-login path that uses deployed `login/start`, `login/finish`, and
+  login-time `totp/verify`.
+- Recovery-code verification, vault item CRUD/sync, and browser-side vault unlock remain
   unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
@@ -27,8 +30,8 @@ Current implementation status, 2026-06-07:
 The current goal is not to add broad feature volume. The next slices should make the smallest useful
 MVP dependable:
 
-1. Complete login finish and login-time TOTP verification. Vault CRUD is not meaningful until a user
-   can return after registration.
+1. Complete and verify the browser return-login flow against the deployed login finish and
+   login-time TOTP APIs. Vault CRUD is not meaningful until a user can return after registration.
 2. Add browser vault unlock plus encrypted item create/read/update/delete with revision conflict
    checks.
 3. Keep production startup migrations off and introduce a controlled migration job/runbook before

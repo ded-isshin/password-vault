@@ -5,6 +5,7 @@ const ACCOUNT_KEYSET_CRYPTO_VERSION = "account-keyset-v1";
 const VAULT_KEY_WRAP_CRYPTO_VERSION = "vault-key-wrap-v1";
 const VAULT_CRYPTO_PROFILE_ID = "vault-crypto-v1";
 const SCRAM_PROFILE_ID = "pv-scram-sha-256-v1";
+const SCRAM_ITERATIONS = 150000;
 
 const encoder = new TextEncoder();
 
@@ -12,6 +13,7 @@ const state = {
   activeStep: "",
   csrfToken: "",
   factorId: "",
+  loginMfaChallengeId: "",
   pendingFinishPayload: null,
   pendingRegisterSession: null,
   registrationFinished: false,
@@ -19,11 +21,18 @@ const state = {
 };
 
 const elements = {
+  showRegisterButton: document.querySelector("#showRegisterButton"),
+  showLoginButton: document.querySelector("#showLoginButton"),
   registrationForm: document.querySelector("#registrationForm"),
   loginHandle: document.querySelector("#loginHandle"),
   masterPassword: document.querySelector("#masterPassword"),
   confirmPassword: document.querySelector("#confirmPassword"),
   registerButton: document.querySelector("#registerButton"),
+  loginForm: document.querySelector("#loginForm"),
+  returnLoginHandle: document.querySelector("#returnLoginHandle"),
+  loginMasterPassword: document.querySelector("#loginMasterPassword"),
+  accountSecretInput: document.querySelector("#accountSecretInput"),
+  loginButton: document.querySelector("#loginButton"),
   statusMessage: document.querySelector("#statusMessage"),
   flowSteps: document.querySelector("#flowSteps"),
   accountSecretPanel: document.querySelector("#accountSecretPanel"),
@@ -40,6 +49,10 @@ const elements = {
   totpForm: document.querySelector("#totpForm"),
   totpCode: document.querySelector("#totpCode"),
   confirmTotpButton: document.querySelector("#confirmTotpButton"),
+  loginMfaPanel: document.querySelector("#loginMfaPanel"),
+  loginMfaForm: document.querySelector("#loginMfaForm"),
+  loginTotpCode: document.querySelector("#loginTotpCode"),
+  verifyLoginTotpButton: document.querySelector("#verifyLoginTotpButton"),
   recoveryPanel: document.querySelector("#recoveryPanel"),
   recoveryCodes: document.querySelector("#recoveryCodes"),
   sessionPanel: document.querySelector("#sessionPanel"),
@@ -61,6 +74,14 @@ function setRegistrationBusy(isBusy, label = "Create account") {
   elements.registerButton.textContent = isBusy ? "Working..." : label;
 }
 
+function setLoginBusy(isBusy, label = "Continue") {
+  elements.loginButton.disabled = isBusy;
+  elements.returnLoginHandle.disabled = isBusy;
+  elements.loginMasterPassword.disabled = isBusy;
+  elements.accountSecretInput.disabled = isBusy;
+  elements.loginButton.textContent = isBusy ? "Working..." : label;
+}
+
 function setSecretContinueBusy(isBusy) {
   elements.continueEnrollmentButton.disabled = isBusy || !elements.secretSavedCheckbox.checked;
   elements.copySecretButton.disabled = isBusy;
@@ -74,10 +95,17 @@ function setTotpBusy(isBusy) {
   elements.confirmTotpButton.textContent = isBusy ? "Verifying..." : "Verify";
 }
 
+function setLoginTotpBusy(isBusy) {
+  elements.verifyLoginTotpButton.disabled = isBusy;
+  elements.loginTotpCode.disabled = isBusy;
+  elements.verifyLoginTotpButton.textContent = isBusy ? "Verifying..." : "Verify";
+}
+
 function resetFlow() {
   state.activeStep = "";
   state.csrfToken = "";
   state.factorId = "";
+  state.loginMfaChallengeId = "";
   state.pendingFinishPayload = null;
   state.pendingRegisterSession = null;
   state.registrationFinished = false;
@@ -126,10 +154,31 @@ function resetOutputs() {
   elements.totpProfile.textContent = "";
   elements.factorId.textContent = "";
   elements.totpCode.value = "";
+  elements.loginMfaPanel.hidden = true;
+  elements.loginTotpCode.value = "";
+  elements.loginTotpCode.disabled = false;
+  elements.verifyLoginTotpButton.disabled = false;
+  elements.verifyLoginTotpButton.textContent = "Verify";
   elements.recoveryPanel.hidden = true;
   elements.recoveryCodes.replaceChildren();
   elements.sessionPanel.hidden = true;
   elements.sessionList.replaceChildren();
+}
+
+function setMode(mode) {
+  const registerMode = mode === "register";
+  elements.registrationForm.hidden = !registerMode;
+  elements.loginForm.hidden = registerMode;
+  elements.showRegisterButton.setAttribute("aria-selected", String(registerMode));
+  elements.showLoginButton.setAttribute("aria-selected", String(!registerMode));
+  resetFlow();
+  resetOutputs();
+  setStatus(registerMode ? "Ready." : "Ready to sign in.");
+  if (registerMode) {
+    elements.loginHandle.focus();
+  } else {
+    elements.returnLoginHandle.focus();
+  }
 }
 
 function ensureBrowserCrypto() {
@@ -187,12 +236,31 @@ function displayAccountSecretKey(secretKey) {
   return `PVSK1-${groups.join("-")}`;
 }
 
+function parseAccountSecretKey(value) {
+  const trimmed = value.trim();
+  const withoutPrefix = trimmed.startsWith("PVSK1-") ? trimmed.slice("PVSK1-".length) : trimmed;
+  const compact = withoutPrefix.replace(/[\s-]/g, "");
+  if (!/^[A-Za-z0-9_-]+$/.test(compact)) {
+    throw new Error("Account secret key format is invalid.");
+  }
+  let decoded;
+  try {
+    decoded = base64UrlToBytes(compact);
+  } catch {
+    throw new Error("Account secret key format is invalid.");
+  }
+  if (decoded.length !== 32) {
+    throw new Error("Account secret key must decode to 32 bytes.");
+  }
+  return decoded;
+}
+
 function jsonBytes(value) {
   return textBytes(JSON.stringify(value));
 }
 
 function normalizeLoginHandle(value) {
-  return value.trim().toLowerCase();
+  return value.trim().replace(/[A-Z]/g, (char) => char.toLowerCase());
 }
 
 function validateKdfProfile(profile) {
@@ -222,6 +290,19 @@ function validateRegisterStart(response) {
   }
   if (!Number.isInteger(Number(response.auth_verifier_iterations))) {
     throw new Error("Invalid SCRAM verifier iterations from server.");
+  }
+}
+
+function validateLoginStart(response) {
+  if (response.auth_protocol !== AUTH_PROTOCOL) {
+    throw new Error("Unsupported auth protocol from server.");
+  }
+  validateKdfProfile(response.kdf_profile);
+  if (response.auth_verifier_profile !== SCRAM_PROFILE_ID) {
+    throw new Error("Unsupported SCRAM verifier profile from server.");
+  }
+  if (Number(response.auth_verifier_iterations) !== SCRAM_ITERATIONS) {
+    throw new Error("Unsupported login verifier iteration count from server.");
   }
 }
 
@@ -336,6 +417,49 @@ async function deriveScramVerifier(authSecret, salt, iterations) {
   };
 }
 
+async function deriveScramClientProof(authSecret, salt, iterations, authMessage) {
+  const iterationCount = Number(iterations);
+  if (!Number.isInteger(iterationCount) || iterationCount < 4096 || iterationCount > 1000000) {
+    throw new Error("Invalid SCRAM proof iteration count.");
+  }
+  if (salt.length < 16) {
+    throw new Error("Invalid SCRAM proof salt.");
+  }
+
+  const saltedPassword = await pbkdf2Bytes(authSecret, salt, iterationCount, "SHA-256");
+  const clientKey = await hmacSha256(saltedPassword, textBytes("Client Key"));
+  const storedKey = await sha256(clientKey);
+  const clientSignature = await hmacSha256(storedKey, authMessage);
+  const proof = new Uint8Array(clientKey.length);
+  for (let index = 0; index < clientKey.length; index += 1) {
+    proof[index] = clientKey[index] ^ clientSignature[index];
+  }
+  wipe(saltedPassword, clientKey, storedKey, clientSignature);
+  return proof;
+}
+
+function pushTranscriptField(parts, name, value) {
+  parts.push(`${name}=${textBytes(value).length}:${value}\n`);
+}
+
+function loginAuthMessage({
+  challengeId,
+  authProtocol,
+  loginHandleNormalized,
+  clientNonce,
+  serverNonce,
+  clientFinalWithoutProof,
+}) {
+  const parts = ["password-vault/login-auth-message/v1\n"];
+  pushTranscriptField(parts, "challenge_id", challengeId);
+  pushTranscriptField(parts, "auth_protocol", authProtocol);
+  pushTranscriptField(parts, "login_handle_normalized", loginHandleNormalized);
+  pushTranscriptField(parts, "client_nonce", base64Url(clientNonce));
+  pushTranscriptField(parts, "server_nonce", base64Url(serverNonce));
+  pushTranscriptField(parts, "client_final_without_proof", base64Url(clientFinalWithoutProof));
+  return textBytes(parts.join(""));
+}
+
 async function aesGcmEncrypt(keyBytes, plaintext) {
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
     "encrypt",
@@ -446,8 +570,75 @@ function browserMetadata() {
   return {
     platform_hint: navigator.userAgentData?.platform || navigator.platform || "web",
     browser_brands: brands,
-    static_ui_flow: "registration_totp_v1",
+    static_ui_flow: "browser_static_v1",
   };
+}
+
+function validateLoginInputs() {
+  const loginHandle = elements.returnLoginHandle.value.trim();
+  const masterPassword = elements.loginMasterPassword.value;
+
+  if (!loginHandle) {
+    throw new Error("Enter a login handle.");
+  }
+  if (masterPassword.length < 12) {
+    throw new Error("Use at least 12 characters for the master password.");
+  }
+  const accountSecretKey = parseAccountSecretKey(elements.accountSecretInput.value);
+
+  return { loginHandle, masterPassword, accountSecretKey };
+}
+
+async function buildLoginFinishPayload(startResponse, input, clientNonce) {
+  const loginHandleNormalized = normalizeLoginHandle(input.loginHandle);
+  const accountSalt = base64UrlToBytes(startResponse.account_salt);
+  const authVerifierSalt = base64UrlToBytes(startResponse.auth_verifier_salt);
+  const serverNonce = base64UrlToBytes(startResponse.server_nonce);
+  const clientFinalWithoutProof = textBytes("c=biws");
+  const { authSecret, unlockKey } = await deriveClientKeys(
+    input.masterPassword,
+    input.accountSecretKey,
+    accountSalt,
+    startResponse.kdf_profile,
+  );
+  const authMessage = loginAuthMessage({
+    challengeId: startResponse.login_challenge_id,
+    authProtocol: AUTH_PROTOCOL,
+    loginHandleNormalized,
+    clientNonce,
+    serverNonce,
+    clientFinalWithoutProof,
+  });
+  const clientProof = await deriveScramClientProof(
+    authSecret,
+    authVerifierSalt,
+    startResponse.auth_verifier_iterations,
+    authMessage,
+  );
+  const payload = {
+    login_challenge_id: startResponse.login_challenge_id,
+    auth_protocol: AUTH_PROTOCOL,
+    client_nonce: base64Url(clientNonce),
+    server_nonce: startResponse.server_nonce,
+    client_final_without_proof: base64Url(clientFinalWithoutProof),
+    client_proof: base64Url(clientProof),
+    device: {
+      label: browserDeviceLabel(),
+      client_type: "browser",
+      public_metadata: browserMetadata(),
+    },
+  };
+  wipe(
+    accountSalt,
+    authVerifierSalt,
+    serverNonce,
+    authSecret,
+    unlockKey,
+    authMessage,
+    clientFinalWithoutProof,
+    clientProof,
+  );
+  return payload;
 }
 
 async function jsonFetch(path, options = {}) {
@@ -598,6 +789,21 @@ function renderSession(sessionResponse, fallbackSession) {
   elements.sessionPanel.hidden = false;
 }
 
+async function startTotpEnrollment(sessionForDisplay) {
+  beginStep("totp-start");
+  setStatus("Starting TOTP enrollment...");
+  const csrf = await jsonFetch("/v1/csrf");
+  state.csrfToken = csrf.csrf_token;
+  const totpEnrollment = await jsonFetch("/v1/mfa/totp/enroll/start", {
+    method: "POST",
+    csrfToken: state.csrfToken,
+    body: {},
+  });
+  renderTotpEnrollment(totpEnrollment);
+  finishStep("totp-start");
+  renderSession(null, sessionForDisplay);
+}
+
 function validateRegistrationInputs() {
   const loginHandle = elements.loginHandle.value.trim();
   const masterPassword = elements.masterPassword.value;
@@ -670,6 +876,75 @@ async function submitRegistration(event) {
   }
 }
 
+async function submitLogin(event) {
+  event.preventDefault();
+  resetFlow();
+  resetOutputs();
+
+  let input;
+  try {
+    ensureBrowserCrypto();
+    input = validateLoginInputs();
+  } catch (error) {
+    setStatus(error.message, "error");
+    return;
+  }
+
+  const clientNonce = randomBytes(32);
+  setLoginBusy(true);
+  setStatus("Starting sign in...");
+
+  try {
+    beginStep("login-start");
+    const startResponse = await jsonFetch("/v1/auth/login/start", {
+      method: "POST",
+      body: {
+        login_handle: input.loginHandle,
+        auth_protocol: AUTH_PROTOCOL,
+        client_nonce: base64Url(clientNonce),
+      },
+    });
+    validateLoginStart(startResponse);
+    finishStep("login-start");
+
+    beginStep("login-proof");
+    setStatus("Verifying account proof...");
+    const finishPayload = await buildLoginFinishPayload(startResponse, input, clientNonce);
+    const finishResponse = await jsonFetch("/v1/auth/login/finish", {
+      method: "POST",
+      body: finishPayload,
+    });
+    finishStep("login-proof");
+
+    elements.loginMasterPassword.value = "";
+    elements.accountSecretInput.value = "";
+    if (finishResponse.result === "mfa_required") {
+      state.loginMfaChallengeId = finishResponse.mfa_challenge_id;
+      elements.loginMfaPanel.hidden = false;
+      elements.loginTotpCode.focus();
+      setStatus("Enter the TOTP code for this account.", "success");
+      return;
+    }
+
+    if (finishResponse.result === "session_created") {
+      await startTotpEnrollment(finishResponse.session);
+      setStatus("TOTP enrollment ready for this account.", "success");
+      return;
+    }
+
+    throw new Error("Unexpected login response.");
+  } catch (error) {
+    failActiveStep();
+    elements.loginMasterPassword.value = "";
+    elements.accountSecretInput.value = "";
+    setStatus(error.message, "error");
+  } finally {
+    wipe(clientNonce, input?.accountSecretKey);
+    setLoginBusy(false);
+    refreshStatus();
+  }
+}
+
 async function continueEnrollment() {
   if (!elements.secretSavedCheckbox.checked) {
     setStatus("Confirm that the account secret key is saved.", "error");
@@ -700,19 +975,7 @@ async function continueEnrollment() {
       finishStep("register-finish");
     }
 
-    beginStep("totp-start");
-    setStatus("Starting TOTP enrollment...");
-    const csrf = await jsonFetch("/v1/csrf");
-    state.csrfToken = csrf.csrf_token;
-    const totpEnrollment = await jsonFetch("/v1/mfa/totp/enroll/start", {
-      method: "POST",
-      csrfToken: state.csrfToken,
-      body: {},
-    });
-    renderTotpEnrollment(totpEnrollment);
-    finishStep("totp-start");
-
-    renderSession(null, registerSession);
+    await startTotpEnrollment(registerSession);
     elements.copySecretButton.disabled = false;
     elements.downloadSecretButton.disabled = false;
     elements.continueEnrollmentButton.disabled = true;
@@ -727,6 +990,54 @@ async function continueEnrollment() {
       if (state.registrationFinished) {
         elements.continueEnrollmentButton.textContent = "Retry enrollment";
       }
+    }
+    refreshStatus();
+  }
+}
+
+async function submitLoginTotp(event) {
+  event.preventDefault();
+  const code = elements.loginTotpCode.value.replace(/\s/g, "");
+  let completed = false;
+  if (!state.loginMfaChallengeId) {
+    setStatus("Start sign in first.", "error");
+    return;
+  }
+  if (!/^\d{6}$/.test(code)) {
+    setStatus("Enter a 6-digit TOTP code.", "error");
+    return;
+  }
+
+  setLoginTotpBusy(true);
+  setStatus("Verifying TOTP code...");
+
+  try {
+    beginStep("login-mfa");
+    const verification = await jsonFetch("/v1/auth/mfa/totp/verify", {
+      method: "POST",
+      body: {
+        mfa_challenge_id: state.loginMfaChallengeId,
+        code,
+      },
+    });
+    state.loginMfaChallengeId = "";
+    finishStep("login-mfa");
+
+    beginStep("session");
+    const session = await jsonFetch("/v1/session").catch(() => null);
+    renderSession(session, verification.session);
+    finishStep("session");
+
+    elements.loginTotpCode.value = "";
+    elements.loginMfaPanel.hidden = true;
+    completed = true;
+    setStatus("Signed in.", "success");
+  } catch (error) {
+    failActiveStep();
+    setStatus(error.message, "error");
+  } finally {
+    if (!completed) {
+      setLoginTotpBusy(false);
     }
     refreshStatus();
   }
@@ -782,11 +1093,15 @@ async function submitTotp(event) {
   }
 }
 
+elements.showRegisterButton.addEventListener("click", () => setMode("register"));
+elements.showLoginButton.addEventListener("click", () => setMode("login"));
 elements.registrationForm.addEventListener("submit", submitRegistration);
+elements.loginForm.addEventListener("submit", submitLogin);
 elements.copySecretButton.addEventListener("click", copyAccountSecret);
 elements.downloadSecretButton.addEventListener("click", downloadAccountSecret);
 elements.secretSavedCheckbox.addEventListener("change", updateSecretSavedState);
 elements.continueEnrollmentButton.addEventListener("click", continueEnrollment);
 elements.totpForm.addEventListener("submit", submitTotp);
+elements.loginMfaForm.addEventListener("submit", submitLoginTotp);
 resetFlow();
 refreshStatus();

@@ -166,6 +166,33 @@ p {
   margin-bottom: 18px;
 }
 
+.mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  min-height: 42px;
+  margin-bottom: 18px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #eef2f1;
+}
+
+.mode-switch button {
+  min-height: 34px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.mode-switch button[aria-selected="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(31, 35, 40, 0.12);
+}
+
 .stack {
   display: grid;
   gap: 10px;
@@ -508,6 +535,10 @@ button:focus-visible {
   .panel,
   .output-band {
     padding: 18px;
+  }
+
+  .mode-switch {
+    min-height: 40px;
   }
 
   .brand h1,
