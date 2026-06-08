@@ -1,8 +1,10 @@
 # syntax=docker/dockerfile:1.18
 
 ARG RUST_VERSION=1.96.0
+ARG BUILD_REVISION=unknown
 
 FROM rust:${RUST_VERSION}-bookworm AS build
+ARG BUILD_REVISION
 WORKDIR /workspace
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 
@@ -10,7 +12,8 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 COPY migrations ./migrations
 
-RUN cargo build --locked --release --bin password-vault-api
+RUN PASSWORD_VAULT_BUILD_REVISION="${BUILD_REVISION}" \
+    cargo build --locked --release --bin password-vault-api
 
 FROM debian:bookworm-slim AS runtime
 

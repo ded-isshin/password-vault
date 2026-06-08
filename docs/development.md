@@ -53,6 +53,21 @@ Rules:
 - Do not run privileged containers.
 - Keep build artifacts inside the repository workspace or an explicitly documented cache path.
 
+### API Container Image
+
+The API image accepts a build-time revision argument. GitHub Actions passes the current commit SHA so
+`password_vault_build_info{revision=...}` can be correlated with rollouts and incidents.
+
+For local image builds, pass the same argument explicitly when release context matters:
+
+```bash
+docker build \
+  --build-arg BUILD_REVISION="$(git rev-parse HEAD)" \
+  -t password-vault-api:local .
+```
+
+If the build arg is omitted, the binary reports `revision="unknown"` in the build info metric.
+
 ### GitHub Actions
 
 Use GitHub-hosted runners only.

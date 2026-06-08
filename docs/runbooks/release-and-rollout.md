@@ -13,7 +13,8 @@ authorize cluster mutation by itself.
 2. GitHub Actions run Rust, PostgreSQL, public-safety, container smoke, Helm, and docs checks.
 3. Merge to `main` triggers the container publish job.
 4. The publish job builds the image on a GitHub-hosted runner, pushes to GHCR, and attaches
-   provenance/SBOM attestations.
+   provenance/SBOM attestations. The image build passes `BUILD_REVISION=<github-sha>` so
+   `password_vault_build_info` reports the source revision in Grafana.
 5. Infrastructure PR updates production values to the image digest.
 6. Human reviews and approves the infrastructure PR.
 7. Argo CD sync rolls out the new digest.

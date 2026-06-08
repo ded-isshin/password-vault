@@ -63,6 +63,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
           load: true
           tags: password-vault-api:ci-smoke
 
@@ -95,6 +97,9 @@ jobs:
           curl -fsS http://127.0.0.1:8080/healthz
           curl -fsS http://127.0.0.1:8080/readyz
           curl -fsS http://127.0.0.1:8080/metrics | grep -E 'axum_http_requests_total|axum_http_requests_duration_seconds'
+          curl -fsS http://127.0.0.1:8080/metrics \
+            | grep 'password_vault_build_info' \
+            | grep "revision=\"${GITHUB_SHA}\""
           docker run --rm --network host \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
@@ -153,6 +158,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
