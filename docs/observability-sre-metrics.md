@@ -7,6 +7,13 @@ Product instrumentation must stay public-repository safe: no private IPs, hostna
 handles, account IDs, device IDs, item IDs, request bodies, encrypted payloads, OTP codes, or raw
 paths as metric labels.
 
+Official sources checked:
+
+- Google SRE Book, "Monitoring Distributed Systems".
+- Google SRE Workbook, "Monitoring".
+- Google SRE Workbook, "Alerting on SLOs".
+- Google SRE Workbook, "Implementing SLOs".
+
 ## Ownership Boundaries
 
 - Product repo owns application metric names, safe labels, `/metrics` exposure behavior, Helm scrape
@@ -37,6 +44,9 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   `LoadBalancer` address is not the default client URL for a MacBook or other LAN-only browser.
 - Argo CD is reachable through the mini-PC LAN-facing edge stream port and reports the product
   application as `Synced` and `Healthy`.
+- A live browser-equivalent edge check from the mini-PC confirmed HTTP 200 for Password Vault,
+  Grafana health, the `Password Vault Overview` dashboard URL, and Argo CD `/healthz`. A MacBook
+  should use the mini-PC LAN-facing address and these edge ports, not Kubernetes/LXD service IPs.
 - Grafana image rendering is not installed, so dashboard PNG rendering is not available from the
   Grafana MCP path. Dashboard verification must currently use live browser access plus datasource
   query checks rather than rendered-image evidence.
@@ -44,6 +54,11 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - Strict node spreading is enabled. Production rollout values use `maxUnavailable: 1` and
   `maxSurge: 0` to avoid a surge-pod scheduling deadlock with
   `whenUnsatisfiable: DoNotSchedule`.
+- Read-only cluster checks showed the product database is still a single `postgres:17-bookworm`
+  StatefulSet on a node-local `local-path` PVC. CloudNativePG CRDs exist, but there is no active
+  product `Cluster`, `Backup`, or `ScheduledBackup`, and no CloudNativePG operator/controller was
+  observed in the current cluster scan.
+- No `NetworkPolicy` exists in the `password-vault` namespace yet.
 
 Important label note:
 
@@ -306,5 +321,9 @@ helm template password-vault deploy/helm/password-vault \
   <https://sre.google/sre-book/monitoring-distributed-systems/>
 - Google SRE Book, Service Level Objectives:
   <https://sre.google/sre-book/service-level-objectives/>
+- Google SRE Workbook, Monitoring:
+  <https://sre.google/workbook/monitoring/>
+- Google SRE Workbook, Alerting on SLOs:
+  <https://sre.google/workbook/alerting-on-slos/>
 - Google SRE Workbook, Implementing SLOs:
   <https://sre.google/workbook/implementing-slos/>

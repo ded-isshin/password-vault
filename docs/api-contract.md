@@ -599,8 +599,9 @@ Implementation status:
 - The current contract is single-slot: fetching a new CSRF token invalidates the previous token for
   that session.
 - The returned `expires_at` is the current effective idle expiry.
-- CSRF validation is enforced for `POST /v1/auth/logout`; future authenticated unsafe routes must
-  use the same session, CSRF, Origin, and Fetch Metadata checks.
+- CSRF validation is enforced for `POST /v1/auth/logout` and implemented vault item write routes.
+  Future authenticated unsafe routes must use the same session, CSRF, Origin, and Fetch Metadata
+  checks.
 
 ### `GET /v1/session`
 
@@ -745,7 +746,6 @@ Response `200`:
   "vaults": [
     {
       "vault_id": "00000000-0000-4000-8000-000000000010",
-      "name_ciphertext": "<base64url-bytes>",
       "head_seq": 0,
       "head_hash": "<base64url-32-bytes>",
       "encrypted_vault_key": {
@@ -753,11 +753,17 @@ Response `200`:
         "key_id": "user-key-v1",
         "nonce": "<base64url-12-bytes>",
         "ciphertext": "<base64url-bytes>"
-      }
+      },
+      "created_at": "2026-06-07T00:00:00Z",
+      "updated_at": "2026-06-07T00:00:00Z"
     }
   ]
 }
 ```
+
+Implementation note: encrypted vault display metadata such as `name_ciphertext` is planned but is
+not represented in the current schema. The current implementation omits `name_ciphertext` until an
+encrypted vault metadata migration is designed.
 
 ### `GET /v1/vaults/{vault_id}/sync`
 
@@ -780,6 +786,7 @@ Response `200`:
     "seq": 2,
     "hash": "<base64url-32-bytes>"
   },
+  "has_more": false,
   "changes": [
     {
       "item_id": "00000000-0000-4000-8000-000000000400",
@@ -809,6 +816,10 @@ Response `200`:
 If the supplied cursor does not match the visible vault head history, return `409 vault_conflict`
 with the current visible head.
 
+The implementation caps each sync response at 500 changes. If more changes remain, `has_more` is
+`true` and `to_head` is the last returned change head; the client should call sync again using that
+`to_head` as the next cursor.
+
 ### `POST /v1/vaults/{vault_id}/items`
 
 Request:
@@ -816,6 +827,7 @@ Request:
 ```json
 {
   "item_id": "00000000-0000-4000-8000-000000000400",
+  "revision_id": "00000000-0000-4000-8000-000000000401",
   "base_head_seq": 0,
   "base_head_hash": "<base64url-32-bytes>",
   "new_head_hash": "<base64url-32-bytes>",
@@ -849,6 +861,7 @@ Request:
 
 ```json
 {
+  "revision_id": "00000000-0000-4000-8000-000000000402",
   "operation": "update",
   "base_revision_seq": 1,
   "base_head_seq": 1,
@@ -884,6 +897,20 @@ Response `201`:
 Stale writes return `409 vault_conflict` with the current visible vault head. The unlocked client is
 responsible for verifying `change_mac`, `envelope_hash`, and hash-chain continuity before trusting
 or decrypting sync responses.
+
+Implementation status:
+
+- Implemented locally, not merged/deployed as of the current feature branch.
+- Vault endpoints require an `mfa_verified` session.
+- State-changing vault requests require the same JSON, session, CSRF, Fetch Metadata, and Origin
+  protections as logout.
+- `item_id` and `revision_id` are client-generated so the encrypted payload can bind them into AEAD
+  associated data and `change_mac`.
+- The backend stores encrypted item envelopes and sync metadata only. It does not decrypt or inspect
+  item plaintext.
+- Cross-account vault or item access returns `404 not_found`.
+- Stale write bases and mismatched sync cursors return `409 vault_conflict` with the current visible
+  vault head after membership is proven.
 
 ## Audit Events
 

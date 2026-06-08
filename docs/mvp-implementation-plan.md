@@ -20,11 +20,13 @@ Current implementation status, 2026-06-08:
   `PV_TOTP_SEED_KEY_B64` key, and confirmation upgrades the setup session to `mfa_verified` while
   returning one-time recovery codes.
 - Login finish and login-time TOTP verification are merged and deployed in the current preview.
+- Vault list, encrypted item create/update/delete revision writes, and delta sync are implemented
+  locally on the current feature branch with database-backed tests. They are not merged or deployed
+  yet.
 - The browser preview supports registration and TOTP enrollment, and the current implementation
   adds the browser return-login path that uses deployed `login/start`, `login/finish`, and
   login-time `totp/verify`.
-- Recovery-code verification, vault item CRUD/sync, and browser-side vault unlock remain
-  unimplemented.
+- Recovery-code verification and browser-side vault unlock remain unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
@@ -46,8 +48,8 @@ MVP dependable:
 1. Prove browser access from the client side, not only from the mini-PC: Password Vault, Grafana,
    and Argo CD should be checked from the MacBook/browser path with the expected self-signed TLS
    warning.
-2. Add browser vault unlock plus encrypted item create/read/update/delete with revision conflict
-   checks.
+2. Merge and deploy the encrypted vault CRUD/sync API, then add browser vault unlock plus encrypted
+   item create/read/update/delete with revision conflict checks.
 3. Keep production startup migrations off and keep schema-changing releases behind the controlled
    migration job/runbook.
 4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster

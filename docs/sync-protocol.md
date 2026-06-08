@@ -53,6 +53,10 @@ item_revision
 `head_hash` is a client-keyed hash-chain head. It lets an unlocked client detect rollback against
 state it has already observed. See [Vault Revision Freshness And Rollback Resistance](security/revision-freshness.md).
 
+The sync API returns a bounded number of changes per response. If `has_more` is true, the client
+must continue from the returned `to_head` cursor instead of assuming it has reached the latest vault
+head.
+
 The client should generate `item_id` and `revision_id` before encryption so those identifiers can be
 bound into AEAD associated data and `change_mac`.
 

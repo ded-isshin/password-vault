@@ -14,6 +14,7 @@ use sqlx::PgPool;
 
 pub mod auth;
 pub mod db;
+pub mod vault;
 
 #[derive(Clone)]
 pub struct ApiConfig {
@@ -244,6 +245,7 @@ fn router(state: AppState) -> Router {
         .route("/readyz", get(readyz))
         .route("/metrics", get(move || metrics(metrics_handle.clone())))
         .merge(auth::routes::router())
+        .merge(vault::router())
         .with_state(state)
         .layer(metrics_layer)
 }
@@ -2021,6 +2023,379 @@ mod tests {
         assert_eq!(verified_session_body["vault_access"], true);
     }
 
+    #[tokio::test]
+    async fn vault_item_api_requires_mfa_and_syncs_encrypted_revisions() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping vault item API database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let vault_id = "00000000-0000-4000-8000-000000000880";
+        let setup_cookie = cookie_pair(
+            &register_account_and_return_set_cookie(&router, "vault-owner@example.com", vault_id)
+                .await,
+        );
+        let pre_mfa_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/vaults", &setup_cookie))
+            .await
+            .expect("pre-MFA vault list returns a response");
+        assert_eq!(pre_mfa_response.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(pre_mfa_response).await["error"]["code"],
+            "mfa_required"
+        );
+
+        let (_seed, verified_cookie) = enroll_totp_and_return_verified_cookie(
+            &router,
+            &pool,
+            "vault-owner@example.com",
+            &setup_cookie,
+        )
+        .await;
+
+        let vaults_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/vaults", &verified_cookie))
+            .await
+            .expect("vault list returns a response");
+        assert_eq!(vaults_response.status(), http::StatusCode::OK);
+        assert_eq!(
+            vaults_response.headers().get("cache-control").unwrap(),
+            "no-store"
+        );
+        let vaults_body = response_json(vaults_response).await;
+        let vault = &vaults_body["vaults"][0];
+        assert_eq!(vault["vault_id"], vault_id);
+        assert_eq!(vault["head_seq"], 0);
+        assert_eq!(
+            vault["encrypted_vault_key"]["crypto_version"],
+            "vault-key-wrap-v1"
+        );
+        let genesis_head_hash = vault["head_hash"]
+            .as_str()
+            .expect("vault head hash is present")
+            .to_string();
+
+        let csrf_token = csrf_for_cookie(&router, &verified_cookie).await;
+        let item_id = "00000000-0000-4000-8000-000000000881";
+        let revision_id_1 = "00000000-0000-4000-8000-000000000882";
+        let head_hash_1 = encode_base64url(&[0x10; 32]);
+        let create_body = serde_json::json!({
+            "item_id": item_id,
+            "revision_id": revision_id_1,
+            "base_head_seq": 0,
+            "base_head_hash": genesis_head_hash,
+            "new_head_hash": head_hash_1,
+            "change_mac": encode_base64url(&[0x11; 32]),
+            "envelope_hash": encode_base64url(&[0x12; 32]),
+            "encrypted_item_envelope": item_envelope_json(0x20, 0x21)
+        })
+        .to_string();
+
+        let missing_csrf_create = router
+            .clone()
+            .oneshot(json_request_with_cookie(
+                &format!("/v1/vaults/{vault_id}/items"),
+                &create_body,
+                &verified_cookie,
+            ))
+            .await
+            .expect("missing CSRF create returns a response");
+        assert_eq!(missing_csrf_create.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(missing_csrf_create).await["error"]["code"],
+            "csrf_required"
+        );
+
+        let create_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items"),
+                &create_body,
+                &verified_cookie,
+                &csrf_token,
+            ))
+            .await
+            .expect("item create returns a response");
+        assert_eq!(create_response.status(), http::StatusCode::CREATED);
+        let create_response_body = response_json(create_response).await;
+        assert_eq!(create_response_body["item_id"], item_id);
+        assert_eq!(create_response_body["revision_id"], revision_id_1);
+        assert_eq!(create_response_body["revision_seq"], 1);
+        assert_eq!(create_response_body["head_seq"], 1);
+        assert_eq!(create_response_body["head_hash"], head_hash_1);
+
+        let stale_create_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items"),
+                &create_body,
+                &verified_cookie,
+                &csrf_for_cookie(&router, &verified_cookie).await,
+            ))
+            .await
+            .expect("stale item create returns a response");
+        assert_eq!(stale_create_response.status(), http::StatusCode::CONFLICT);
+        let stale_create_body = response_json(stale_create_response).await;
+        assert_eq!(stale_create_body["error"]["code"], "vault_conflict");
+        assert_eq!(stale_create_body["current_head"]["seq"], 1);
+        assert_eq!(stale_create_body["current_head"]["hash"], head_hash_1);
+
+        let sync_response = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                &format!(
+                    "/v1/vaults/{vault_id}/sync?from_head_seq=0&from_head_hash={}",
+                    vault["head_hash"].as_str().unwrap()
+                ),
+                &verified_cookie,
+            ))
+            .await
+            .expect("sync from genesis returns a response");
+        assert_eq!(sync_response.status(), http::StatusCode::OK);
+        let sync_body = response_json(sync_response).await;
+        assert_eq!(sync_body["to_head"]["seq"], 1);
+        assert_eq!(sync_body["has_more"], false);
+        assert_eq!(sync_body["changes"].as_array().unwrap().len(), 1);
+        assert_eq!(sync_body["changes"][0]["item_id"], item_id);
+        assert_eq!(sync_body["changes"][0]["revision_id"], revision_id_1);
+        assert_eq!(
+            sync_body["changes"][0]["encrypted_item_envelope"]["crypto_version"],
+            "item-envelope-v1"
+        );
+
+        let revision_id_2 = "00000000-0000-4000-8000-000000000883";
+        let head_hash_2 = encode_base64url(&[0x30; 32]);
+        let update_body = serde_json::json!({
+            "revision_id": revision_id_2,
+            "operation": "update",
+            "base_revision_seq": 1,
+            "base_head_seq": 1,
+            "base_head_hash": head_hash_1,
+            "new_head_hash": head_hash_2,
+            "change_mac": encode_base64url(&[0x31; 32]),
+            "envelope_hash": encode_base64url(&[0x32; 32]),
+            "encrypted_item_envelope": item_envelope_json(0x33, 0x34)
+        })
+        .to_string();
+        let update_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items/{item_id}/revisions"),
+                &update_body,
+                &verified_cookie,
+                &csrf_for_cookie(&router, &verified_cookie).await,
+            ))
+            .await
+            .expect("item update returns a response");
+        assert_eq!(update_response.status(), http::StatusCode::CREATED);
+        let update_response_body = response_json(update_response).await;
+        assert_eq!(update_response_body["revision_id"], revision_id_2);
+        assert_eq!(update_response_body["revision_seq"], 2);
+        assert_eq!(update_response_body["head_seq"], 2);
+
+        let revision_id_3 = "00000000-0000-4000-8000-000000000884";
+        let head_hash_3 = encode_base64url(&[0x40; 32]);
+        let delete_body = serde_json::json!({
+            "revision_id": revision_id_3,
+            "operation": "delete",
+            "base_revision_seq": 2,
+            "base_head_seq": 2,
+            "base_head_hash": head_hash_2,
+            "new_head_hash": head_hash_3,
+            "change_mac": encode_base64url(&[0x41; 32]),
+            "envelope_hash": encode_base64url(&[0x42; 32]),
+            "encrypted_item_envelope": item_envelope_json(0x43, 0x44)
+        })
+        .to_string();
+        let delete_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items/{item_id}/revisions"),
+                &delete_body,
+                &verified_cookie,
+                &csrf_for_cookie(&router, &verified_cookie).await,
+            ))
+            .await
+            .expect("item delete revision returns a response");
+        assert_eq!(delete_response.status(), http::StatusCode::CREATED);
+        let delete_response_body = response_json(delete_response).await;
+        assert_eq!(delete_response_body["revision_id"], revision_id_3);
+        assert_eq!(delete_response_body["revision_seq"], 3);
+        assert_eq!(delete_response_body["head_seq"], 3);
+
+        let delta_sync = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                &format!("/v1/vaults/{vault_id}/sync?from_head_seq=1&from_head_hash={head_hash_1}"),
+                &verified_cookie,
+            ))
+            .await
+            .expect("delta sync returns a response");
+        assert_eq!(delta_sync.status(), http::StatusCode::OK);
+        let delta_sync_body = response_json(delta_sync).await;
+        assert_eq!(delta_sync_body["to_head"]["seq"], 3);
+        assert_eq!(delta_sync_body["has_more"], false);
+        assert_eq!(delta_sync_body["changes"].as_array().unwrap().len(), 2);
+        assert_eq!(delta_sync_body["changes"][0]["operation"], "update");
+        assert_eq!(delta_sync_body["changes"][1]["operation"], "delete");
+
+        let mismatched_cursor_sync = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                &format!(
+                    "/v1/vaults/{vault_id}/sync?from_head_seq=1&from_head_hash={}",
+                    encode_base64url(&[0xff; 32])
+                ),
+                &verified_cookie,
+            ))
+            .await
+            .expect("mismatched cursor sync returns a response");
+        assert_eq!(mismatched_cursor_sync.status(), http::StatusCode::CONFLICT);
+        let mismatched_cursor_body = response_json(mismatched_cursor_sync).await;
+        assert_eq!(mismatched_cursor_body["error"]["code"], "vault_conflict");
+        assert_eq!(mismatched_cursor_body["current_head"]["seq"], 3);
+        assert_eq!(mismatched_cursor_body["current_head"]["hash"], head_hash_3);
+
+        let invalid_envelope_body = serde_json::json!({
+            "item_id": "00000000-0000-4000-8000-000000000886",
+            "revision_id": "00000000-0000-4000-8000-000000000887",
+            "base_head_seq": 3,
+            "base_head_hash": head_hash_3,
+            "new_head_hash": encode_base64url(&[0x50; 32]),
+            "change_mac": encode_base64url(&[0x51; 32]),
+            "envelope_hash": encode_base64url(&[0x52; 32]),
+            "encrypted_item_envelope": {
+                "crypto_version": "unsupported-envelope-v1",
+                "key_id": "vault-key-v1",
+                "aead": "AES-256-GCM",
+                "nonce": encode_base64url(&[0x53; 12]),
+                "ciphertext": encode_base64url(&[0x54; 48])
+            }
+        })
+        .to_string();
+        let invalid_envelope_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items"),
+                &invalid_envelope_body,
+                &verified_cookie,
+                &csrf_for_cookie(&router, &verified_cookie).await,
+            ))
+            .await
+            .expect("invalid envelope create returns a response");
+        assert_eq!(
+            invalid_envelope_response.status(),
+            http::StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            response_json(invalid_envelope_response).await["error"]["code"],
+            "bad_request"
+        );
+
+        let duplicate_revision_body = serde_json::json!({
+            "item_id": "00000000-0000-4000-8000-000000000888",
+            "revision_id": revision_id_1,
+            "base_head_seq": 3,
+            "base_head_hash": head_hash_3,
+            "new_head_hash": encode_base64url(&[0x60; 32]),
+            "change_mac": encode_base64url(&[0x61; 32]),
+            "envelope_hash": encode_base64url(&[0x62; 32]),
+            "encrypted_item_envelope": item_envelope_json(0x63, 0x64)
+        })
+        .to_string();
+        let duplicate_revision_response = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items"),
+                &duplicate_revision_body,
+                &verified_cookie,
+                &csrf_for_cookie(&router, &verified_cookie).await,
+            ))
+            .await
+            .expect("duplicate revision create returns a response");
+        assert_eq!(
+            duplicate_revision_response.status(),
+            http::StatusCode::CONFLICT
+        );
+        let duplicate_revision_body = response_json(duplicate_revision_response).await;
+        assert_eq!(duplicate_revision_body["error"]["code"], "vault_conflict");
+        assert_eq!(duplicate_revision_body["current_head"]["seq"], 3);
+        assert_eq!(duplicate_revision_body["current_head"]["hash"], head_hash_3);
+
+        let other_setup_cookie = cookie_pair(
+            &register_account_and_return_set_cookie(
+                &router,
+                "vault-other@example.com",
+                "00000000-0000-4000-8000-000000000885",
+            )
+            .await,
+        );
+        let (_other_seed, other_verified_cookie) = enroll_totp_and_return_verified_cookie(
+            &router,
+            &pool,
+            "vault-other@example.com",
+            &other_setup_cookie,
+        )
+        .await;
+        let cross_account_create = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                &format!("/v1/vaults/{vault_id}/items"),
+                &create_body,
+                &other_verified_cookie,
+                &csrf_for_cookie(&router, &other_verified_cookie).await,
+            ))
+            .await
+            .expect("cross-account create returns a response");
+        assert_eq!(cross_account_create.status(), http::StatusCode::NOT_FOUND);
+        assert_eq!(
+            response_json(cross_account_create).await["error"]["code"],
+            "not_found"
+        );
+        let cross_account_sync = router
+            .clone()
+            .oneshot(get_request_with_cookie(
+                &format!(
+                    "/v1/vaults/{vault_id}/sync?from_head_seq=0&from_head_hash={}",
+                    vault["head_hash"].as_str().unwrap()
+                ),
+                &other_verified_cookie,
+            ))
+            .await
+            .expect("cross-account sync returns a response");
+        assert_eq!(cross_account_sync.status(), http::StatusCode::NOT_FOUND);
+        assert_eq!(
+            response_json(cross_account_sync).await["error"]["code"],
+            "not_found"
+        );
+    }
+
     fn json_request(uri: &str, body: &str) -> Request<Body> {
         Request::builder()
             .method("POST")
@@ -2121,12 +2496,36 @@ mod tests {
             .expect("test GET request with cookie builds")
     }
 
+    async fn csrf_for_cookie(router: &axum::Router, cookie: &str) -> String {
+        let csrf_response = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/csrf", cookie))
+            .await
+            .expect("csrf request returns a response");
+        assert_eq!(csrf_response.status(), http::StatusCode::OK);
+        let csrf_body = response_json(csrf_response).await;
+        csrf_body["csrf_token"]
+            .as_str()
+            .expect("csrf token is present")
+            .to_string()
+    }
+
     fn cookie_pair(set_cookie: &str) -> String {
         set_cookie
             .split(';')
             .next()
             .expect("set-cookie has a cookie pair")
             .to_string()
+    }
+
+    fn item_envelope_json(nonce_byte: u8, ciphertext_byte: u8) -> Value {
+        serde_json::json!({
+            "crypto_version": "item-envelope-v1",
+            "key_id": "vault-key-v1",
+            "aead": "AES-256-GCM",
+            "nonce": encode_base64url(&[nonce_byte; 12]),
+            "ciphertext": encode_base64url(&[ciphertext_byte; 48])
+        })
     }
 
     async fn db_test_guard() -> MutexGuard<'static, ()> {
@@ -2583,6 +2982,17 @@ mod tests {
         login_handle: &str,
         setup_cookie: &str,
     ) -> Vec<u8> {
+        let (seed, _verified_cookie) =
+            enroll_totp_and_return_verified_cookie(router, pool, login_handle, setup_cookie).await;
+        seed
+    }
+
+    async fn enroll_totp_and_return_verified_cookie(
+        router: &axum::Router,
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        setup_cookie: &str,
+    ) -> (Vec<u8>, String) {
         let csrf_response = router
             .clone()
             .oneshot(get_request_with_cookie("/v1/csrf", setup_cookie))
@@ -2630,6 +3040,13 @@ mod tests {
             .await
             .expect("totp enroll confirm returns a response");
         assert_eq!(confirm_response.status(), http::StatusCode::OK);
+        let verified_cookie = confirm_response
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("totp enroll confirm rotates the session cookie")
+            .to_string();
+        let verified_cookie = cookie_pair(&verified_cookie);
 
         sqlx::query(
             "
@@ -2645,7 +3062,7 @@ mod tests {
         .await
         .expect("test can reset TOTP replay state");
 
-        seed
+        (seed, verified_cookie)
     }
 
     async fn assert_csrf_hash_persisted(
