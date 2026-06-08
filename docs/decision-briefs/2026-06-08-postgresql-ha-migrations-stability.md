@@ -19,9 +19,12 @@ Inputs inspected:
 
 Runtime assumption for this decision:
 
-- CloudNativePG CRDs are present in the Kubernetes cluster.
-- There are currently no CloudNativePG `Cluster` resources for `password-vault`.
-- The current `password-vault` database is a single PostgreSQL `StatefulSet`.
+- CloudNativePG CRDs and the shared CloudNativePG operator are present in the Kubernetes cluster.
+- A product-owned `password-vault-cnpg` CloudNativePG `Cluster` exists as a pre-cutover validation
+  target with three PostgreSQL instances.
+- The current live `password-vault` API database is still the single PostgreSQL `StatefulSet`; the
+  API has not been cut over to `password-vault-cnpg`.
+- There are currently no CloudNativePG `Backup` or `ScheduledBackup` resources for `password-vault`.
 - The current `hiringtrace` PostgreSQL deployment, if present, is a separate product runtime and
   must not be reused as a `password-vault` database, schema, credential source, PVC, or backup
   target.
@@ -105,24 +108,23 @@ shortcut. The migration should be staged and reversible.
 
 Recommended path:
 
-1. Install or confirm the shared CloudNativePG operator through infrastructure GitOps.
-2. Select and document the backup target, credentials path, retention, and restore-drill namespace.
-3. Create a product-owned `password-vault` CloudNativePG `Cluster` with three instances, separate
-   PVCs, product-specific Services, product-specific Secrets, and no public PostgreSQL exposure.
-4. Configure synchronous replication, node spread/anti-affinity, resource requests, monitoring, and
-   NetworkPolicies before accepting real user secrets.
-5. Enable continuous WAL archiving and scheduled base backups.
+1. Confirm the shared CloudNativePG operator through infrastructure GitOps.
+2. Keep the product-owned `password-vault-cnpg` CloudNativePG pre-cutover cluster healthy with three
+   instances, separate PVCs, product-specific Services, product-specific Secrets, no public
+   PostgreSQL exposure, monitoring, and NetworkPolicy.
+3. Select and document the backup target, credentials path, retention, and restore-drill namespace.
+4. Enable continuous WAL archiving and scheduled base backups.
+5. Run and document restore and failover drills against a non-live target.
 6. Run the product schema migrations against the new cluster using an explicit migration job, not API
    pod startup.
 7. If preview data needs to be preserved, perform a reviewed dump/import or logical migration from
    the preview `StatefulSet`; otherwise treat preview data as disposable and initialize from
    migrations.
-8. Run a restore drill into a separate namespace or separate `Cluster` object before cutover.
-9. Cut the API over by changing the runtime database Secret/Service reference through GitOps, then
+8. Cut the API over by changing the runtime database Secret/Service reference through GitOps, then
    roll API pods with `maxUnavailable: 0`.
-10. Validate health, readiness, synthetic user journeys, backup status, replication state,
+9. Validate health, readiness, synthetic user journeys, backup status, replication state,
     failover behavior, and dashboards.
-11. Keep the old preview `StatefulSet` quarantined for a short rollback window if data was migrated;
+10. Keep the old preview `StatefulSet` quarantined for a short rollback window if data was migrated;
     remove it only after the cutover and restore evidence are recorded.
 
 The cutover must be blocked if the backup target, WAL archiving, restore drill, or runtime Secret

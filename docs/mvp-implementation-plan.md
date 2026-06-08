@@ -55,10 +55,12 @@ Current implementation status, 2026-06-08:
   VictoriaMetrics after a synthetic smoke run. MFA, vault item, and sync counters are now covered by
   the full CI/local synthetic journey, but still need a live edge verification run and dashboard
   query check.
-- CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
-  `Backup`, or `ScheduledBackup` resources are present yet. A live scan also found no running
-  CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
-  `StatefulSet`, so it remains a blocker before real password data.
+- The shared CloudNativePG operator is deployed through infrastructure GitOps. A product-owned
+  pre-cutover `password-vault-cnpg` CloudNativePG `Cluster` is deployed and verified live with
+  three PostgreSQL 18.4 instances spread across the three worker nodes. It is intentionally not wired
+  to the API yet. The API still uses the preview single PostgreSQL `StatefulSet`, so real password
+  data remains blocked until backup, WAL archiving, restore, failover, migration, and cutover gates
+  are complete.
 - A controlled migration runner is merged, published, and deployed: the API image supports a
   `password-vault-api migrate` command, startup migrations remain disabled in production values, and
   generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
@@ -75,8 +77,9 @@ MVP dependable:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
 3. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
    not schedule production cleanup until HA/backup posture is understood.
-4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
-   before accepting real secrets.
+4. Complete the database cutover track: keep the current pre-cutover CloudNativePG cluster healthy,
+   add backup/WAL/restore/failover gates, run schema validation against it, then switch the API
+   database Secret through GitOps. Do not accept real secrets before this is complete.
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
 6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
