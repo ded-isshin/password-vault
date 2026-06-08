@@ -8,6 +8,10 @@ const ITEM_ENVELOPE_CRYPTO_VERSION = "item-envelope-v1";
 const ITEM_ENVELOPE_AEAD = "AES-256-GCM";
 const SCRAM_PROFILE_ID = "pv-scram-sha-256-v1";
 const SCRAM_ITERATIONS = 150000;
+const VAULT_CHECKPOINT_VERSION = "vault-checkpoint-v1";
+const VAULT_CHECKPOINT_STORAGE_PREFIX = "password-vault:vault-checkpoint:v1:";
+const VAULT_CHECKPOINT_RECORD_STORAGE_PREFIX = "password-vault:vault-checkpoint-record:v1:";
+const VAULT_CHECKPOINT_PROBE_KEY = "password-vault:vault-checkpoint:probe";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -1049,6 +1053,173 @@ async function computeHeadHash(vault, payload) {
   return base64Url(await hmacSha256(vault.integrityKey, canonicalBytes(payload)));
 }
 
+function checkpointStorage() {
+  try {
+    const storage = window.localStorage;
+    storage.setItem(VAULT_CHECKPOINT_PROBE_KEY, "1");
+    storage.removeItem(VAULT_CHECKPOINT_PROBE_KEY);
+    return storage;
+  } catch {
+    throw new Error("Persistent vault checkpoint storage is unavailable. Enable browser storage before using this vault.");
+  }
+}
+
+function vaultCheckpointStorageKey(vaultId) {
+  return `${VAULT_CHECKPOINT_STORAGE_PREFIX}${encodeURIComponent(vaultId)}`;
+}
+
+function vaultCheckpointRecordStoragePrefix(vaultId) {
+  return `${VAULT_CHECKPOINT_RECORD_STORAGE_PREFIX}${encodeURIComponent(vaultId)}:`;
+}
+
+function vaultCheckpointRecordStorageKey(vaultId, headSeq, headHash) {
+  return `${vaultCheckpointRecordStoragePrefix(vaultId)}${headSeq}:${encodeURIComponent(headHash)}`;
+}
+
+function isVaultHeadHash(value) {
+  try {
+    return typeof value === "string" && base64UrlToBytes(value).length === 32;
+  } catch {
+    return false;
+  }
+}
+
+function isValidHeadSeq(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function parseVaultCheckpoint(raw, vaultId) {
+  let checkpoint;
+  try {
+    checkpoint = JSON.parse(raw);
+  } catch {
+    throw new Error("Stored vault checkpoint is not valid JSON.");
+  }
+  if (
+    checkpoint?.version !== VAULT_CHECKPOINT_VERSION ||
+    checkpoint?.vault_id !== vaultId ||
+    !isValidHeadSeq(checkpoint?.head_seq) ||
+    !isVaultHeadHash(checkpoint?.head_hash)
+  ) {
+    throw new Error("Stored vault checkpoint is invalid.");
+  }
+  return {
+    vaultId: checkpoint.vault_id,
+    headSeq: checkpoint.head_seq,
+    headHash: checkpoint.head_hash,
+  };
+}
+
+function latestVaultCheckpoint(checkpoints) {
+  let latest = null;
+  const hashesBySeq = new Map();
+  for (const checkpoint of checkpoints) {
+    const existingHash = hashesBySeq.get(checkpoint.headSeq);
+    if (existingHash && existingHash !== checkpoint.headHash) {
+      throw new Error("Stored vault checkpoints contain conflicting heads at the same sequence.");
+    }
+    hashesBySeq.set(checkpoint.headSeq, checkpoint.headHash);
+    if (!latest || checkpoint.headSeq > latest.headSeq) {
+      latest = checkpoint;
+    }
+  }
+  return latest;
+}
+
+function loadVaultCheckpointFromStorage(storage, vaultId) {
+  const checkpoints = [];
+  const pointerRaw = storage.getItem(vaultCheckpointStorageKey(vaultId));
+  if (pointerRaw) {
+    checkpoints.push(parseVaultCheckpoint(pointerRaw, vaultId));
+  }
+  const recordPrefix = vaultCheckpointRecordStoragePrefix(vaultId);
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(recordPrefix)) {
+      const recordRaw = storage.getItem(key);
+      if (recordRaw) {
+        checkpoints.push(parseVaultCheckpoint(recordRaw, vaultId));
+      }
+    }
+  }
+  return latestVaultCheckpoint(checkpoints);
+}
+
+function loadVaultCheckpoint(vaultId) {
+  return loadVaultCheckpointFromStorage(checkpointStorage(), vaultId);
+}
+
+function assertCheckpointWriteIsMonotonic(existingCheckpoint, nextHeadSeq, nextHeadHash) {
+  if (!existingCheckpoint) {
+    return;
+  }
+  if (existingCheckpoint.headSeq > nextHeadSeq) {
+    throw new Error("Refusing to overwrite a newer stored vault checkpoint.");
+  }
+  if (existingCheckpoint.headSeq === nextHeadSeq && existingCheckpoint.headHash !== nextHeadHash) {
+    throw new Error("Refusing to overwrite a stored vault checkpoint with a forked head.");
+  }
+}
+
+function persistVaultCheckpoint(vault) {
+  if (!isValidHeadSeq(vault.headSeq) || !isVaultHeadHash(vault.headHash)) {
+    throw new Error("Vault checkpoint head is invalid.");
+  }
+  const storage = checkpointStorage();
+  assertCheckpointWriteIsMonotonic(loadVaultCheckpointFromStorage(storage, vault.vaultId), vault.headSeq, vault.headHash);
+  const checkpoint = {
+    version: VAULT_CHECKPOINT_VERSION,
+    vault_id: vault.vaultId,
+    head_seq: vault.headSeq,
+    head_hash: vault.headHash,
+  };
+  const serialized = JSON.stringify(checkpoint);
+  try {
+    storage.setItem(vaultCheckpointRecordStorageKey(vault.vaultId, vault.headSeq, vault.headHash), serialized);
+    const latest = loadVaultCheckpointFromStorage(storage, vault.vaultId);
+    assertCheckpointWriteIsMonotonic(latest, vault.headSeq, vault.headHash);
+    storage.setItem(vaultCheckpointStorageKey(vault.vaultId), serialized);
+  } catch (error) {
+    if (error?.message?.startsWith("Refusing to overwrite") || error?.message?.startsWith("Stored vault")) {
+      throw error;
+    }
+    throw new Error("Persistent vault checkpoint could not be saved.");
+  }
+}
+
+function assertCheckpointCompatibleWithServerHead(checkpoint, serverHeadSeq, serverHeadHash) {
+  if (!checkpoint) {
+    return;
+  }
+  if (checkpoint.headSeq > serverHeadSeq) {
+    throw new Error("Possible vault rollback detected: this browser has seen a newer vault head than the server returned.");
+  }
+  if (checkpoint.headSeq === serverHeadSeq && checkpoint.headHash !== serverHeadHash) {
+    throw new Error("Possible vault fork detected: server head differs from this browser's stored checkpoint.");
+  }
+}
+
+function markCheckpointProgress(vault) {
+  const checkpoint = vault.storedCheckpoint;
+  if (!checkpoint || vault.storedCheckpointVerified) {
+    return;
+  }
+  if (vault.headSeq < checkpoint.headSeq) {
+    return;
+  }
+  if (vault.headSeq === checkpoint.headSeq && vault.headHash === checkpoint.headHash) {
+    vault.storedCheckpointVerified = true;
+    return;
+  }
+  throw new Error("Possible vault rollback or fork detected: server chain did not match this browser's stored checkpoint.");
+}
+
+function assertStoredCheckpointVerified(vault) {
+  if (vault.storedCheckpoint && !vault.storedCheckpointVerified) {
+    throw new Error("Possible vault rollback detected: sync did not reach this browser's stored checkpoint.");
+  }
+}
+
 async function unlockVaultWithKey(unlockKey) {
   beginStep("vault-unlock");
   setStatus("Unlocking vault...");
@@ -1057,6 +1228,17 @@ async function unlockVaultWithKey(unlockKey) {
   if (!serverVault) {
     throw new Error("No vault is available for this account.");
   }
+  const serverHeadSeq = Number(serverVault.head_seq);
+  const serverHeadHash = String(serverVault.head_hash || "");
+  const genesisHeadHash = String(serverVault.genesis_head_hash || "");
+  if (!isValidHeadSeq(serverHeadSeq) || !isVaultHeadHash(serverHeadHash)) {
+    throw new Error("Server returned an invalid vault head.");
+  }
+  if (serverHeadSeq > 0 && !isVaultHeadHash(genesisHeadHash)) {
+    throw new Error("Server did not return the genesis vault head required for checkpoint replay.");
+  }
+  const storedCheckpoint = loadVaultCheckpoint(serverVault.vault_id);
+  assertCheckpointCompatibleWithServerHead(storedCheckpoint, serverHeadSeq, serverHeadHash);
   const { vaultKey, keyId } = await decryptVaultKey(unlockKey, serverVault);
   const integrityKey = await deriveVaultIntegrityKey(vaultKey, serverVault.vault_id);
   state.vault = {
@@ -1065,16 +1247,24 @@ async function unlockVaultWithKey(unlockKey) {
     vaultKey,
     integrityKey,
     headSeq: 0,
-    headHash: serverVault.genesis_head_hash || serverVault.head_hash,
-    serverHeadSeq: Number(serverVault.head_seq),
-    serverHeadHash: serverVault.head_hash,
+    headHash: genesisHeadHash || serverHeadHash,
+    serverHeadSeq,
+    serverHeadHash,
+    storedCheckpoint,
+    storedCheckpointVerified: !storedCheckpoint,
     items: new Map(),
   };
+  markCheckpointProgress(state.vault);
   clearPendingUnlockKey();
   finishStep("vault-unlock");
   elements.vaultPanel.hidden = false;
   setVaultBusy(false);
-  await syncVault();
+  try {
+    await syncVault();
+  } catch (error) {
+    lockVault(false);
+    throw error;
+  }
 }
 
 async function unlockVaultFromPendingKey() {
@@ -1166,8 +1356,43 @@ async function buildEncryptedItemChange({ operation, plaintext, itemId, baseRevi
   };
 }
 
-async function verifyAndApplyChange(change) {
-  const vault = requireUnlockedVault();
+function cloneVaultForReplay(vault) {
+  return {
+    ...vault,
+    items: new Map(vault.items),
+  };
+}
+
+function commitVaultReplay(target, replay) {
+  target.items = replay.items;
+  target.headSeq = replay.headSeq;
+  target.headHash = replay.headHash;
+  target.storedCheckpointVerified = replay.storedCheckpointVerified;
+}
+
+function isVaultFailClosedError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("checkpoint") ||
+    message.includes("rollback") ||
+    message.includes("fork") ||
+    message.includes("vault head") ||
+    message.includes("sync chain") ||
+    message.includes("verified local head") ||
+    message.includes("verified local chain") ||
+    message.includes("change mac") ||
+    message.includes("head hash") ||
+    message.includes("envelope hash")
+  );
+}
+
+function failClosedVault(error) {
+  if (state.vault && isVaultFailClosedError(error)) {
+    lockVault(false);
+  }
+}
+
+async function verifyAndApplyChange(change, { persistCheckpoint = true, vault = requireUnlockedVault() } = {}) {
   const operation = String(change.operation);
   const itemId = String(change.item_id);
   const revisionId = String(change.revision_id);
@@ -1243,10 +1468,11 @@ async function verifyAndApplyChange(change) {
   );
   wipe(contentKey);
 
+  const replay = cloneVaultForReplay(vault);
   if (operation === "delete") {
-    vault.items.delete(itemId);
+    replay.items.delete(itemId);
   } else {
-    vault.items.set(itemId, {
+    replay.items.set(itemId, {
       itemId,
       revisionId,
       revisionSeq,
@@ -1254,12 +1480,18 @@ async function verifyAndApplyChange(change) {
       fields: plaintext,
     });
   }
-  vault.headSeq = headSeq;
-  vault.headHash = change.head_hash;
+  replay.headSeq = headSeq;
+  replay.headHash = change.head_hash;
+  markCheckpointProgress(replay);
+  if (persistCheckpoint) {
+    persistVaultCheckpoint(replay);
+  }
+  commitVaultReplay(vault, replay);
 }
 
 async function syncVault() {
   const vault = requireUnlockedVault();
+  const replay = cloneVaultForReplay(vault);
   beginStep("vault-sync");
   setVaultBusy(true, "Save");
   setVaultStatus("Syncing vault...");
@@ -1267,27 +1499,36 @@ async function syncVault() {
     let hasMore = false;
     do {
       const query = new URLSearchParams({
-        from_head_seq: String(vault.headSeq),
-        from_head_hash: vault.headHash,
+        from_head_seq: String(replay.headSeq),
+        from_head_hash: replay.headHash,
       });
       const response = await jsonFetch(`/v1/vaults/${vault.vaultId}/sync?${query.toString()}`);
+      const fromHeadSeq = Number(response.from_head?.seq);
+      const fromHeadHash = String(response.from_head?.hash || "");
+      if (fromHeadSeq !== replay.headSeq || fromHeadHash !== replay.headHash) {
+        throw new Error("Server sync response does not start from the verified local head.");
+      }
       for (const change of response.changes || []) {
-        await verifyAndApplyChange(change);
+        await verifyAndApplyChange(change, { persistCheckpoint: false, vault: replay });
       }
       hasMore = Boolean(response.has_more);
       if (!hasMore) {
         const serverHeadSeq = Number(response.to_head?.seq);
         const serverHeadHash = String(response.to_head?.hash || "");
-        if (serverHeadSeq !== vault.headSeq || serverHeadHash !== vault.headHash) {
+        if (serverHeadSeq !== replay.headSeq || serverHeadHash !== replay.headHash) {
           throw new Error("Server sync head does not match the verified local chain.");
         }
+        assertStoredCheckpointVerified(replay);
       }
     } while (hasMore);
+    persistVaultCheckpoint(replay);
+    commitVaultReplay(vault, replay);
     renderVaultItems();
     finishStep("vault-sync");
     setVaultStatus(`Unlocked. ${vault.items.size} item(s).`, "success");
   } catch (error) {
     failActiveStep();
+    failClosedVault(error);
     setVaultStatus(error.message, "error");
     throw error;
   } finally {
@@ -1384,6 +1625,7 @@ async function saveVaultItem(event) {
     setVaultStatus("Encrypted item saved.", "success");
   } catch (error) {
     failActiveStep();
+    failClosedVault(error);
     setVaultStatus(error.message, "error");
     setStatus(error.message, "error");
   } finally {
@@ -1451,6 +1693,7 @@ async function deleteVaultItem() {
     setVaultStatus("Encrypted item deleted.", "success");
   } catch (error) {
     failActiveStep();
+    failClosedVault(error);
     setVaultStatus(error.message, "error");
     setStatus(error.message, "error");
   } finally {
@@ -1883,7 +2126,10 @@ elements.loginMfaForm.addEventListener("submit", submitLoginTotp);
 elements.loginRecoveryForm.addEventListener("submit", submitLoginRecoveryCode);
 elements.vaultItemForm.addEventListener("submit", saveVaultItem);
 elements.syncVaultButton.addEventListener("click", () => {
-  syncVault().catch((error) => setStatus(error.message, "error"));
+  syncVault().catch((error) => {
+    failClosedVault(error);
+    setStatus(error.message, "error");
+  });
 });
 elements.lockVaultButton.addEventListener("click", () => lockVault(true));
 elements.newItemButton.addEventListener("click", resetVaultForm);

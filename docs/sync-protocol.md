@@ -179,6 +179,14 @@ head_hash
 If a sync response does not extend the local checkpoint, the client treats it as possible rollback or
 fork and refuses to trust the state without explicit user resolution.
 
+Current browser MVP implementation: the static web client stores a versioned per-vault checkpoint in
+origin-scoped `localStorage`, replays sync from genesis after browser reload, proves the replayed
+chain reaches the stored checkpoint, and persists a new checkpoint only after verified sync or write
+success. Checkpoint records are append-only per observed vault head, with a convenience latest
+pointer; loading scans the append-only records so stale tabs cannot erase newer local rollback
+evidence. The checkpoint stores only vault/head metadata, not keys, cookies, item identifiers, item
+content, ciphertext, timestamps, TOTP data, or recovery codes.
+
 MVP residual risk: a brand-new device with no trusted checkpoint can still be shown an older but
 internally valid chain. Strong cross-device freshness, device gossip, or transparency logging is
 post-MVP.

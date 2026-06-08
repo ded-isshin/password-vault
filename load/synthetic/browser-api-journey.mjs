@@ -11,6 +11,7 @@ const ITEM_ENVELOPE_CRYPTO_VERSION = "item-envelope-v1";
 const ITEM_ENVELOPE_AEAD = "AES-256-GCM";
 const SCRAM_PROFILE_ID = "pv-scram-sha-256-v1";
 const SCRAM_ITERATIONS = 150000;
+const VAULT_CHECKPOINT_VERSION = "vault-checkpoint-v1";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -250,6 +251,178 @@ function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function testHeadHash(fillByte) {
+  return base64Url(new Uint8Array(32).fill(fillByte));
+}
+
+function isVaultHeadHash(value) {
+  try {
+    return typeof value === "string" && base64UrlToBytes(value).length === 32;
+  } catch {
+    return false;
+  }
+}
+
+function isValidHeadSeq(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function assertCheckpointCompatibleWithServerHead(checkpoint, serverHeadSeq, serverHeadHash) {
+  if (!checkpoint) {
+    return;
+  }
+  assert(isValidHeadSeq(checkpoint.headSeq), "Stored checkpoint sequence must be valid.");
+  assert(isVaultHeadHash(checkpoint.headHash), "Stored checkpoint head hash must be valid.");
+  assert(isValidHeadSeq(serverHeadSeq), "Server checkpoint sequence must be valid.");
+  assert(isVaultHeadHash(serverHeadHash), "Server checkpoint head hash must be valid.");
+  if (checkpoint.headSeq > serverHeadSeq) {
+    throw new Error("Possible vault rollback detected: this browser has seen a newer vault head than the server returned.");
+  }
+  if (checkpoint.headSeq === serverHeadSeq && checkpoint.headHash !== serverHeadHash) {
+    throw new Error("Possible vault fork detected: server head differs from this browser's stored checkpoint.");
+  }
+}
+
+function markCheckpointProgress(vault) {
+  const checkpoint = vault.storedCheckpoint;
+  if (!checkpoint || vault.storedCheckpointVerified) {
+    return;
+  }
+  if (vault.headSeq < checkpoint.headSeq) {
+    return;
+  }
+  if (vault.headSeq === checkpoint.headSeq && vault.headHash === checkpoint.headHash) {
+    vault.storedCheckpointVerified = true;
+    return;
+  }
+  throw new Error("Possible vault rollback or fork detected: server chain did not match this browser's stored checkpoint.");
+}
+
+function assertStoredCheckpointVerified(vault) {
+  if (vault.storedCheckpoint && !vault.storedCheckpointVerified) {
+    throw new Error("Possible vault rollback detected: sync did not reach this browser's stored checkpoint.");
+  }
+}
+
+function checkpointRecord(vault) {
+  assert(isValidHeadSeq(vault.headSeq), "Checkpoint sequence must be valid.");
+  assert(isVaultHeadHash(vault.headHash), "Checkpoint head hash must be valid.");
+  return {
+    version: VAULT_CHECKPOINT_VERSION,
+    vault_id: vault.vaultId,
+    head_seq: vault.headSeq,
+    head_hash: vault.headHash,
+  };
+}
+
+function latestVaultCheckpoint(checkpoints) {
+  let latest = null;
+  const hashesBySeq = new Map();
+  for (const checkpoint of checkpoints) {
+    const existingHash = hashesBySeq.get(checkpoint.headSeq);
+    if (existingHash && existingHash !== checkpoint.headHash) {
+      throw new Error("Stored vault checkpoints contain conflicting heads at the same sequence.");
+    }
+    hashesBySeq.set(checkpoint.headSeq, checkpoint.headHash);
+    if (!latest || checkpoint.headSeq > latest.headSeq) {
+      latest = checkpoint;
+    }
+  }
+  return latest;
+}
+
+function assertCheckpointWriteIsMonotonic(existingCheckpoint, nextHeadSeq, nextHeadHash) {
+  if (!existingCheckpoint) {
+    return;
+  }
+  if (existingCheckpoint.headSeq > nextHeadSeq) {
+    throw new Error("Refusing to overwrite a newer stored vault checkpoint.");
+  }
+  if (existingCheckpoint.headSeq === nextHeadSeq && existingCheckpoint.headHash !== nextHeadHash) {
+    throw new Error("Refusing to overwrite a stored vault checkpoint with a forked head.");
+  }
+}
+
+function assertRejectsSyncCheckpoint(label, fn) {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  throw new Error(`${label} unexpectedly succeeded.`);
+}
+
+function assertVaultCheckpointGuards() {
+  const genesis = testHeadHash(0);
+  const head1 = testHeadHash(1);
+  const head2 = testHeadHash(2);
+  const head3 = testHeadHash(3);
+  const forkHead1 = testHeadHash(11);
+  const forkHead2 = testHeadHash(12);
+  const vault = {
+    vaultId: "vault-checkpoint-test",
+    headSeq: 0,
+    headHash: genesis,
+    storedCheckpoint: {
+      vaultId: "vault-checkpoint-test",
+      headSeq: 1,
+      headHash: head1,
+    },
+    storedCheckpointVerified: false,
+  };
+
+  assertCheckpointCompatibleWithServerHead(vault.storedCheckpoint, 2, head2);
+  markCheckpointProgress(vault);
+  assert(!vault.storedCheckpointVerified, "Checkpoint must not verify before its sequence is reached.");
+  vault.headSeq = 1;
+  vault.headHash = head1;
+  markCheckpointProgress(vault);
+  assert(vault.storedCheckpointVerified, "Checkpoint must verify at the matching stored head.");
+  vault.headSeq = 2;
+  vault.headHash = head2;
+  assertStoredCheckpointVerified(vault);
+  const persisted = checkpointRecord(vault);
+  assert(persisted.version === VAULT_CHECKPOINT_VERSION, "Checkpoint version must be persisted.");
+  assert(persisted.head_seq === 2 && persisted.head_hash === head2, "Checkpoint must persist the latest head.");
+  assert(latestVaultCheckpoint([{ headSeq: 1, headHash: head1 }, { headSeq: 2, headHash: head2 }]).headHash === head2, "Latest checkpoint must win.");
+  assertRejectsSyncCheckpoint("same-sequence stored fork", () =>
+    latestVaultCheckpoint([{ headSeq: 1, headHash: head1 }, { headSeq: 1, headHash: forkHead1 }]),
+  );
+  assertCheckpointWriteIsMonotonic({ headSeq: 1, headHash: head1 }, 2, head2);
+  assertRejectsSyncCheckpoint("stale checkpoint overwrite", () =>
+    assertCheckpointWriteIsMonotonic({ headSeq: 2, headHash: head2 }, 1, head1),
+  );
+  assertRejectsSyncCheckpoint("fork checkpoint overwrite", () =>
+    assertCheckpointWriteIsMonotonic({ headSeq: 2, headHash: head2 }, 2, forkHead2),
+  );
+
+  assertRejectsSyncCheckpoint("newer local checkpoint", () =>
+    assertCheckpointCompatibleWithServerHead({ headSeq: 3, headHash: head3 }, 2, head2),
+  );
+  assertRejectsSyncCheckpoint("same sequence fork", () =>
+    assertCheckpointCompatibleWithServerHead({ headSeq: 2, headHash: forkHead2 }, 2, head2),
+  );
+  assertRejectsSyncCheckpoint("mismatched checkpoint chain", () =>
+    markCheckpointProgress({
+      headSeq: 1,
+      headHash: forkHead1,
+      storedCheckpoint: { headSeq: 1, headHash: head1 },
+      storedCheckpointVerified: false,
+    }),
+  );
+  assertRejectsSyncCheckpoint("unreached checkpoint", () =>
+    assertStoredCheckpointVerified({
+      headSeq: 0,
+      headHash: genesis,
+      storedCheckpoint: { headSeq: 1, headHash: head1 },
+      storedCheckpointVerified: false,
+    }),
+  );
+  assertRejectsSyncCheckpoint("invalid checkpoint hash", () =>
+    assertCheckpointCompatibleWithServerHead({ headSeq: 1, headHash: "head-1" }, 1, head1),
+  );
 }
 
 function assertNoStore(response, label) {
@@ -843,6 +1016,14 @@ async function deriveItemRevisionKey(vaultKey, vaultId, itemId, revisionId) {
 }
 
 async function vaultStateFromServerVault(serverVault, unlockKey) {
+  const serverHeadSeq = Number(serverVault.head_seq);
+  const serverHeadHash = String(serverVault.head_hash || "");
+  const genesisHeadHash = String(serverVault.genesis_head_hash || "");
+  assert(isValidHeadSeq(serverHeadSeq) && isVaultHeadHash(serverHeadHash), "Server returned invalid vault head.");
+  assert(
+    serverHeadSeq === 0 || isVaultHeadHash(genesisHeadHash),
+    "Server did not return the genesis vault head required for checkpoint replay.",
+  );
   const { vaultKey, keyId } = await decryptVaultKey(unlockKey, serverVault);
   const integrityKey = await deriveVaultIntegrityKey(vaultKey, serverVault.vault_id);
   return {
@@ -851,9 +1032,9 @@ async function vaultStateFromServerVault(serverVault, unlockKey) {
     vaultKey,
     integrityKey,
     headSeq: 0,
-    headHash: serverVault.genesis_head_hash || serverVault.head_hash,
-    serverHeadSeq: Number(serverVault.head_seq),
-    serverHeadHash: serverVault.head_hash,
+    headHash: genesisHeadHash || serverHeadHash,
+    serverHeadSeq,
+    serverHeadHash,
     items: new Map(),
   };
 }
@@ -1229,9 +1410,10 @@ async function main() {
 
   try {
     assertAccountSecretKeyRoundTrip();
+    assertVaultCheckpointGuards();
     await assertAesGcmTamperRejected();
     if (process.env.SYNTHETIC_SELF_TEST_ONLY === "true") {
-      console.log(JSON.stringify({ status: "ok", self_test: "browser_crypto_tamper_rejected" }));
+      console.log(JSON.stringify({ status: "ok", self_test: "browser_crypto_and_checkpoint_guards" }));
       return;
     }
     logStep("checking health and readiness");
