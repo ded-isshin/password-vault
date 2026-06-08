@@ -14,9 +14,11 @@ replicaCount: 3
 service:
   type: ClusterIP
   port: 8080
+  metricsPort: 9090
 
 config:
   bindAddr: 0.0.0.0:8080
+  metricsBindAddr: 0.0.0.0:9090
   requireDatabase: true
   runMigrationsOnStartup: false
   rustLog: password_vault_api=info

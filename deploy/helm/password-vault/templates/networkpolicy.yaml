@@ -16,6 +16,7 @@ spec:
   ingress:
     - ports:
         - port: http
+        - port: metrics
   egress:
     - {}
 {{- end }}
