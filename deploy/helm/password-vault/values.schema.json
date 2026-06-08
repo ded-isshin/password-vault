@@ -3,6 +3,89 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "http": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "allowAllIngress": {
+              "type": "boolean"
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "namespaceSelector": {
+              "type": "object"
+            },
+            "podSelector": {
+              "type": "object"
+            }
+          }
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "podSelector": {
+              "type": "object"
+            }
+          }
+        },
+        "dns": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "kubeDns": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "namespaceSelector": {
+                  "type": "object"
+                },
+                "podSelector": {
+                  "type": "object"
+                }
+              }
+            },
+            "nodeLocal": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "cidr": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "topologySpreadConstraints": {
       "type": "object",
       "additionalProperties": true,
