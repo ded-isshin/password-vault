@@ -5,7 +5,11 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
+  {{- if .Values.migrations.job.argocdHook.generateName }}
+  generateName: {{ include "password-vault.fullname" . }}-migrate-
+  {{- else }}
   name: {{ include "password-vault.fullname" . }}-migrate
+  {{- end }}
   namespace: {{ include "password-vault.namespace" . }}
   labels:
     {{- include "password-vault.labels" . | nindent 4 }}

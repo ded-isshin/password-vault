@@ -119,6 +119,7 @@ struct VaultResponse {
     vault_id: Uuid,
     head_seq: i64,
     head_hash: String,
+    genesis_head_hash: String,
     encrypted_vault_key: EncryptedVaultKeyResponse,
     created_at: String,
     updated_at: String,
@@ -226,6 +227,7 @@ async fn list_vaults(
             v.id AS vault_id,
             v.head_seq,
             v.head_hash,
+            v.genesis_head_hash,
             v.created_at,
             v.updated_at,
             w.crypto_version AS wrap_crypto_version,
@@ -250,6 +252,9 @@ async fn list_vaults(
         let head_hash = row
             .try_get::<Vec<u8>, _>("head_hash")
             .map_err(|_| ApiError::service_unavailable())?;
+        let genesis_head_hash = row
+            .try_get::<Vec<u8>, _>("genesis_head_hash")
+            .map_err(|_| ApiError::service_unavailable())?;
         let nonce = row
             .try_get::<Vec<u8>, _>("wrap_nonce")
             .map_err(|_| ApiError::service_unavailable())?;
@@ -264,6 +269,7 @@ async fn list_vaults(
                 .try_get::<i64, _>("head_seq")
                 .map_err(|_| ApiError::service_unavailable())?,
             head_hash: encode_base64url(&head_hash),
+            genesis_head_hash: encode_base64url(&genesis_head_hash),
             encrypted_vault_key: EncryptedVaultKeyResponse {
                 crypto_version: row
                     .try_get::<String, _>("wrap_crypto_version")

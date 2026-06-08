@@ -245,8 +245,7 @@ Implementation status:
 - The client-supplied `initial_vault.vault_id` remains part of the contract for now; collisions are
   handled as a generic registration failure.
 - The setup session is created with `mfa_enrollment_required`. CSRF issuance, TOTP enrollment,
-  login finish, and login-time TOTP verification are implemented. Vault item APIs are not
-  implemented yet.
+  login finish, login-time TOTP verification, and vault item APIs are implemented.
 - The `__Host-pv_session` cookie is intentionally `Secure`; browser testing should use the
   mini-PC HTTPS edge route or another HTTPS route for realistic cookie persistence.
 
@@ -748,6 +747,7 @@ Response `200`:
       "vault_id": "00000000-0000-4000-8000-000000000010",
       "head_seq": 0,
       "head_hash": "<base64url-32-bytes>",
+      "genesis_head_hash": "<base64url-32-bytes>",
       "encrypted_vault_key": {
         "crypto_version": "vault-key-wrap-v1",
         "key_id": "user-key-v1",
@@ -764,6 +764,10 @@ Response `200`:
 Implementation note: encrypted vault display metadata such as `name_ciphertext` is planned but is
 not represented in the current schema. The current implementation omits `name_ciphertext` until an
 encrypted vault metadata migration is designed.
+
+`genesis_head_hash` is returned so a returning browser or future device can sync from
+`from_head_seq=0` even when the current vault head has already advanced. It is sync metadata, not
+vault plaintext.
 
 ### `GET /v1/vaults/{vault_id}/sync`
 
@@ -819,6 +823,11 @@ with the current visible head.
 The implementation caps each sync response at 500 changes. If more changes remain, `has_more` is
 `true` and `to_head` is the last returned change head; the client should call sync again using that
 `to_head` as the next cursor.
+
+An unlocked client must verify every returned change against its local keyed head-hash chain before
+advancing its local checkpoint. On the final page, including an empty final page, the response
+`to_head` must match the locally verified head. The client must not adopt a server-supplied
+`to_head` that was not proven by the returned change chain.
 
 ### `POST /v1/vaults/{vault_id}/items`
 

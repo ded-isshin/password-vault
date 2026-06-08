@@ -9,6 +9,10 @@ Current implementation status, 2026-06-08:
 - The current GitOps preview is `Synced/Healthy` in Argo CD. API pods are three ready replicas,
   spread one per worker after the production rollout strategy was changed to
   `maxUnavailable: 1` and `maxSurge: 0` for strict topology spreading.
+- The latest Argo CD operation state is `Failed` even though the application is currently
+  `Synced/Healthy`: a fixed-name `password-vault-migrate` hook Job from an older digest blocked a
+  later dry-run apply because Kubernetes Jobs have immutable pod templates. The current branch fixes
+  the product chart to render migration hooks with `metadata.generateName` and `HookSucceeded`.
 - `/v1/auth/register/start`, `/v1/auth/login/start`, `/v1/auth/register/finish`,
   `/v1/session`, `/v1/csrf`, `/v1/auth/logout`, `/v1/mfa/totp/enroll/start`, and
   `/v1/mfa/totp/enroll/confirm` are implemented.
@@ -25,7 +29,10 @@ Current implementation status, 2026-06-08:
 - The browser preview supports registration and TOTP enrollment, and the current implementation
   adds the browser return-login path that uses deployed `login/start`, `login/finish`, and
   login-time `totp/verify`.
-- Recovery-code verification and browser-side vault unlock remain unimplemented.
+- The current branch adds browser-side in-memory vault unlock, encrypted item create/update/delete,
+  and sync on top of the deployed vault API. This browser vault workflow is implemented locally and
+  still needs CI, image publication, GitOps rollout, and live browser verification.
+- Recovery-code verification remains unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
@@ -41,9 +48,10 @@ Current implementation status, 2026-06-08:
   CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
   `StatefulSet`, so it remains a blocker before real password data.
 - A controlled migration runner is merged, published, and deployed: the API image supports a
-  `password-vault-api migrate` command, production values enable the Argo CD PreSync migration
-  `Job`, and the live migration Job completed successfully during the current rollout. This proves
-  the migration mechanism, not database HA or backup readiness.
+  `password-vault-api migrate` command and one live migration Job completed successfully. The
+  fixed-name hook behavior is not accepted as stable after the later immutable Job failure; the
+  current branch changes the chart to generated-name migration hooks and must be rolled out before
+  relying on the mechanism for schema-changing releases.
 
 ## Stabilization-First Queue
 
@@ -53,10 +61,10 @@ MVP dependable:
 1. Prove browser access from the client side, not only from the mini-PC: Password Vault, Grafana,
    and Argo CD should be checked from the MacBook/browser path with the expected self-signed TLS
    warning.
-2. Merge and deploy the encrypted vault CRUD/sync API, then add browser vault unlock plus encrypted
-   item create/read/update/delete with revision conflict checks.
-3. Keep production startup migrations off and keep schema-changing releases behind the controlled
-   migration job/runbook.
+2. Validate, merge, and deploy the browser vault unlock plus encrypted item
+   create/read/update/delete/sync workflow.
+3. Roll out the generated-name Argo CD migration hook fix, then verify a second digest rollout does
+   not leave the application with a failed operation state.
 4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.

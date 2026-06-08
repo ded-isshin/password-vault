@@ -57,6 +57,11 @@ The sync API returns a bounded number of changes per response. If `has_more` is 
 must continue from the returned `to_head` cursor instead of assuming it has reached the latest vault
 head.
 
+An unlocked client must verify every returned change against its local keyed head-hash chain. On the
+final page, including an empty final page, `to_head` must equal the local head that the client has
+verified by applying the returned changes. The client must not advance to an unproven server
+checkpoint.
+
 The client should generate `item_id` and `revision_id` before encryption so those identifiers can be
 bound into AEAD associated data and `change_mac`.
 

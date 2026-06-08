@@ -140,6 +140,9 @@
             <li data-step="login-proof">Login proof</li>
             <li data-step="login-mfa">Login MFA</li>
             <li data-step="session">Session</li>
+            <li data-step="vault-unlock">Vault unlock</li>
+            <li data-step="vault-sync">Vault sync</li>
+            <li data-step="vault-write">Vault write</li>
           </ol>
         </section>
       </div>
@@ -245,6 +248,56 @@
           <h2 id="sessionTitle">Current state</h2>
         </div>
         <dl id="sessionList" class="session-list"></dl>
+      </section>
+
+      <section id="vaultPanel" class="output-band" hidden aria-labelledby="vaultTitle">
+        <div class="section-heading vault-heading">
+          <div>
+            <p class="eyebrow">Vault</p>
+            <h2 id="vaultTitle">Items</h2>
+          </div>
+          <div class="vault-actions">
+            <button id="syncVaultButton" class="secondary-action" type="button">Sync</button>
+            <button id="lockVaultButton" class="secondary-action" type="button">Lock</button>
+          </div>
+        </div>
+
+        <p id="vaultStatus" class="status-message" role="status" aria-live="polite">
+          Locked.
+        </p>
+
+        <div class="vault-layout">
+          <form id="vaultItemForm" class="vault-form">
+            <label for="itemTitle">Title</label>
+            <input id="itemTitle" name="itemTitle" type="text" autocomplete="off" required />
+
+            <label for="itemUrl">URL</label>
+            <input id="itemUrl" name="itemUrl" type="url" autocomplete="off" />
+
+            <label for="itemUsername">Username</label>
+            <input id="itemUsername" name="itemUsername" type="text" autocomplete="off" />
+
+            <label for="itemPassword">Password</label>
+            <input id="itemPassword" name="itemPassword" type="text" autocomplete="off" />
+
+            <label for="itemNotes">Notes</label>
+            <textarea id="itemNotes" name="itemNotes" rows="4" autocomplete="off"></textarea>
+
+            <div class="vault-form-actions">
+              <button id="saveItemButton" class="primary-action secondary-size" type="submit">
+                Save
+              </button>
+              <button id="newItemButton" class="secondary-action" type="button">New</button>
+              <button id="deleteItemButton" class="secondary-action danger-action" type="button" disabled>
+                Delete
+              </button>
+            </div>
+          </form>
+
+          <div class="vault-list-panel" aria-live="polite">
+            <ul id="vaultItemList" class="vault-item-list"></ul>
+          </div>
+        </div>
       </section>
     </main>
 

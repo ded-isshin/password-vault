@@ -4,6 +4,17 @@ Status: draft.
 
 This document separates server authorization from vault decryption.
 
+Implementation status, 2026-06-08:
+
+- Browser-side in-memory unlock is implemented locally in the current branch.
+- Unlock derives from the master password plus account secret key during registration/login.
+- After MFA verification, the browser decrypts the encrypted vault key wrap and keeps the unwrapped
+  vault key only in tab memory.
+- The `Lock` action clears in-memory unlock material and hides decrypted item fields without
+  revoking the server session.
+- Refreshing the page still requires sign-in/unlock again because no persisted local wrapped key is
+  implemented.
+
 ## States
 
 ```text

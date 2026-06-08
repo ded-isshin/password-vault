@@ -42,8 +42,10 @@ jobs:
             --set migrations.job.argocdHook.enabled=true \
             >/tmp/password-vault-migration-job-rendered.yaml
           grep -q 'kind: Job' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'generateName: password-vault-migrate-' /tmp/password-vault-migration-job-rendered.yaml
+          ! grep -q '^  name: password-vault-migrate$' /tmp/password-vault-migration-job-rendered.yaml
           grep -q 'argocd.argoproj.io/hook: "PreSync"' /tmp/password-vault-migration-job-rendered.yaml
-          grep -q 'argocd.argoproj.io/hook-delete-policy: "BeforeHookCreation"' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'argocd.argoproj.io/hook-delete-policy: "HookSucceeded"' /tmp/password-vault-migration-job-rendered.yaml
           grep -q 'argocd.argoproj.io/sync-wave: "-1"' /tmp/password-vault-migration-job-rendered.yaml
           grep -q 'restartPolicy: Never' /tmp/password-vault-migration-job-rendered.yaml
           grep -q 'automountServiceAccountToken: false' /tmp/password-vault-migration-job-rendered.yaml

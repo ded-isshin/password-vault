@@ -41,8 +41,11 @@ The command requires `PV_DATABASE_URL`, applies bundled SQLx migrations, and exi
 the HTTP server and does not require the TOTP or synthetic metadata keys.
 
 The Argo `PreSync` hook fails closed: if migration execution fails, Argo CD stops the sync before
-rolling the API Deployment. The default hook delete policy is `BeforeHookCreation`, keeping the
-completed job available as evidence until the next sync recreates it.
+rolling the API Deployment.
+
+The migration hook uses `metadata.generateName` by default and deletes successful Jobs with
+`HookSucceeded`. Fixed-name Kubernetes Jobs are immutable after creation and can block later Argo CD
+syncs when the image digest or pod template changes. Failed hook Jobs are left for inspection.
 
 `ttlSecondsAfterFinished` is intentionally unset by default. Enable it only if the operating model
 accepts Kubernetes deleting completed migration jobs before the next Argo sync.
