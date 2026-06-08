@@ -13,6 +13,10 @@ Official sources checked:
 - Google SRE Workbook, "Monitoring".
 - Google SRE Workbook, "Alerting on SLOs".
 - Google SRE Workbook, "Implementing SLOs".
+- Kubernetes documentation, "Network Policies".
+- CloudNativePG documentation, "Replication".
+- CloudNativePG Barman Cloud Plugin documentation, "Main Concepts".
+- PostgreSQL documentation, "Versioning Policy".
 
 ## Ownership Boundaries
 
@@ -58,7 +62,7 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   StatefulSet on a node-local `local-path` PVC. CloudNativePG CRDs exist, but there is no active
   product `Cluster`, `Backup`, or `ScheduledBackup`, and no CloudNativePG operator/controller was
   observed in the current cluster scan.
-- No `NetworkPolicy` exists in the `password-vault` namespace yet.
+- A first PostgreSQL `NetworkPolicy` exists in the `password-vault` namespace.
 - Low-cardinality product counters for registration, account creation, login, MFA, session
   creation/upgrades, vault item changes, sync requests, and build information are merged,
   published, deployed, and covered by a low-cardinality `/metrics` test.
@@ -68,16 +72,20 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - Live verification after deployment found the dashboard and product metric series. Fresh 5-minute
   checks can legitimately return zero for registration, MFA, vault item, and sync panels when no
   synthetic or manual traffic is exercising those paths.
-- The current branch adds `load/synthetic/browser-api-journey.mjs`, a dependency-free Node
+- The repository includes `load/synthetic/browser-api-journey.mjs`, a dependency-free Node
   browser-API synthetic journey for
   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
-  It is a CI/local proof until merged and intentionally does not run automatically against the live
-  edge route.
-- The build info panel returns `password_vault_build_info`. The current live digest may still report
-  `revision="unknown"` until a fixed image is published and rolled out. CI and published images
-  should set the `revision` label from the GitHub commit SHA through the Docker build arg
-  `BUILD_REVISION`; local ad-hoc builds that do not pass the build arg still report
-  `revision="unknown"`.
+  It is a CI/local proof and can be run manually against the live edge route with explicit
+  `SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL=true`.
+- The build info panel returns `password_vault_build_info` with
+  `revision="afb800d4f918127e508db43b06e1a1f688a73274"` for the deployed 2026-06-08 preview image.
+  CI and published images should set the `revision` label from the GitHub commit SHA through the
+  `PASSWORD_VAULT_BUILD_REVISION` Rust compile-time environment variable. Local ad-hoc builds that
+  do not pass the build arg can still report `revision="unknown"`.
+- The infrastructure GitOps state now includes a first `NetworkPolicy` that restricts PostgreSQL
+  ingress on TCP/5432 to Password Vault API pods and Argo CD migration hook pods. This is a useful
+  first isolation step, but it is not a namespace-wide default deny and does not yet make `/metrics`
+  internal-only.
 
 Important label note:
 
@@ -321,18 +329,20 @@ scraped, and shown on the dashboard.
 - No SLO, error-budget, or burn-rate panels are implemented.
 - No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
-- Build/version panel is deployed and returns live `password_vault_build_info` data. The current
-  live digest may still report `revision="unknown"` until the fixed image digest is rolled out.
-  Published images should report the GitHub commit SHA in the `revision` label; local images may
-  report `unknown` if built without `BUILD_REVISION`.
+- Build/version panel is deployed and returns live `password_vault_build_info` data with the product
+  commit SHA for published images. Local images may report `unknown` when built without the build
+  revision environment.
 - Product auth/MFA/vault/sync panels are deployed. Registration and login-start values have live
   series; current 5-minute rates can be zero until a fuller synthetic or browser journey exercises
   those paths.
 - CSRF, rate-limit, recovery, and protected-activation security-event panels are not implemented
   yet.
 - Edge access to `/metrics` is blocked in the current preview, but internal application
-  `LoadBalancer` access still reaches `/metrics`; restrictive NetworkPolicy or a separate
-  internal-only metrics listener is still needed.
+  `LoadBalancer` access still reaches `/metrics`; API ingress hardening or a separate internal-only
+  metrics listener is still needed.
+- PostgreSQL ingress now has a first NetworkPolicy. API ingress/egress and full namespace
+  default-deny are intentionally not enabled yet because the current edge/LoadBalancer path needs
+  a tested allow-list design.
 - No dashboard check proving `/metrics` is inaccessible from the wrong network path.
 - No live synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
 
@@ -424,3 +434,13 @@ helm template password-vault deploy/helm/password-vault \
   <https://sre.google/workbook/alerting-on-slos/>
 - Google SRE Workbook, Implementing SLOs:
   <https://sre.google/workbook/implementing-slos/>
+- Kubernetes documentation, Network Policies:
+  <https://kubernetes.io/docs/concepts/services-networking/network-policies/>
+- Kubernetes API reference, NetworkPolicy:
+  <https://kubernetes.io/docs/reference/kubernetes-api/networking/network-policy-v1/>
+- CloudNativePG documentation, Replication:
+  <https://cloudnative-pg.io/docs/1.27/replication/>
+- CloudNativePG Barman Cloud Plugin, Main Concepts:
+  <https://cloudnative-pg.io/plugin-barman-cloud/docs/concepts/>
+- PostgreSQL documentation, Versioning Policy:
+  <https://www.postgresql.org/support/versioning/>
