@@ -35,7 +35,7 @@ use crate::{
 };
 
 const AUTH_PROTOCOL: &str = "derived-auth-v1";
-const AUTH_BODY_LIMIT_BYTES: usize = 128 * 1024;
+pub(crate) const AUTH_BODY_LIMIT_BYTES: usize = 128 * 1024;
 const CLIENT_NONCE_BYTES: usize = 32;
 const SERVER_NONCE_BYTES: usize = 32;
 const AUTH_KEY_BYTES: usize = 32;
