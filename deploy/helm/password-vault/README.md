@@ -118,3 +118,11 @@ The database selector is part of the deployment contract. The current preview Po
 `StatefulSet` and any future CloudNativePG `Cluster` must expose pod labels that match
 `networkPolicy.database.podSelector`, or API-to-database traffic will be denied when the policy is
 enabled.
+
+Use `networkPolicy.database.podSelectorOverride` when the production values must replace the default
+database selector entirely. This is required when switching from the chart's default preview
+PostgreSQL `StatefulSet` labels to CloudNativePG pod labels, because Helm merges nested values maps
+instead of replacing `matchLabels` key-by-key.
+
+Do not set `podSelectorOverride.matchLabels` to an empty map. An empty pod selector can match every
+pod in the namespace and broaden API database egress instead of restricting it.
