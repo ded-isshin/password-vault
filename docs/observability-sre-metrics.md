@@ -250,7 +250,7 @@ evidence remain open. The live deployment level must be re-evaluated after each 
 Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up checks:
 
 - Grafana dashboard UID `password-vault-overview` is provisioned.
-- The dashboard has 26 panels and was visible through the Grafana API. Grafana Image Renderer is not
+- The dashboard has 31 panels and was visible through the Grafana API. Grafana Image Renderer is not
   installed, so evidence is based on dashboard metadata and live datasource queries rather than PNG
   rendering.
 - The API uses the `password-vault-cnpg` CloudNativePG application Secret, and the API Deployment has
