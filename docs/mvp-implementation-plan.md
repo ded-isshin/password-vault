@@ -30,24 +30,26 @@ Current implementation status, 2026-06-08:
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
 - CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
-  `Backup`, or `ScheduledBackup` resources are present yet. The current preview database is still
-  a single PostgreSQL `StatefulSet`, so it remains a blocker before real password data.
-- A controlled migration runner is implemented locally in the current product branch: the API image
-  supports a `password-vault-api migrate` command, and Helm can emit an opt-in Kubernetes migration
-  `Job`. Production values still need to enable and validate the job through GitOps before
-  schema-changing real-user releases.
+  `Backup`, or `ScheduledBackup` resources are present yet. A live scan also found no running
+  CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
+  `StatefulSet`, so it remains a blocker before real password data.
+- A controlled migration runner is merged, published, and deployed: the API image supports a
+  `password-vault-api migrate` command, production values enable the Argo CD PreSync migration
+  `Job`, and the live migration Job completed successfully during the current rollout. This proves
+  the migration mechanism, not database HA or backup readiness.
 
 ## Stabilization-First Queue
 
 The current goal is not to add broad feature volume. The next slices should make the smallest useful
 MVP dependable:
 
-1. Complete and verify the browser return-login flow against the deployed login finish and
-   login-time TOTP APIs. Vault CRUD is not meaningful until a user can return after registration.
+1. Prove browser access from the client side, not only from the mini-PC: Password Vault, Grafana,
+   and Argo CD should be checked from the MacBook/browser path with the expected self-signed TLS
+   warning.
 2. Add browser vault unlock plus encrypted item create/read/update/delete with revision conflict
    checks.
-3. Keep production startup migrations off and enable the controlled migration job/runbook through
-   GitOps before schema-changing real-user releases.
+3. Keep production startup migrations off and keep schema-changing releases behind the controlled
+   migration job/runbook.
 4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
