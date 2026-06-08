@@ -58,7 +58,7 @@ Key implications:
 - Black-box checks are required because only end-to-end probes can prove that a user can register,
   log in, complete MFA, unlock locally, write an encrypted item, read it back, and sync.
 - White-box metrics are still required for diagnosis: API route metrics, database pool pressure,
-  PostgreSQL replication/backup state, auth hashing pressure, and rollout state.
+  PostgreSQL replication/backup state, auth/MFA challenge pressure, and rollout state.
 - Dashboards should stay simple enough to support action. Metrics that are not used by dashboards,
   alerts, load tests, or release gates should be removed or deferred.
 - Candidate SLOs are useful now, but they should not be treated as contractual production SLOs until
@@ -254,7 +254,7 @@ observable schema evolution:
    replay, attempt exhaustion, and generic auth failure behavior.
 2. Implement or confirm internal-only metrics exposure through Kubernetes networking and edge rules.
 3. Add `password_vault_build_info` or equivalent release/revision metric.
-4. Add DB pool, query latency, DB error, auth hash duration, auth hash active, rate-limit, and
+4. Add DB pool, query latency, DB error, auth/MFA step duration, rate-limit, and
    CSRF/security rejection metrics.
 5. Add VM/Grafana alert rules for target down, fast 5xx burn, sustained p99 latency, pending request
    growth, and missing scrape data.
@@ -304,7 +304,7 @@ The first useful dashboard should be organized by questions, not metric names:
    - sync.
 3. Is this capacity or dependency pressure?
    - pending requests;
-   - auth hash active work;
+   - auth challenge pressure;
    - DB pool wait;
    - DB query latency;
    - CPU/memory;

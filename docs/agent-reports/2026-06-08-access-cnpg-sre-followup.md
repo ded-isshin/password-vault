@@ -107,7 +107,7 @@ Next maturity:
 
 - add full synthetic journey pass/fail and step-duration metrics;
 - add SLO/burn-rate dashboard rows once min-volume or synthetic traffic makes the signal meaningful;
-- add DB query latency, DB pool wait, DB error, auth hash duration, and active auth work metrics;
+- add DB query latency, DB pool wait, DB error, auth/MFA step duration, and challenge pressure metrics;
 - add derived business/product SLIs for activation, access, write+sync, and recovery.
 
 Use `or vector(0)` only when an explicit zero is the correct dashboard fallback. For gate panels and
