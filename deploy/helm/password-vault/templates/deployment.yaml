@@ -35,6 +35,12 @@ spec:
         - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
           topologyKey: {{ .Values.topologySpreadConstraints.topologyKey }}
           whenUnsatisfiable: {{ .Values.topologySpreadConstraints.whenUnsatisfiable }}
+          {{- with .Values.topologySpreadConstraints.nodeAffinityPolicy }}
+          nodeAffinityPolicy: {{ . }}
+          {{- end }}
+          {{- with .Values.topologySpreadConstraints.nodeTaintsPolicy }}
+          nodeTaintsPolicy: {{ . }}
+          {{- end }}
           labelSelector:
             matchLabels:
               {{- include "password-vault.selectorLabels" . | nindent 14 }}

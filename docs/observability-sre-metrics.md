@@ -55,9 +55,10 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   Grafana MCP path. Dashboard verification must currently use live browser access plus datasource
   query checks rather than rendered-image evidence.
 - The API Deployment has three ready replicas and is pinned to an immutable GHCR image digest.
-- Strict node spreading is enabled. Production rollout values use `maxUnavailable: 1` and
-  `maxSurge: 0` to avoid a surge-pod scheduling deadlock with
-  `whenUnsatisfiable: DoNotSchedule`.
+- Topology spreading is enabled. The chart supports `nodeAffinityPolicy: Honor` and
+  `nodeTaintsPolicy: Honor` so production can use hard `DoNotSchedule` spreading without counting
+  tainted control-plane nodes as empty topology domains. Until those production values are rolled
+  out, `ScheduleAnyway` is the safe temporary value for live updates.
 - Read-only cluster checks showed the product database is still a single `postgres:17-bookworm`
   StatefulSet on a node-local `local-path` PVC. CloudNativePG CRDs exist, but there is no active
   product `Cluster`, `Backup`, or `ScheduledBackup`, and no CloudNativePG operator/controller was
