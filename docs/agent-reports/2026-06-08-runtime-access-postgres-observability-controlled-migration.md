@@ -38,9 +38,10 @@ without an explicit route or VPN.
 Verified from the mini-PC:
 
 - edge NGINX is listening on the LAN-facing service ports;
-- Grafana `/api/health` returned HTTP 200;
-- Argo CD `/healthz` returned HTTP 200;
-- Password Vault `/healthz` and `/readyz` returned HTTP 200.
+- Grafana `/api/health` returned HTTP 200 on the LAN edge port;
+- Argo CD `/healthz` returned HTTP 200 on the LAN edge stream port;
+- Password Vault `/healthz` and `/readyz` returned HTTP 200 on the LAN edge port;
+- the same edge ports also answered HTTP 200 for browser entry pages from the mini-PC side.
 
 Client-side verification from the MacBook is still a separate check because local success on the
 mini-PC proves the edge listener and upstreams, not the MacBook route, firewall, or VPN state.
@@ -74,8 +75,16 @@ Live datasource checks returned data:
 - pending requests: `0`;
 - unmatched 404 rate: `0`.
 
+Important limitation: current latency and traffic data are mostly health/readiness/scrape traffic.
+That proves collection and dashboard wiring, not the real product journey. Vault write/read/sync and
+auth funnel metrics still need product instrumentation and synthetic user journeys.
+
 Grafana image rendering is not installed. Automated PNG evidence through Grafana MCP is therefore
 not available yet; dashboard verification currently relies on live queries and browser access.
+
+No Password Vault-specific `VMRule` objects were found in the cluster. Platform-level
+VictoriaMetrics/Kubernetes alert rules exist, but product SLO, target-down, burn-rate, latency, and
+security alert rules are still missing.
 
 ### PostgreSQL HA
 
@@ -100,6 +109,10 @@ Recommended next data-plane direction remains:
 - add WAL archiving, scheduled base backups, restore drill, failover drill, and alerts before real
   secrets are accepted.
 
+The current problem is not a schema conflict with another product. The conflict risk would come from
+sharing another product's database, secret, PVC, backup prefix, or migration target. The safer model
+is a shared platform operator and product-owned PostgreSQL resources.
+
 ### Migration Policy
 
 Stable PostgreSQL versions do not remove application schema migrations.
@@ -117,9 +130,10 @@ The policy should be:
 - no same-release destructive drops or renames for live data;
 - rollback compatibility recorded before merge.
 
-This product branch now contains a controlled migration runner and an opt-in Argo CD Helm migration
-hook. Local validation proved the API image can run migrations first and then start the server with
-startup migrations disabled.
+The current product release contains a controlled migration runner and an opt-in Argo CD Helm
+migration hook. Local validation proved the API image can run migrations first and then start the
+server with startup migrations disabled. The live GitOps rollout also completed the migration Job
+successfully before the API rollout.
 
 Independent reviews found no blocking issues. Accepted fixes from review:
 
@@ -144,15 +158,34 @@ P0 means it blocks a credible stable MVP.
 
 | Priority | Task | Why |
 | --- | --- | --- |
-| P0 | Merge controlled migration runner and enable the GitOps migration hook in production values. | Prevents schema mutation from being a side effect of API pod startup. |
+| P0 | Prove browser access from the MacBook/client path for Password Vault, Grafana, and Argo CD. | Mini-PC local `200` responses do not prove client routing, TLS warning handling, or browser login usability. |
 | P0 | Implement browser vault unlock and encrypted item CRUD/sync with revision conflict checks. | This is the core product, not optional feature work. |
 | P0 | Add product-specific application metrics: build info, DB pool/wait/query metrics, auth hash pressure, rate-limit, CSRF/security rejection counters. | Golden Signals alone do not prove password-manager correctness or abuse resistance. |
 | P0 | Add SLO/burn-rate and target-down alerts after live metrics exist. | A dashboard without actionable alerts is not enough for operations. |
 | P0 | Replace preview PostgreSQL with a product-specific CloudNativePG cluster plus backup/restore/failover drills. | Real secrets require durable write survival and recovery evidence. |
 | P0 | Add external synthetic journey probes from a client-equivalent route. | Internal scrape health is not the same as "a user can reach and use it." |
+| P0 | Add NetworkPolicy or a separate internal-only metrics listener before real secrets. | Edge `/metrics` is blocked, but internal service metrics remain reachable from the cluster network path. |
 | P1 | Add protected-activation business metrics: registration finish, TOTP confirm, login-to-session, first vault item created. | These are meaningful product readiness metrics without exposing user identity. |
 | P1 | Add realistic load tests for register/login/MFA/vault write/read once those flows exist. | Health-only load tests are smoke tests, not product load tests. |
 | P1 | Decide Grafana renderer versus browser automation for dashboard visual evidence. | Current MCP cannot render dashboard PNGs. |
+
+## GitHub Control Plane Hygiene
+
+Read-only GitHub triage found several open MVP issues that are stale or partially done after recent
+rollouts, plus four open Dependabot PRs with failing checks. This is operational noise:
+
+- stale issues can cause agents to re-plan already completed work;
+- failing dependency PRs should be handled from a clean baseline, one at a time;
+- completed work should be reflected in issue comments, labels, or closures before spawning more
+  implementation agents.
+
+Recommended hygiene sequence:
+
+1. Update or close issues for completed Helm/GHCR/GitOps/migration slices.
+2. Keep the MVP epic focused on remaining blockers: vault CRUD/sync, HA database, backup/restore,
+   product metrics/alerts, NetworkPolicy, and synthetic journeys.
+3. Defer Dependabot PRs until the main branch and release path remain green after the next product
+   slice, then process them individually.
 
 ## Work To Defer Or Drop For Now
 
@@ -178,6 +211,47 @@ journeys are proven.
   rejected, corrected, or deferred.
 - Do not spawn broad analysis agents unless their output maps to a P0 gate or a user-facing MVP
   feature.
+- Treat claims as one of `observed`, `configured`, `tested`, or `production-ready`; do not collapse
+  these into "done."
+- Require evidence for high-risk claims: command, context, timestamp or commit/PR, and short output
+  summary.
+- Use one active writer per file or disjoint write scopes for implementation agents. Reviewers and
+  advisors should be report-only unless assigned a bounded patch.
+- Keep a small canonical current-state section in the MVP plan; do not keep copying stale point-in-
+  time report text forward.
+
+## Independent Review Notes
+
+Codex subagent reviewer `Linnaeus` completed a report-only review. Accepted findings:
+
+- The current PostgreSQL deployment is the main blocker before real secrets.
+- CNPG CRDs are not equivalent to a running operator and product `Cluster`.
+- Current dashboard data proves scrape/dashboard wiring, not real product Golden Signals.
+- Missing Password Vault VMRules and NetworkPolicy are real stabilization gaps.
+- GitHub issue and Dependabot noise should be cleaned before broad new agent work.
+
+Claude Code advisor was invoked as report-only. The first read-only filesystem run stalled and was
+stopped after it produced no output. A second bounded no-tools run completed and independently
+confirmed the core findings:
+
+- `3/3` API replicas do not make the product highly available while all writes depend on one
+  PostgreSQL pod.
+- CNPG CRDs are not equivalent to a reconciled CNPG operator and product `Cluster`.
+- A healthy dashboard from health/readiness traffic is not proof of product Golden Signals.
+- Product-specific VMRules, NetworkPolicy, and real browser/TLS/auth checks remain required.
+- Agent recommendations must distinguish desired manifests from running reconciled state.
+
+Accepted Claude additions:
+
+- Treat API replica health and database HA as separate reliability claims.
+- Add explicit "CRD exists" versus "controller reconciles" checks to future Kubernetes reviews.
+- Consider image digest pinning for database images when the production database path is finalized.
+
+Corrected or deferred Claude additions:
+
+- Preview PostgreSQL is a blocker before real secrets, but data migration from preview PostgreSQL is
+  only needed if preview data must be preserved. A clean CNPG cutover is acceptable while the
+  preview contains no real secrets.
 
 ## Validation
 
@@ -196,20 +270,28 @@ Tested:
 - Read-only Kubernetes checks verified Argo CD app health, Password Vault pod readiness, and service
   state.
 - Grafana MCP queries verified that dashboard PromQL expressions return live data.
+- Live GitOps rollout verified that the Argo CD PreSync migration Job completed successfully before
+  the API Deployment ran the new image.
+- Read-only checks verified no Password Vault-specific `VMRule`, no `NetworkPolicy` in the
+  `password-vault` namespace, no active CNPG `Cluster`, and no running CNPG operator/controller
+  matching the expected names.
+- GitHub CLI read-only triage listed open issues, open PRs, and recent workflow status.
 
 Not tested:
 
 - MacBook-to-mini-PC browser route from the MacBook side.
-- Actual Argo CD PreSync execution of the new migration Job in the live cluster.
 - CloudNativePG database rollout, backup, restore, or failover.
 - Product synthetic journey for register/login/MFA/unlock/write/read/sync, because vault CRUD/sync
   is not implemented yet.
 - Grafana dashboard PNG rendering, because the renderer is not installed.
+- MacBook browser TLS/auth/UI behavior for Grafana and Argo CD.
 
 ## Sources
 
 - Google SRE Book, Monitoring Distributed Systems:
   <https://sre.google/sre-book/monitoring-distributed-systems/>
+- Google SRE Book, Service Level Objectives:
+  <https://sre.google/sre-book/service-level-objectives/>
 - Kubernetes Jobs:
   <https://kubernetes.io/docs/concepts/workloads/controllers/job/>
 - Argo CD sync phases and waves:
@@ -224,3 +306,5 @@ Not tested:
   <https://cloudnative-pg.io/docs/1.29/backup/>
 - PostgreSQL `ALTER TABLE`:
   <https://www.postgresql.org/docs/current/sql-altertable.html>
+- PostgreSQL `CREATE INDEX`:
+  <https://www.postgresql.org/docs/current/sql-createindex.html>
