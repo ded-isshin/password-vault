@@ -31,9 +31,11 @@ RUN apt-get update \
 COPY --from=build /workspace/target/release/password-vault-api /usr/local/bin/password-vault-api
 
 ENV PV_BIND_ADDR="0.0.0.0:8080" \
+    PV_METRICS_BIND_ADDR="0.0.0.0:9090" \
     RUST_LOG="password_vault_api=info"
 
 EXPOSE 8080
+EXPOSE 9090
 USER 10001:10001
 
 ENTRYPOINT ["/usr/local/bin/password-vault-api"]

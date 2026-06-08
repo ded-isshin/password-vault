@@ -41,6 +41,7 @@ function loadConfig() {
   }
 
   const baseUrl = new URL(process.env.BASE_URL || "http://127.0.0.1:8080");
+  const metricsBaseUrl = new URL(process.env.METRICS_BASE_URL || defaultMetricsBaseUrl(baseUrl));
   const allowNonLocal = boolEnv("SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL", false);
   if (!allowNonLocal && !isLocalBaseUrl(baseUrl)) {
     throw new Error(
@@ -52,6 +53,11 @@ function loadConfig() {
     process.env.SYNTHETIC_CHECK_METRICS === undefined
       ? isLocalBaseUrl(baseUrl)
       : boolEnv("SYNTHETIC_CHECK_METRICS", true);
+  if (checkMetrics && !allowNonLocal && !isLocalBaseUrl(metricsBaseUrl)) {
+    throw new Error(
+      "Refusing non-local METRICS_BASE_URL. Set SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL=true for an explicit live-edge run.",
+    );
+  }
   const runId = sanitizeRunId(process.env.RUN_ID || `local-${Date.now()}`);
   const prefix = sanitizeRunId(process.env.SYNTHETIC_LOGIN_PREFIX || "synthetic");
   const domain = String(process.env.SYNTHETIC_EMAIL_DOMAIN || "loadtest.invalid")
@@ -64,12 +70,22 @@ function loadConfig() {
 
   return {
     baseUrl,
+    metricsBaseUrl,
     checkMetrics,
     runId,
     loginHandle: `${prefix}-${runId}-${base64Url(randomBytes(6))}@${domain}`,
     masterPassword: `Synthetic-${runId}-${base64Url(randomBytes(18))}-A1!`,
     timeoutMs,
   };
+}
+
+function defaultMetricsBaseUrl(baseUrl) {
+  if (!isLocalBaseUrl(baseUrl)) {
+    return baseUrl.toString();
+  }
+  const metricsUrl = new URL(baseUrl.toString());
+  metricsUrl.port = "9090";
+  return metricsUrl.toString();
 }
 
 function isLocalBaseUrl(baseUrl) {
@@ -311,7 +327,7 @@ async function requestText(config, path, options = {}) {
 }
 
 async function requestRaw(config, path, options = {}) {
-  const url = new URL(path, config.baseUrl);
+  const url = new URL(path, options.baseUrl || config.baseUrl);
   const headers = {
     Accept: options.accept || "application/json",
     ...(options.headers || {}),
@@ -1009,8 +1025,16 @@ async function syncVault(config, jar, vault) {
 }
 
 async function assertMetrics(config) {
+  await requestText(config, "/metrics", {
+    accept: "text/plain",
+    expectStatus: 404,
+    expectNoStore: false,
+    label: "public API metrics denial",
+  });
+
   const { text } = await requestText(config, "/metrics", {
     accept: "text/plain",
+    baseUrl: config.metricsBaseUrl,
     expectNoStore: false,
     label: "metrics",
   });

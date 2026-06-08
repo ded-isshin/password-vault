@@ -1,4 +1,5 @@
 export const baseUrl = (__ENV.BASE_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
+export const metricsBaseUrl = (__ENV.METRICS_BASE_URL || 'http://127.0.0.1:9090').replace(/\/+$/, '');
 export const runId = sanitize(__ENV.RUN_ID || 'manual');
 export const loadRate = parseInt(__ENV.LOAD_RATE || '2', 10);
 export const loadDuration = __ENV.LOAD_DURATION || '15s';

@@ -121,6 +121,9 @@ up{job="password-vault-api"}
 sum(rate(axum_http_requests_total{job="password-vault-api"}[5m]))
 ```
 
+The API service should not expose `/metrics` on the browser/API port. Metrics are scraped through
+the internal metrics service and port.
+
 Browser-access check for the current home platform:
 
 ```text

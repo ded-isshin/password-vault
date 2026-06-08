@@ -20,6 +20,7 @@ pub mod vault;
 #[derive(Clone)]
 pub struct ApiConfig {
     pub bind_addr: SocketAddr,
+    pub metrics_bind_addr: SocketAddr,
     database_url: Option<String>,
     synthetic_metadata_key: Option<[u8; 32]>,
     totp_seed_key: Option<[u8; 32]>,
@@ -33,6 +34,10 @@ impl ApiConfig {
             .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
             .parse()
             .map_err(|_| ConfigError::InvalidBindAddr)?;
+        let metrics_bind_addr = env::var("PV_METRICS_BIND_ADDR")
+            .unwrap_or_else(|_| "0.0.0.0:9090".to_string())
+            .parse()
+            .map_err(|_| ConfigError::InvalidMetricsBindAddr)?;
 
         let require_database = match env::var("PV_REQUIRE_DATABASE") {
             Ok(value) => parse_bool(&value).ok_or(ConfigError::InvalidRequireDatabase)?,
@@ -60,6 +65,7 @@ impl ApiConfig {
 
         Ok(Self {
             bind_addr,
+            metrics_bind_addr,
             database_url: database_url_present,
             synthetic_metadata_key,
             totp_seed_key,
@@ -71,6 +77,9 @@ impl ApiConfig {
     pub fn local_test(require_database: bool, database_url_present: bool) -> Self {
         Self {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: database_url_present
@@ -104,6 +113,7 @@ impl std::fmt::Debug for ApiConfig {
         formatter
             .debug_struct("ApiConfig")
             .field("bind_addr", &self.bind_addr)
+            .field("metrics_bind_addr", &self.metrics_bind_addr)
             .field(
                 "database_url",
                 &self.database_url.as_ref().map(|_| "<configured>"),
@@ -125,6 +135,7 @@ impl std::fmt::Debug for ApiConfig {
 #[derive(Debug)]
 pub enum ConfigError {
     InvalidBindAddr,
+    InvalidMetricsBindAddr,
     InvalidRequireDatabase,
     InvalidRunMigrationsOnStartup,
     InvalidSyntheticMetadataKey,
@@ -135,6 +146,9 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidBindAddr => write!(formatter, "PV_BIND_ADDR must be a socket address"),
+            Self::InvalidMetricsBindAddr => {
+                write!(formatter, "PV_METRICS_BIND_ADDR must be a socket address")
+            }
             Self::InvalidRequireDatabase => {
                 write!(formatter, "PV_REQUIRE_DATABASE must be true or false")
             }
@@ -211,6 +225,11 @@ pub fn app(config: ApiConfig) -> Router {
     })
 }
 
+pub fn metrics_app() -> Router {
+    let (_, metrics_handle) = metrics_layer_and_handle();
+    Router::new().route("/metrics", get(move || metrics(metrics_handle.clone())))
+}
+
 pub async fn run_database_migrations(database_url: &str) -> Result<(), ApiInitError> {
     let pool = db::connect(database_url).await?;
     db::run_migrations(&pool).await?;
@@ -236,7 +255,7 @@ pub async fn build_app(config: ApiConfig) -> Result<Router, ApiInitError> {
 }
 
 fn router(state: AppState) -> Router {
-    let (metrics_layer, metrics_handle) = metrics_layer_and_handle();
+    let (metrics_layer, _) = metrics_layer_and_handle();
 
     Router::new()
         .route("/", get(index))
@@ -244,7 +263,6 @@ fn router(state: AppState) -> Router {
         .route("/assets/app.js", get(app_js))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        .route("/metrics", get(move || metrics(metrics_handle.clone())))
         .merge(auth::routes::router())
         .merge(vault::router())
         .with_state(state)
@@ -449,7 +467,7 @@ mod tests {
         db,
     };
 
-    use super::{ApiConfig, app, build_app};
+    use super::{ApiConfig, app, build_app, metrics_app};
 
     static DB_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -500,7 +518,19 @@ mod tests {
             assert_eq!(response.status(), 404);
         }
 
-        let metrics_response = app
+        let public_metrics_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(public_metrics_response.status(), 404);
+
+        let metrics_response = metrics_app()
             .oneshot(
                 Request::builder()
                     .uri("/metrics")
@@ -532,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn product_metrics_use_low_cardinality_labels() {
-        let app = app(ApiConfig::local_test(false, false));
+        let metrics_app = metrics_app();
 
         crate::telemetry::registration_event("finish", "success");
         crate::telemetry::account_created("success");
@@ -543,7 +573,7 @@ mod tests {
         crate::telemetry::sync_request("success", "complete");
         crate::telemetry::vault_item_change("create", "success");
 
-        let metrics_response = app
+        let metrics_response = metrics_app
             .oneshot(
                 Request::builder()
                     .uri("/metrics")
@@ -699,6 +729,9 @@ mod tests {
             bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
             database_url: Some("postgres://test:test@127.0.0.1:1/test".to_string()),
             synthetic_metadata_key: None,
             totp_seed_key: None,
@@ -749,6 +782,9 @@ mod tests {
 
         let router = build_app(ApiConfig {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
@@ -884,6 +920,9 @@ mod tests {
             bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
             totp_seed_key: Some([8u8; 32]),
@@ -1002,6 +1041,9 @@ mod tests {
 
         let router = build_app(ApiConfig {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
@@ -1211,6 +1253,9 @@ mod tests {
             bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
             totp_seed_key: Some([8u8; 32]),
@@ -1394,6 +1439,9 @@ mod tests {
 
         let router = build_app(ApiConfig {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
@@ -1624,6 +1672,9 @@ mod tests {
             bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
             totp_seed_key: Some([8u8; 32]),
@@ -1690,6 +1741,9 @@ mod tests {
 
         let missing_key_router = build_app(ApiConfig {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
@@ -1836,6 +1890,9 @@ mod tests {
 
         let router = build_app(ApiConfig {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
@@ -2096,6 +2153,9 @@ mod tests {
 
         let router = build_app(ApiConfig {
             bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
                 .parse()
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),

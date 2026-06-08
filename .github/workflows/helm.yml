@@ -34,6 +34,10 @@ jobs:
             --set observability.vmServiceScrape.enabled=true \
             >/tmp/password-vault-rendered.yaml
           test -s /tmp/password-vault-rendered.yaml
+          grep -q 'name: password-vault-api-metrics' /tmp/password-vault-rendered.yaml
+          grep -q 'name: PV_METRICS_BIND_ADDR' /tmp/password-vault-rendered.yaml
+          grep -q 'name: metrics' /tmp/password-vault-rendered.yaml
+          grep -q 'port: metrics' /tmp/password-vault-rendered.yaml
           docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
             template password-vault deploy/helm/password-vault \
             --namespace password-vault \

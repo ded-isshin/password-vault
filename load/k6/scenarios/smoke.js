@@ -1,6 +1,6 @@
 import { check } from 'k6';
 import http from 'k6/http';
-import { baseUrl, runId, scenario, smokeThresholds } from '../lib/config.js';
+import { baseUrl, metricsBaseUrl, runId, scenario, smokeThresholds } from '../lib/config.js';
 import { clientNonce, jsonHeaders, loginHandle, stableLoginHandle } from '../lib/data.js';
 
 export const options = {
@@ -42,7 +42,7 @@ export default function () {
     'login/start has combined nonce': (response) => Boolean(response.json('combined_nonce')),
   });
 
-  const metrics = http.get(`${baseUrl}/metrics`);
+  const metrics = http.get(`${metricsBaseUrl}/metrics`);
   check(metrics, {
     'metrics is 200': (response) => response.status === 200,
     'metrics expose http counters': (response) => response.body.includes('axum_http_requests_total'),

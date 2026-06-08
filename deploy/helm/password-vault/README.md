@@ -73,6 +73,7 @@ Schema migrations are not run by app pods by default.
 When `observability.vmServiceScrape.enabled=true`, the chart emits a VictoriaMetrics
 `VMServiceScrape` with stable job label `password-vault-api`.
 
-The API exposes `/metrics` on the same service port as the public API. If `ingress.enabled=true`,
-operators must block public access to `/metrics` at the ingress layer or provide an internal-only
-metrics path before exposing this chart to the internet.
+The application exposes `/metrics` on a separate metrics listener configured by
+`config.metricsBindAddr` and published through the internal-only `password-vault-api-metrics`
+ClusterIP Service. The public API service should not expose `/metrics`; smoke checks should expect
+HTTP 404 on the API port and HTTP 200 on the metrics port.

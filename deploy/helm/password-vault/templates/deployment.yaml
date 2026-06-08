@@ -48,6 +48,8 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+            - containerPort: 9090
+              name: metrics
           lifecycle:
             preStop:
               exec:
@@ -58,6 +60,8 @@ spec:
           env:
             - name: PV_BIND_ADDR
               value: {{ .Values.config.bindAddr | quote }}
+            - name: PV_METRICS_BIND_ADDR
+              value: {{ .Values.config.metricsBindAddr | quote }}
             - name: PV_REQUIRE_DATABASE
               value: {{ .Values.config.requireDatabase | quote }}
             - name: PV_RUN_MIGRATIONS_ON_STARTUP

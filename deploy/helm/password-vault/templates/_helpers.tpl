@@ -22,9 +22,13 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: password-vault
 {{- end -}}
 
-{{- define "password-vault.selectorLabels" -}}
+{{- define "password-vault.baseSelectorLabels" -}}
 app.kubernetes.io/name: {{ include "password-vault.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "password-vault.selectorLabels" -}}
+{{- include "password-vault.baseSelectorLabels" . }}
 component: api
 {{- end -}}
 

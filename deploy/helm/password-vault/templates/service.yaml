@@ -14,3 +14,20 @@ spec:
     - name: http
       port: {{ .Values.service.port }}
       targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "password-vault.fullname" . }}-api-metrics
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+    component: metrics
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "password-vault.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.service.metricsPort }}
+      targetPort: metrics

@@ -81,6 +81,7 @@ jobs:
             password-vault-api:ci-smoke migrate
           docker run -d --rm --name password-vault-api-smoke --network host \
             -e PV_BIND_ADDR=127.0.0.1:8080 \
+            -e PV_METRICS_BIND_ADDR=127.0.0.1:9090 \
             -e PV_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/password_vault_test \
             -e PV_REQUIRE_DATABASE=true \
             -e PV_RUN_MIGRATIONS_ON_STARTUP=false \
@@ -96,14 +97,16 @@ jobs:
           done
           curl -fsS http://127.0.0.1:8080/healthz
           curl -fsS http://127.0.0.1:8080/readyz
-          curl -fsS http://127.0.0.1:8080/metrics | grep -E 'axum_http_requests_total|axum_http_requests_duration_seconds'
-          curl -fsS http://127.0.0.1:8080/metrics \
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/metrics)" = "404"
+          curl -fsS http://127.0.0.1:9090/metrics | grep -E 'axum_http_requests_total|axum_http_requests_duration_seconds'
+          curl -fsS http://127.0.0.1:9090/metrics \
             | grep 'password_vault_build_info' \
             | grep "revision=\"${GITHUB_SHA}\""
           docker run --rm --network host \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
             -e BASE_URL=http://127.0.0.1:8080 \
+            -e METRICS_BASE_URL=http://127.0.0.1:9090 \
             -e RUN_ID=ci-${{ github.run_id }}-${{ github.run_attempt }} \
             -e SYNTHETIC_TIMEOUT_MS=120000 \
             "$NODE_SYNTHETIC_IMAGE" node --check load/synthetic/browser-api-journey.mjs
@@ -111,6 +114,7 @@ jobs:
             -v "$PWD:/workspace:ro" \
             -w /workspace \
             -e BASE_URL=http://127.0.0.1:8080 \
+            -e METRICS_BASE_URL=http://127.0.0.1:9090 \
             -e RUN_ID=ci-${{ github.run_id }}-${{ github.run_attempt }} \
             -e SYNTHETIC_TIMEOUT_MS=120000 \
             "$NODE_SYNTHETIC_IMAGE" node load/synthetic/browser-api-journey.mjs
@@ -118,6 +122,7 @@ jobs:
             -v "$PWD/load/k6:/scripts:ro" \
             -w /scripts \
             -e BASE_URL=http://127.0.0.1:8080 \
+            -e METRICS_BASE_URL=http://127.0.0.1:9090 \
             -e RUN_ID=ci-${{ github.run_id }} \
             -e LOAD_RATE=2 \
             -e LOAD_DURATION=15s \

@@ -12,9 +12,10 @@ spec:
       - {{ include "password-vault.namespace" . }}
   selector:
     matchLabels:
-      {{- include "password-vault.selectorLabels" . | nindent 6 }}
+      {{- include "password-vault.baseSelectorLabels" . | nindent 6 }}
+      component: metrics
   endpoints:
-    - port: http
+    - port: metrics
       path: /metrics
       relabelConfigs:
         - action: replace

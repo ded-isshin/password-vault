@@ -24,8 +24,8 @@ Official sources checked:
   contract, load-test checks, and this SRE plan.
 - Infrastructure repo owns production values, Grafana dashboards, VictoriaMetrics/Prometheus rule
   deployment, notification routing, retention, and external synthetic probes.
-- `/metrics` is exposed on the API service port today. If ingress is enabled, operators must block
-  public access to `/metrics` or move scraping to an internal-only path/listener.
+- `/metrics` must stay off the browser/API service port. The intended chart contract is a separate
+  metrics listener and internal ClusterIP metrics service scraped by VictoriaMetrics.
 
 ## Current Deployed State
 
@@ -84,8 +84,7 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   do not pass the build arg can still report `revision="unknown"`.
 - The infrastructure GitOps state now includes a first `NetworkPolicy` that restricts PostgreSQL
   ingress on TCP/5432 to Password Vault API pods and Argo CD migration hook pods. This is a useful
-  first isolation step, but it is not a namespace-wide default deny and does not yet make `/metrics`
-  internal-only.
+  first isolation step, but it is not a namespace-wide default deny.
 - The infrastructure GitOps state now includes `VMRule` alert rules named `password-vault-alerts`.
   Runtime validation showed the `password-vault.rules` group loaded in `vmalert`, with rules for
   API target loss, replica loss, 5xx ratio, p95 latency, pending requests, missing build info,
@@ -351,13 +350,13 @@ on the dashboard.
   those paths.
 - CSRF, rate-limit, recovery, and protected-activation security-event panels are not implemented
   yet.
-- Edge access to `/metrics` is blocked in the current preview, but internal application
-  `LoadBalancer` access still reaches `/metrics`; API ingress hardening or a separate internal-only
-  metrics listener is still needed.
+- The chart is expected to expose `/metrics` only on the internal metrics service, while the API
+  service returns 404 for `/metrics`. After rollout, verify both paths explicitly.
 - PostgreSQL ingress now has a first NetworkPolicy. API ingress/egress and full namespace
   default-deny are intentionally not enabled yet because the current edge/LoadBalancer path needs
   a tested allow-list design.
-- No dashboard check proving `/metrics` is inaccessible from the wrong network path.
+- No dashboard panel proves `/metrics` is inaccessible from the wrong network path. This should be a
+  synthetic/security check, not only a dashboard assumption.
 - No live synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
 
 ## Waste-Control Rules For Observability Work
@@ -414,8 +413,9 @@ budget over short and long windows.
 
 Before calling the MVP observable:
 
-- `/metrics` returns 200 and includes `axum_http_requests_total`,
+- Internal `/metrics` returns 200 and includes `axum_http_requests_total`,
   `axum_http_requests_duration_seconds_bucket`, and `axum_http_requests_pending`.
+- Browser/API-port `/metrics` returns 404 or another non-success response.
 - Scraping produces `up{job="password-vault-api"} == 1` for deployed API targets.
 - Dashboard has panels for request rate, 5xx ratio, p95/p99 latency, pending requests, and target
   health.
@@ -424,9 +424,9 @@ Before calling the MVP observable:
 - Multi-window burn-rate alerts exist for product endpoint SLOs.
 - Metrics labels are low-cardinality and public safe; random 404 paths, login handles, account IDs,
   device IDs, item IDs, OTP values, and secrets do not appear in `/metrics`.
-- Ingress or network policy blocks public access to `/metrics` when public ingress is enabled.
-- k6 smoke covers `/healthz`, `/readyz`, `/metrics`, and at least one auth journey once the journey
-  is implemented.
+- Ingress or network policy blocks public access to internal metrics when public ingress is enabled.
+- k6 smoke covers `/healthz`, `/readyz`, public API `/metrics` denial, internal `/metrics`, and at
+  least one auth journey once the journey is implemented.
 - Candidate SLO queries return data from real traffic or synthetic traffic.
 - Product/security metrics are instrumented before using auth funnel or abuse dashboards as release
   gates.
