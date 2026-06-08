@@ -7,9 +7,11 @@ Status: MVP draft.
 This runbook covers product image release, GitOps handoff, and safe rollout expectations. It does not
 authorize cluster mutation by itself.
 
-Current status: the browser/API MVP is deployed through GitOps, while the database is still a
-preview single PostgreSQL `StatefulSet`. CloudNativePG operator foundation exists in the cluster,
-but no Password Vault CloudNativePG `Cluster`, `Backup`, or `ScheduledBackup` exists yet.
+Current status: the browser/API MVP is deployed through GitOps and the API is cut over to the
+product-owned `password-vault-cnpg` CloudNativePG cluster. The legacy preview PostgreSQL
+`StatefulSet` may remain briefly as rollback debt, but it is not the active API database. No real
+user secrets are approved until backup, WAL, restore, failover, alert delivery, and scheduled
+synthetic gates are proven.
 
 ## Release Artifact Flow
 
@@ -199,8 +201,7 @@ Expected state:
 - the operator image matches the GitOps-pinned chart/app version;
 - `VMPodScrape/data-cloudnative-pg-operator` is `operational`.
 
-CloudNativePG must not be assumed to manage the preview database until a `Cluster` resource exists.
-Verify this boundary explicitly:
+CloudNativePG is the active preview database. Verify the database and backup boundary explicitly:
 
 ```bash
 KUBECONFIG=<redacted-path> kubectl get \
@@ -210,8 +211,9 @@ KUBECONFIG=<redacted-path> kubectl get \
 
 Expected current preview state:
 
-- no CloudNativePG `Cluster`, `Backup`, `ScheduledBackup`, or `Pooler` resources;
-- `password-vault-postgres` remains a preview single `StatefulSet`;
+- `password-vault-cnpg` exists with three ready instances;
+- no CloudNativePG `Backup`, `ScheduledBackup`, or `Pooler` resources exist until backup work lands;
+- `password-vault-postgres`, if still present, is only a rollback artifact;
 - other products' PostgreSQL `StatefulSet`s remain separate and must not be reused by Password Vault.
 
 VictoriaMetrics checks:
@@ -225,20 +227,20 @@ Expected current scrape state:
 
 - Password Vault API target count matches the expected API replica count;
 - CloudNativePG operator scrape has `up=1`;
-- CNPG controller/workqueue metrics are present before any CNPG database cluster is created.
+- Password Vault CNPG scrape has the expected database target count and streaming replica data.
 
 ## Backup, Restore, And Real-Data Gate
 
-The current preview database is not production-like. Do not accept real user secrets until the
-following evidence exists:
+The current preview database is HA-shaped but not yet production-like. Do not accept real user
+secrets until the following evidence exists:
 
 - backup object-store target is selected;
 - backup credentials are provisioned outside Git as Kubernetes/runtime secrets;
 - CloudNativePG Barman Cloud Plugin or another reviewed CloudNativePG-supported backup method is
   selected and documented;
 - Password Vault CloudNativePG `Cluster` exists with three instances and explicit node spread;
-- synchronous replication policy is reviewed for the current cluster;
-- continuous WAL archiving is enabled;
+- synchronous replication policy is reviewed and verified for the current cluster;
+- WAL archiving health is observable and remains failure-free after the backup method is selected;
 - scheduled physical base backups are enabled;
 - at least one scheduled backup has completed successfully;
 - restore into a non-live namespace or separate `Cluster` object has been completed;
@@ -246,30 +248,19 @@ following evidence exists:
 - a controlled application smoke test succeeds against the restored database;
 - observed RTO/RPO and manual steps are recorded.
 
-Prepared sequence for the future CNPG cutover:
+Post-cutover operating sequence:
 
-1. Keep the existing preview `StatefulSet` and PVC intact.
-2. Add a GitOps PR for the new CloudNativePG `Cluster`; do not change the API database connection
-   yet.
-3. Prove the new cluster reaches healthy primary/replica state.
-4. Add backup/WAL configuration and a scheduled backup.
-5. Run a restore drill into a scratch target.
-6. Choose the data preservation mode:
-   - if preview data is disposable, initialize the new cluster from migrations only;
-   - if preview data must be preserved through a full schema dump, restore the dump into an empty
-     cluster and then run `password-vault-api migrate`;
-   - if preview data must be preserved through data-only import, run `password-vault-api migrate`
-     first and then import data only.
-7. Before the final export or final incremental sync, freeze writes or put the old preview path into
-   a reviewed read-only/maintenance window. Do not let accepted writes continue on the old database
-   between final data copy and API cutover.
-8. Run a reconciliation check that proves the new target contains the expected migrated state without
-   logging secrets or user identifiers.
-9. Change the API database Secret/Service reference through GitOps.
-10. Roll API pods with `maxUnavailable: 0`.
-11. Run browser/API synthetic verification, metrics checks, backup checks, and Argo checks.
-12. Keep the old preview `StatefulSet` quarantined for a rollback window. Do not delete the old PVC
-    until cutover and restore evidence are recorded.
+1. Keep the active `password-vault-cnpg` cluster healthy with three ready instances.
+2. Keep the API database Secret reference pointed at the CNPG application Secret.
+3. Keep the legacy preview `StatefulSet` quarantined only for the rollback window; do not delete the
+   old PVC until cutover, synthetic, and restore evidence are recorded.
+4. Add backup/WAL configuration and a scheduled backup through GitOps.
+5. Run a restore drill into a scratch target before accepting real secrets.
+6. Run a failover drill or controlled failover validation and record observed application impact.
+7. Run browser/API synthetic verification, metrics checks, backup checks, and Argo checks after each
+   deployment-impacting change.
+8. Remove the legacy preview `StatefulSet` only after the rollback window and restore evidence are
+   complete.
 
 Do not treat PostgreSQL pod readiness as backup proof. HA, backup, PITR, and restore drills are
 different controls.

@@ -4,8 +4,8 @@ Status: draft. Created for milestone `v0.2-working-mvp`.
 
 Current implementation status, 2026-06-08:
 
-- Deployed browser preview, health/readiness/metrics, preview PostgreSQL, Helm/GitOps, and Grafana
-  dashboard exist.
+- Deployed browser preview, health/readiness/metrics, active CloudNativePG preview PostgreSQL,
+  Helm/GitOps, and Grafana dashboard exist.
 - The current GitOps preview is `Synced/Healthy/Succeeded` in Argo CD. API pods are three ready
   replicas. The chart now supports topology spread `nodeAffinityPolicy` and `nodeTaintsPolicy`
   controls plus `matchLabelKeys: [pod-template-hash]` so production can combine live
@@ -36,8 +36,9 @@ Current implementation status, 2026-06-08:
   return login, login-time TOTP, vault unlock, encrypted item create, sync, MAC/head validation, and
   item decryption. It also verifies recovery-code login into an `mfa_recovery` session, confirms
   that recovery sessions cannot access vault APIs, and re-enrolls TOTP. It is wired into PR
-  container smoke and the manual `load-smoke` workflow, but it still needs a live edge run after
-  each deployed change before the deployed browser path can be treated as proven end-to-end.
+  container smoke and the manual `load-smoke` workflow. A live edge run after the CNPG cutover
+  succeeded on 2026-06-08; future deployed changes still need a fresh live edge run before their
+  browser path can be treated as proven end-to-end.
 - The current branch adds a dry-run-first `cleanup-synthetic` maintenance command for old
   reserved-domain synthetic accounts. This enables bounded cleanup of live-test data, but a
   scheduled external synthetic probe and cleanup job are still future work.
@@ -51,16 +52,14 @@ Current implementation status, 2026-06-08:
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
   changes, sync requests, and build information are merged, published, deployed, and covered by a
   low-cardinality metrics test. Live checks verified `password_vault_build_info`,
-  `password_vault_registration_events_total`, and `password_vault_login_starts_total` in
-  VictoriaMetrics after a synthetic smoke run. MFA, vault item, and sync counters are now covered by
-  the full CI/local synthetic journey, but still need a live edge verification run and dashboard
-  query check.
+  `password_vault_registration_events_total`, `password_vault_mfa_events_total`,
+  `password_vault_vault_item_changes_total`, and `password_vault_sync_requests_total` in
+  VictoriaMetrics after synthetic runs.
 - The shared CloudNativePG operator is deployed through infrastructure GitOps. A product-owned
-  pre-cutover `password-vault-cnpg` CloudNativePG `Cluster` is deployed and verified live with
-  three PostgreSQL 18.4 instances spread across the three worker nodes. It is intentionally not wired
-  to the API yet. The API still uses the preview single PostgreSQL `StatefulSet`, so real password
-  data remains blocked until backup, WAL archiving, restore, failover, migration, and cutover gates
-  are complete.
+  `password-vault-cnpg` CloudNativePG `Cluster` is deployed and verified live with three PostgreSQL
+  18.4 instances spread across the three worker nodes. The API is cut over to the CNPG application
+  Secret. Real password data remains blocked until backup availability, restore drills, failover
+  drills, alert delivery, and scheduled synthetic monitoring gates are complete.
 - A controlled migration runner is merged, published, and deployed: the API image supports a
   `password-vault-api migrate` command, startup migrations remain disabled in production values, and
   generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
@@ -77,9 +76,9 @@ MVP dependable:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
 3. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
    not schedule production cleanup until HA/backup posture is understood.
-4. Complete the database cutover track: keep the current pre-cutover CloudNativePG cluster healthy,
-   add backup/WAL/restore/failover gates, run schema validation against it, then switch the API
-   database Secret through GitOps. Do not accept real secrets before this is complete.
+4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
+   backup/WAL/restore/failover gates, and remove the legacy preview PostgreSQL rollback artifact only
+   after recorded restore evidence exists. Do not accept real secrets before this is complete.
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
 6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.

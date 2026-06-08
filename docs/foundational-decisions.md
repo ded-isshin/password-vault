@@ -19,7 +19,8 @@ Recommended baseline:
 - Account secret key: recommended second KDF input for MVP to reduce password-only offline guessing
   risk after database compromise. The final ADR must define UX, recovery, and device onboarding.
 - Vault unlock: separate from login; local client unlock is required to decrypt vault items.
-- KDF: Argon2id in browser through a reviewed pinned WASM dependency as the target.
+- KDF: the current browser MVP profile is `pbkdf2-sha256-browser-v1` through WebCrypto; Argon2id in
+  browser through a reviewed pinned WASM dependency remains the target.
 - Key separation: one expensive KDF pass, then HKDF domain separation.
 - AEAD: AES-256-GCM through WebCrypto for the browser MVP, preferably with per-revision content
   keys derived from the vault key.

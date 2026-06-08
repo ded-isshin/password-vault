@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17-bookworm
+        image: postgres:18-bookworm
         env:
           POSTGRES_DB: password_vault_test
           POSTGRES_USER: postgres
