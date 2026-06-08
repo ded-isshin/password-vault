@@ -45,6 +45,87 @@ brief, load README, and release runbook. This report records what was checked in
 - HiringTrace PostgreSQL is separate. There is no conflict as long as Password Vault keeps its own
   namespace, CNPG cluster, database, credentials, PVCs, services, backup prefix, and migrations.
 
+## Runtime Re-Check: 2026-06-08T18:20Z
+
+This re-check was triggered after a browser-access report and after product PR #99 was merged.
+
+Verified from the mini-PC:
+
+- The mini-PC LAN interface remained the browser-facing route for Grafana, Argo CD, and Password
+  Vault.
+- HTTPS requests to the LAN edge returned page titles for all three services:
+  `Grafana`, `Argo CD`, and `Password Vault`.
+- The host had listeners bound to `0.0.0.0` for the expected browser ports:
+  Grafana `3000`, Argo CD `9443`, and Password Vault `11443`.
+- The Kubernetes/LXD `LoadBalancer` address for Argo CD also returned HTTP 200 from the mini-PC, but
+  it should not be treated as the normal MacBook URL unless that client has routing into the
+  Kubernetes/LXD network.
+- A plain `kubectl` command without `KUBECONFIG` still defaulted to `localhost:8080` and failed. The
+  read-only cluster checks succeeded with the explicit production kubeconfig path from
+  `infrastructure-home` documentation.
+
+Read-only Kubernetes findings:
+
+- All six Kubernetes nodes were `Ready`.
+- Argo CD Applications, including `prod-root` and `password-vault`, were `Synced` and `Healthy`.
+- `argocd-server-external` remained a cluster `LoadBalancer` service. Browser access for a normal
+  LAN client should still go through the mini-PC edge route.
+- Grafana was exposed through the observability `LoadBalancer` service and was also reachable
+  through the mini-PC edge route.
+- Password Vault API had three ready replicas spread across three worker nodes.
+- Password Vault API was still deployed at the previous runtime image digest. Product PR #99
+  published a newer GHCR image digest for the same application code lineage and pinned base images,
+  but that digest had not been promoted through GitOps during this re-check.
+- Password Vault CNPG had three ready instances and the cluster status was healthy.
+- No Password Vault CNPG `Backup` or `ScheduledBackup` resources were present.
+- The legacy single-node PostgreSQL `StatefulSet` remained present as rollback debt and was not the
+  active API database path.
+
+Grafana/VictoriaMetrics findings:
+
+- Grafana MCP datasource discovery succeeded; `VictoriaMetrics` was the default Prometheus-compatible
+  datasource.
+- Dashboard `password-vault-overview` was found.
+- `sum(up{job="password-vault-api"}) or vector(0)` returned `3`.
+- `sum(up{job="password-vault-cnpg"}) or vector(0)` returned `3`.
+- `max(cnpg_pg_replication_streaming_replicas{job="password-vault-cnpg"}) or vector(0)` returned
+  `2`.
+- `max(cnpg_pg_replication_lag{namespace="password-vault",pod=~"password-vault-cnpg-.*"}) or
+  vector(0)` returned `0`.
+- `max(cnpg_collector_last_available_backup_timestamp{namespace="password-vault",pod=~"password-vault-cnpg-.*"})
+  or vector(0)` returned `0`.
+- `sum by (state) (password_vault_db_pool_connections{namespace="password-vault"})` returned
+  `max=15`, `idle=3`, and `used=0` across the API replicas at the instant checked.
+- `ALERTS{alertname=~"PasswordVault.*",alertstate="firing"}` returned
+  `PasswordVaultCnpgBackupMissing`, which is expected while no available base backup exists.
+- A stale local check used the wrong old metric name
+  `cnpg_collector_pg_replication_streaming_replicas`; the deployed dashboard uses the current
+  `cnpg_pg_replication_streaming_replicas` metric and returned the expected value.
+
+Product PR #99 follow-up:
+
+- PR #99 was merged to `main`.
+- Main `docs`, `public-safety`, `rust`, `postgres-migrations`, and `container publish` checks passed.
+- The new published image digest was
+  `ghcr.io/ded-isshin/password-vault-api@sha256:27d69503a77da36c58bc36c0e4430d3ca4c6b013ef085c2341d10f424e65a6b2`.
+- This improves supply-chain drift/integrity by pinning CI and build base images by digest. It does
+  not fully remove Docker Hub availability risk because digest pulls still contact Docker Hub unless
+  mirrored or cached.
+
+Infra source-of-truth follow-up:
+
+- The default `<infra-repo-checkout>` checkout was on an older dirty feature branch and
+  must not be used as current Password Vault GitOps evidence.
+- The current Password Vault infra worktree was `<infra-current-worktree>`.
+- That worktree was clean, on `main`, equal to `origin/main`, and at
+  `0fdeb9205d52fd29611675993961b017c0a61fc0`.
+- The committed GitOps source contains the Password Vault Argo Application, CNPG cluster,
+  CNPG NetworkPolicy, CNPG scrape, blackbox probe, VMRule alerts, and Grafana dashboard.
+- Therefore the corrected top finding is not "missing GitOps source." The corrected blocker is
+  missing CNPG backup/WAL/PITR/restore/failover evidence.
+- The legacy `password-vault-postgres` StatefulSet is still committed and live as rollback debt.
+  It should be removed only after backup, restore, and failover evidence are recorded.
+
 ## Browser Access
 
 Correct browser/LAN entrypoints are the mini-PC edge HTTPS ports:
@@ -174,7 +255,20 @@ Accepted suggestions:
 
 Rejected suggestions:
 
-- None from this review.
+- Claude's initial top finding claimed the Password Vault GitOps manifests were missing from the
+  default infra checkout. That was rejected after verifying that the checkout Claude inspected was
+  an older dirty feature branch. The current infra worktree and `origin/main` do contain the
+  Password Vault Application, CNPG, dashboard, blackbox, and alert manifests.
+
+Follow-up review:
+
+- Claude re-ran a corrected review against the current infra worktree.
+- Accepted: CNPG backup/WAL/PITR remains the top blocker; restore drill, failover drill, alert
+  delivery smoke, scheduled external synthetic metrics, and MacBook-side reachability remain open.
+- Accepted: promoting the PR #99 image digest is a routine GitOps promotion task, not a durability
+  blocker.
+- Verified locally after Claude follow-up: the infra worktree was clean and equal to `origin/main`;
+  the legacy PostgreSQL StatefulSet remains present in GitOps and runtime.
 
 Deferred suggestions:
 

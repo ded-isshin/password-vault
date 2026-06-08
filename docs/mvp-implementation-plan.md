@@ -42,17 +42,17 @@ Current implementation status, 2026-06-08:
 - The browser synthetic now has a local `SYNTHETIC_SELF_TEST_ONLY=true` crypto guard that checks
   AES-GCM rejection for tampered ciphertext, nonce, and authenticated metadata before any API
   account is created.
-- The current branch adds a dry-run-first `cleanup-synthetic` maintenance command for old
-  reserved-domain synthetic accounts. This enables bounded cleanup of live-test data, but a
-  scheduled external synthetic probe and cleanup job are still future work.
+- A dry-run-first `cleanup-synthetic` maintenance command exists for old reserved-domain synthetic
+  accounts. This enables bounded cleanup of live-test data, but a scheduled external synthetic probe
+  and cleanup job are still future work.
 - Recovery-code verification is implemented for the MVP preview. It can only be used after primary
   login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
 - Grafana and Argo CD are also reachable through the mini-PC HTTPS edge route from the mini-PC.
-  MacBook/browser reachability still needs a client-side check; do not use Kubernetes/LXD
-  `LoadBalancer` addresses as MacBook URLs.
+  MacBook/browser reachability still needs a client-side check; use the mini-PC LAN edge address
+  with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
@@ -64,8 +64,8 @@ Current implementation status, 2026-06-08:
 - The shared CloudNativePG operator is deployed through infrastructure GitOps. A product-owned
   `password-vault-cnpg` CloudNativePG `Cluster` is deployed and verified live with three PostgreSQL
   18.4 instances spread across the three worker nodes. The API is cut over to the CNPG application
-  Secret. Real password data remains blocked until backup availability, restore drills, failover
-  drills, alert delivery, and scheduled synthetic monitoring gates are complete.
+  Secret. Real password data remains blocked until backup availability, WAL/PITR evidence, restore
+  drills, failover drills, alert delivery, and scheduled synthetic monitoring gates are complete.
 - A controlled migration runner is merged, published, and deployed: the API image supports a
   `password-vault-api migrate` command, startup migrations remain disabled in production values, and
   generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
@@ -94,8 +94,9 @@ MVP dependable:
 6. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
 7. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
-8. Deploy and test SLO/alert rules for target-down and fast 5xx burn-rate before adding broader
-   alert volume.
+8. Finish alert delivery before adding broader alert volume: the current rules include candidate
+   availability burn-rate and durability alerts, but Alertmanager delivery still needs a controlled
+   smoke test.
 9. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability
    further to database health, backup freshness, and security aggregate metrics.
