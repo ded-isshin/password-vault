@@ -24,12 +24,57 @@ The client stores the last accepted per-vault checkpoint locally:
 vault_id
 head_seq
 head_hash
-updated_at
 ```
 
 If a later sync returns a lower `head_seq`, a different `head_hash` for the same `head_seq`, or a
 chain that does not extend the local checkpoint, the client must refuse to trust the returned state
 until the user explicitly resolves the condition.
+
+## Current Browser Implementation
+
+Status: implemented for the static browser MVP.
+
+The browser stores the per-vault checkpoint in origin-scoped `localStorage` under versioned
+Password Vault keys. The implementation writes append-only per-head records plus a convenience
+latest-pointer record; loading scans the append-only records so a stale tab cannot erase evidence of
+a newer checkpoint by overwriting the pointer. Stored records contain only:
+
+```text
+version
+vault_id
+head_seq
+head_hash
+```
+
+It does not store vault keys, account secret keys, TOTP seeds, recovery codes, cookies, item IDs,
+item titles, URLs, usernames, passwords, notes, ciphertext, or decrypted item data.
+
+On unlock, the client:
+
+1. Requires local persistent storage to be available.
+2. Loads and validates the stored checkpoint for the vault, if one exists.
+3. Rejects immediately if the stored checkpoint is newer than the server-reported head.
+4. Rejects immediately if the stored checkpoint has the same sequence but a different head hash.
+5. Replays sync from the genesis head so item contents can be reconstructed after browser reload.
+6. Verifies that the replayed chain reaches the stored checkpoint before trusting any newer suffix.
+7. Persists the latest verified head only after sync succeeds.
+
+For local writes, the client persists the new checkpoint after the server accepts the write, the
+returned head matches the locally proposed head, and the client verifies its locally generated
+change MAC and head hash. Checkpoint writes are monotonic for all tabs sharing the same browser
+origin: the client refuses to overwrite a newer checkpoint or a different hash at the same sequence.
+This is detection-and-fail-closed behavior for multi-tab races, not a cross-tab distributed lock.
+
+This is intentionally fail-closed for the MVP. If the browser blocks `localStorage`, if the stored
+checkpoint is malformed, or if the checkpoint cannot be written after a verified sync/write, the
+client surfaces an error instead of silently accepting a downgrade to memory-only freshness.
+
+Origin-scoped storage means a checkpoint written for one browser origin is not visible to another
+origin. Moving between local preview URLs, LAN edge URLs, or future production domains starts as a
+new-device/no-checkpoint case unless a future trusted checkpoint-transfer mechanism exists.
+
+The checkpoint intentionally survives lock/logout for the browser origin. Removing it would remove
+the cross-session rollback anchor.
 
 ## Keys
 
@@ -230,6 +275,7 @@ Not fully detected:
 - a server can hide a suffix of changes from a client that never saw that suffix;
 - a malicious server can fork different devices unless heads are compared out of band;
 - a compromised browser bundle can erase or rewrite local checkpoints;
+- a browser profile, user setting, private mode, or storage cleanup can remove the local checkpoint;
 - a malicious server can deny service by refusing to return data;
 - cross-device fork detection requires device gossip, signed checkpoints, or an external transparency
   mechanism, which is post-MVP.
@@ -273,6 +319,12 @@ The API contract must include:
   <https://datatracker.ietf.org/doc/html/rfc5116>
 - RFC 6962, append-only Merkle tree background:
   <https://www.ietf.org/rfc/rfc6962>
+- WHATWG HTML Standard, Web Storage:
+  <https://html.spec.whatwg.org/multipage/webstorage.html>
+- MDN `Window.localStorage`:
+  <https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage>
+- MDN "Using the Web Storage API":
+  <https://developer.mozilla.org/en-US/docs/Web/API/Web_Storage_API/Using_the_Web_Storage_API>
 - OWASP Cryptographic Storage Cheat Sheet:
   <https://cheatsheetseries.owasp.org/cheatsheets/Cryptographic_Storage_Cheat_Sheet.html>
 - OWASP Key Management Cheat Sheet:

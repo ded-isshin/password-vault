@@ -31,6 +31,11 @@ Current implementation status, 2026-06-08:
   encrypted item create/update/delete, and sync on top of the deployed vault API.
 - The browser vault workflow is merged, published, rolled out, and visible through the mini-PC edge
   route.
+- The browser MVP persists append-only per-vault local checkpoint records in origin-scoped
+  `localStorage` after verified sync/write operations. On later unlocks from the same origin, the
+  client rejects server heads that are older than or inconsistent with the stored checkpoint and
+  replays from genesis to reconstruct item contents while proving the chain reaches the stored
+  checkpoint. Multi-tab writes must remain monotonic within the same origin.
 - A dependency-free Node browser API synthetic journey exists in
   `load/synthetic/browser-api-journey.mjs`. It exercises registration, TOTP enrollment, logout,
   return login, login-time TOTP, vault unlock, encrypted item create, sync, MAC/head validation, and
@@ -39,9 +44,9 @@ Current implementation status, 2026-06-08:
   container smoke and the manual `load-smoke` workflow. A live edge run after the CNPG cutover
   succeeded on 2026-06-08; future deployed changes still need a fresh live edge run before their
   browser path can be treated as proven end-to-end.
-- The browser synthetic now has a local `SYNTHETIC_SELF_TEST_ONLY=true` crypto guard that checks
-  AES-GCM rejection for tampered ciphertext, nonce, and authenticated metadata before any API
-  account is created.
+- The browser synthetic now has local self-tests that check AES-GCM rejection for tampered
+  ciphertext, nonce, and authenticated metadata, local checkpoint rollback/fork guards, and the
+  production `app.js` checkpoint storage helpers before any API account is created.
 - A dry-run-first `cleanup-synthetic` maintenance command exists for old reserved-domain synthetic
   accounts. The Helm chart can render a disabled-by-default Kubernetes CronJob for this command, so
   production values can enable dry-run scheduling before allowing confirmed deletion. Scheduled
@@ -103,8 +108,9 @@ MVP dependable:
    secrets before this is complete.
 5. Run the full synthetic browser/API journey in CI and against the live edge route:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
-6. Keep browser crypto tests non-negotiable: keep the local tamper self-test and add future test
-   vectors only when they directly protect the accepted crypto format.
+6. Keep browser crypto and freshness tests non-negotiable: keep the local tamper/checkpoint
+   self-tests and add future test vectors only when they directly protect the accepted crypto,
+   browser storage, or sync-freshness format.
 7. Keep live synthetic data bounded: use reserved `.invalid` handles, schedule cleanup in dry-run
    mode first, and only enable confirmed deletion after the aggregate match count is understood.
 8. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
