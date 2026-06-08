@@ -493,6 +493,7 @@ mod tests {
     use crate::{
         auth::{
             encoding::{decode_base64url, encode_base64url},
+            routes::AUTH_BODY_LIMIT_BYTES,
             scram::{self, DEFAULT_ITERATIONS},
             tokens,
             totp::{self, TotpProfile},
@@ -941,6 +942,41 @@ mod tests {
         assert!(account_exists(&pool, "synthetic-old-alpha@example.invalid").await);
         assert!(account_exists(&pool, "real@example.com").await);
         assert!(account_exists(&pool, "synthetic-old-alpha@nested@loadtest.invalid").await);
+    }
+
+    #[tokio::test]
+    async fn auth_router_body_limit_matches_mvp_contract() {
+        let router = app(ApiConfig::local_test(false, false));
+
+        let below_mvp_cap =
+            auth_start_body_with_json_whitespace_padding(AUTH_BODY_LIMIT_BYTES - 1024);
+        assert!(below_mvp_cap.len() < AUTH_BODY_LIMIT_BYTES);
+        let below_response = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/start", &below_mvp_cap))
+            .await
+            .expect("below-cap auth request returns a response");
+        assert_eq!(
+            below_response.status(),
+            http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            response_json(below_response).await["error"]["code"],
+            "service_unavailable"
+        );
+
+        let above_mvp_cap =
+            auth_start_body_with_json_whitespace_padding(AUTH_BODY_LIMIT_BYTES + 1024);
+        assert!(above_mvp_cap.len() > AUTH_BODY_LIMIT_BYTES);
+        let above_response = router
+            .oneshot(json_request("/v1/auth/login/start", &above_mvp_cap))
+            .await
+            .expect("above-cap auth request returns a response");
+        assert_eq!(above_response.status(), http::StatusCode::BAD_REQUEST);
+        assert_eq!(
+            response_json(above_response).await["error"]["code"],
+            "bad_request"
+        );
     }
 
     #[tokio::test]
@@ -2889,6 +2925,19 @@ mod tests {
             .header("sec-fetch-site", fetch_site)
             .body(Body::from(body.to_string()))
             .expect("test request with fetch site builds")
+    }
+
+    fn auth_start_body_with_json_whitespace_padding(target_len: usize) -> String {
+        let valid_body = format!(
+            r#"{{"login_handle":"limit-test@example.com","auth_protocol":"derived-auth-v1","client_nonce":"{}"}}"#,
+            encode_base64url(&[0x11; 32])
+        );
+        assert!(valid_body.len() < target_len);
+        format!(
+            "{}{}",
+            " ".repeat(target_len - valid_body.len()),
+            valid_body
+        )
     }
 
     fn json_request_with_cookie(uri: &str, body: &str, cookie: &str) -> Request<Body> {

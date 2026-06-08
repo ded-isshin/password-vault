@@ -962,6 +962,9 @@ codes, session tokens, private infrastructure details, or request bodies.
 - `login/start` has constant response shape for existing and unknown accounts.
 - Auth/MFA/session responses include `Cache-Control: no-store`.
 - Routes with bodies reject non-JSON and browser-simple form content types.
+- Auth router body-limit behavior is tested: valid JSON bodies below the current 128 KiB MVP cap
+  can reach the route handler, while bodies above the cap are rejected with the current generic
+  `bad_request` error before handler execution.
 - `login/start` does not expose MFA state.
 - Registration duplicate handling returns generic failure and is rate-limited.
 - Auth verifier registration never stores raw `client_auth_secret`.
