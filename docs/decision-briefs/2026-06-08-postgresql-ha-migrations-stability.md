@@ -37,9 +37,19 @@ Runtime state verified after the 2026-06-08 cutover:
   `synchronous_standby_names=ANY 1 (...)`; `pg_stat_replication` reported both standbys in
   `streaming` state with `sync_state=quorum`.
 - The live `password-vault` API is cut over to the `password-vault-cnpg` application Secret.
+- The active `password-vault-cnpg` cluster is separate from HiringTrace. HiringTrace still uses a
+  separate single PostgreSQL `StatefulSet` in a different namespace and must not be reused by
+  Password Vault.
+- The current default storage class is `local-path` with node-local RWO volumes and no volume
+  expansion. This makes PostgreSQL replication useful for single-worker failure tolerance but does
+  not replace off-node backups.
 - The legacy single PostgreSQL `StatefulSet` may remain briefly as rollback debt, but it is no
   longer the active API database.
-- There are currently no CloudNativePG `Backup` or `ScheduledBackup` resources for `password-vault`.
+- There are currently no CloudNativePG `Backup` or `ScheduledBackup` resources for `password-vault`,
+  and no usable base backup timestamp is visible in the live CNPG metrics.
+- The Barman Cloud Plugin and cert-manager are deployed as platform foundation, but the Password
+  Vault cluster does not yet have an object-store backup target, runtime object-store credentials,
+  scheduled base backups, or restore evidence.
 - The current `hiringtrace` PostgreSQL deployment, if present, is a separate product runtime and
   must not be reused as a `password-vault` database, schema, credential source, PVC, or backup
   target.
@@ -88,6 +98,12 @@ Backups must include continuous WAL archiving plus physical base backups to an o
 backup target before any real user secrets are accepted. Restore must be drilled into a separate
 namespace or separate `Cluster` object before the environment is considered production-like.
 
+Live PostgreSQL archiver counters can show zero failures while the base-backup gate is still red.
+That is expected: WAL archive health, base backup availability, PITR readiness, restore drills, and
+failover drills are separate controls. Do not treat pod readiness, synchronous replication, or a
+healthy archiver counter as proof that the database is recoverable after data corruption, operator
+mistake, node-local volume loss, or a bad migration.
+
 Schema migrations remain required even with stable PostgreSQL versions. PostgreSQL engine stability
 does not remove the need to version application-owned tables, constraints, indexes, authentication
 fields, sync metadata, and crypto/key-wrapping metadata. The goal is not "no migrations"; the goal
@@ -101,6 +117,8 @@ PostgreSQL version policy and application schema policy are separate:
 - do not add migrations for speculative ideas or cosmetic churn;
 - do add migrations when persisted authentication, security, sync, audit, or encrypted-vault
   metadata must change.
+- after real user data exists, do not edit already-applied migration files; add a new forward-only
+  migration with an explicit rollout and rollback-compatibility note.
 
 ## Why Clustered PostgreSQL Is Required
 

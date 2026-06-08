@@ -11,7 +11,9 @@ Current status: the browser/API MVP is deployed through GitOps and the API is cu
 product-owned `password-vault-cnpg` CloudNativePG cluster. The legacy preview PostgreSQL
 `StatefulSet` may remain briefly as rollback debt, but it is not the active API database. No real
 user secrets are approved until backup, WAL, restore, failover, alert delivery, and scheduled
-synthetic gates are proven.
+synthetic gates are proven. The mini-PC edge path is also a gate: Grafana, Argo CD, and Password
+Vault must be limited to the intended LAN/VPN access path and must not be unintentionally reachable
+from public networks.
 
 ## Release Artifact Flow
 
@@ -161,6 +163,11 @@ Grafana, Argo CD, and Password Vault. Those are backend targets for the mini-PC 
 normal MacBook/browser entrypoints. The edge NGINX path listens on the mini-PC LAN address and
 proxies to the internal service addresses.
 
+Do not use the internal Kubernetes/LXD `LoadBalancer` addresses as browser URLs unless the client
+has an explicit route into that network. A normal MacBook on the home LAN should use the mini-PC LAN
+address and the edge-published port. If the MacBook is on a different Wi-Fi/VPN segment, client-side
+reachability can fail while all mini-PC and in-cluster checks stay healthy.
+
 Read-only edge checks from the mini-PC:
 
 ```bash
@@ -187,6 +194,16 @@ curl -k -I https://<mini-pc-lan-ip>:9443/healthz
 If the mini-PC checks pass but the MacBook checks fail, investigate client LAN reachability, VPN
 state, local firewall rules, and whether the browser used `https`. Do not start by changing
 Kubernetes Services or Argo CD.
+
+Current edge constraints:
+
+- the preview edge certificate is self-signed, so browser warnings are expected;
+- the edge black-box probe may intentionally skip certificate verification until a trusted local CA
+  or real certificate path exists;
+- the edge listener check proves that the host accepts connections on the expected local ports, but
+  it does not prove that only the intended clients can reach those ports;
+- before real secrets, the access model must be version-controlled and verified as LAN/VPN-only for
+  Password Vault, Grafana, and Argo CD.
 
 Do not commit concrete home-network IPs, hostnames, domains, cookies, tokens, or screenshots that
 show private runtime details.
@@ -243,6 +260,9 @@ Expected current preview state:
 
 - `password-vault-cnpg` exists with three ready instances;
 - no CloudNativePG `Backup`, `ScheduledBackup`, or `Pooler` resources exist until backup work lands;
+- the Barman Cloud Plugin and cert-manager may exist as platform foundation, but they do not prove
+  Password Vault backup readiness until an object-store target, runtime credentials, scheduled base
+  backups, and restore drills are wired to the product cluster;
 - `password-vault-postgres`, if still present, is only a rollback artifact;
 - other products' PostgreSQL `StatefulSet`s remain separate and must not be reused by Password Vault.
 
