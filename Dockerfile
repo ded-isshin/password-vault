@@ -1,7 +1,8 @@
-ARG RUST_VERSION=1.96.0
+ARG RUST_IMAGE=docker.io/library/rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460
+ARG RUNTIME_IMAGE=docker.io/library/debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb
 ARG BUILD_REVISION=unknown
 
-FROM rust:${RUST_VERSION}-bookworm AS build
+FROM ${RUST_IMAGE} AS build
 ARG BUILD_REVISION
 WORKDIR /workspace
 ENV PATH="/usr/local/cargo/bin:${PATH}"
@@ -13,7 +14,7 @@ COPY migrations ./migrations
 RUN PASSWORD_VAULT_BUILD_REVISION="${BUILD_REVISION}" \
     cargo build --locked --release --bin password-vault-api
 
-FROM debian:bookworm-slim AS runtime
+FROM ${RUNTIME_IMAGE} AS runtime
 
 LABEL org.opencontainers.image.title="Password Vault API" \
       org.opencontainers.image.description="API service for the Password Vault MVP" \
