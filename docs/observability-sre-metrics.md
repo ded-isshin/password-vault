@@ -249,6 +249,19 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   query returned registration start/finish successes, login successes, TOTP enrollment/login
   outcomes, recovery-code login verification, encrypted item create success, and sync success.
   Scheduled synthetic pass/fail metrics are still planned.
+- A later 2026-06-08 runtime re-check returned:
+  - `sum(up{job="password-vault-api"}) or vector(0)` = `3`;
+  - `sum(up{job="password-vault-cnpg"}) or vector(0)` = `3`;
+  - `max(probe_success{job="password-vault-blackbox",service="password-vault",probe="internal-readyz"})
+    or vector(0)` = `1`;
+  - API p95 over a `15m` histogram rate stayed in single-digit milliseconds during the checked
+    one-hour window;
+  - `sum(increase(password_vault_registration_events_total{job="password-vault-api"}[6h]))` = `12`;
+  - `sum(increase(password_vault_login_attempts_total{job="password-vault-api"}[6h]))` = `12`;
+  - `sum(increase(password_vault_vault_item_changes_total{job="password-vault-api"}[6h]))` = `6`;
+  - `sum(increase(password_vault_sync_requests_total{job="password-vault-api"}[6h]))` = `12`;
+  - `ALERTS{alertname=~"PasswordVault.*",alertstate="firing"}` showed
+    `PasswordVaultCnpgBackupMissing`.
 - `PasswordVaultCnpgBackupMissing` is expected to be pending or firing while no available base
   backup exists. This is not noise; it is the visible real-secret-use blocker.
 - The mini-PC edge route for Grafana was reachable from the mini-PC with `https` and the local
@@ -274,6 +287,10 @@ Do not mark these complete without runtime evidence:
 - Use `or vector(0)` only where an explicit zero is the intended dashboard fallback. For gate
   panels, alerts, and telemetry-existence checks, missing data must remain distinguishable from a
   healthy zero.
+- Low-traffic windows need special handling. A `5m` rate query can legitimately return no data when
+  no requests were scraped in the range; SLO and dashboard queries should either use an appropriate
+  longer window, add minimum-volume guards, or make missing data visible instead of silently
+  pretending it is healthy.
 - PostgreSQL HA scrape data exists for the active CloudNativePG cluster, and dashboard panels for
   targets, streaming replicas, version, backup availability, replication lag, and WAL archive
   failures are deployed. Backup availability still returns `0`; restore drill and failover drill
