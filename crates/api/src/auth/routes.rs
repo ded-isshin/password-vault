@@ -295,7 +295,7 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
-    fn bad_request() -> Self {
+    pub(crate) fn bad_request() -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             code: "bad_request",
@@ -303,7 +303,7 @@ impl ApiError {
         }
     }
 
-    fn service_unavailable() -> Self {
+    pub(crate) fn service_unavailable() -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
             code: "service_unavailable",
@@ -311,7 +311,7 @@ impl ApiError {
         }
     }
 
-    fn rate_limited() -> Self {
+    pub(crate) fn rate_limited() -> Self {
         Self {
             status: StatusCode::TOO_MANY_REQUESTS,
             code: "rate_limited",
@@ -327,7 +327,7 @@ impl ApiError {
         }
     }
 
-    fn session_required() -> Self {
+    pub(crate) fn session_required() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
             code: "session_required",
@@ -335,7 +335,7 @@ impl ApiError {
         }
     }
 
-    fn csrf_required() -> Self {
+    pub(crate) fn csrf_required() -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
             code: "csrf_required",
@@ -343,11 +343,19 @@ impl ApiError {
         }
     }
 
-    fn mfa_required() -> Self {
+    pub(crate) fn mfa_required() -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
             code: "mfa_required",
             message: "MFA enrollment or verification is required.",
+        }
+    }
+
+    pub(crate) fn not_found() -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            code: "not_found",
+            message: "Not found.",
         }
     }
 
@@ -1708,17 +1716,17 @@ struct DeviceChallengeMetadata {
     public_metadata: Value,
 }
 
-struct CurrentSession {
-    id: Uuid,
-    account_id: Uuid,
-    device_id: Option<Uuid>,
-    session_state: String,
-    idle_expires_at: OffsetDateTime,
-    absolute_expires_at: OffsetDateTime,
+pub(crate) struct CurrentSession {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) device_id: Option<Uuid>,
+    pub(crate) session_state: String,
+    pub(crate) idle_expires_at: OffsetDateTime,
+    pub(crate) absolute_expires_at: OffsetDateTime,
 }
 
 impl CurrentSession {
-    fn vault_access(&self) -> bool {
+    pub(crate) fn vault_access(&self) -> bool {
         self.session_state == "mfa_verified"
     }
 }
@@ -2120,7 +2128,7 @@ fn recovery_code_hash(
     hasher.finalize().into()
 }
 
-async fn insert_audit_event(
+pub(crate) async fn insert_audit_event(
     transaction: &mut Transaction<'_, Postgres>,
     account_id: Uuid,
     actor_device_id: Option<Uuid>,
@@ -2287,7 +2295,7 @@ fn csrf_token_from_headers(headers: &HeaderMap) -> Option<[u8; tokens::TOKEN_LEN
     decode_base64url_array::<{ tokens::TOKEN_LEN }>(value).ok()
 }
 
-async fn ensure_csrf_token(
+pub(crate) async fn ensure_csrf_token(
     pool: &PgPool,
     headers: &HeaderMap,
     session_id: Uuid,
@@ -2321,7 +2329,7 @@ async fn ensure_csrf_token(
     }
 }
 
-fn ensure_unsafe_request_context(headers: &HeaderMap) -> Result<(), ApiError> {
+pub(crate) fn ensure_unsafe_request_context(headers: &HeaderMap) -> Result<(), ApiError> {
     if headers
         .get("sec-fetch-site")
         .and_then(|value| value.to_str().ok())
@@ -2352,7 +2360,7 @@ fn origin_host(origin: &str) -> Option<&str> {
         .filter(|host| !host.is_empty())
 }
 
-async fn load_current_session(
+pub(crate) async fn load_current_session(
     pool: &PgPool,
     headers: &HeaderMap,
     now: OffsetDateTime,
@@ -2426,7 +2434,7 @@ async fn load_current_session(
     }))
 }
 
-async fn refresh_session_activity(
+pub(crate) async fn refresh_session_activity(
     pool: &PgPool,
     mut session: CurrentSession,
     now: OffsetDateTime,
@@ -2639,14 +2647,14 @@ fn normalize_login_handle(login_handle: &str) -> Result<String, ApiError> {
     Ok(normalized)
 }
 
-fn database_pool(state: &AppState) -> Result<&PgPool, ApiError> {
+pub(crate) fn database_pool(state: &AppState) -> Result<&PgPool, ApiError> {
     state
         .database
         .as_ref()
         .ok_or_else(ApiError::service_unavailable)
 }
 
-fn no_store_json<T: Serialize>(status: StatusCode, body: T) -> Response {
+pub(crate) fn no_store_json<T: Serialize>(status: StatusCode, body: T) -> Response {
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
@@ -2654,13 +2662,13 @@ fn no_store_json<T: Serialize>(status: StatusCode, body: T) -> Response {
     response
 }
 
-fn format_rfc3339(value: OffsetDateTime) -> Result<String, ApiError> {
+pub(crate) fn format_rfc3339(value: OffsetDateTime) -> Result<String, ApiError> {
     value
         .format(&Rfc3339)
         .map_err(|_| ApiError::service_unavailable())
 }
 
-fn now_utc_second() -> Result<OffsetDateTime, ApiError> {
+pub(crate) fn now_utc_second() -> Result<OffsetDateTime, ApiError> {
     OffsetDateTime::now_utc()
         .replace_nanosecond(0)
         .map_err(|_| ApiError::service_unavailable())
@@ -2673,7 +2681,7 @@ fn unix_time_seconds(value: OffsetDateTime) -> Result<u64, ApiError> {
         .map_err(|_| ApiError::service_unavailable())
 }
 
-struct StrictJson<T>(T);
+pub(crate) struct StrictJson<T>(pub(crate) T);
 
 impl<S, T> FromRequest<S> for StrictJson<T>
 where
@@ -2690,7 +2698,10 @@ where
     }
 }
 
-async fn add_no_store_header(request: axum::http::Request<Body>, next: Next) -> Response {
+pub(crate) async fn add_no_store_header(
+    request: axum::http::Request<Body>,
+    next: Next,
+) -> Response {
     let mut response = next.run(request).await;
     response
         .headers_mut()
