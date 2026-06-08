@@ -86,6 +86,13 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   ingress on TCP/5432 to Password Vault API pods and Argo CD migration hook pods. This is a useful
   first isolation step, but it is not a namespace-wide default deny and does not yet make `/metrics`
   internal-only.
+- The infrastructure GitOps state now includes `VMRule` alert rules named `password-vault-alerts`.
+  Runtime validation showed the `password-vault.rules` group loaded in `vmalert`, with rules for
+  API target loss, replica loss, 5xx ratio, p95 latency, pending requests, missing build info,
+  preview PostgreSQL readiness, and migration hook failure. No `PasswordVault*` alerts were active
+  at validation time.
+- Alert delivery is not complete yet. The shared `VMAlertmanager` route may still use the default
+  blackhole receiver until notification routing is configured in the observability stack.
 
 Important label note:
 
@@ -98,7 +105,8 @@ Important label note:
 Planned:
 
 - SLO and burn-rate panels.
-- Business, product, and security panels.
+- Alertmanager notification routing and a controlled test notification.
+- Business, product, and security panels beyond the first deployed product counters.
 - Database HA, backup, restore, and PostgreSQL health panels.
 - External synthetic browser/API probes from outside the Kubernetes/LXD network.
 - Live dashboard panels for synthetic pass/fail once an external probe is approved.
@@ -314,11 +322,12 @@ Use these levels to avoid calling a dashboard "done" when it only proves that sc
 | L4 durability | Data survival is measured. | DB replication, backup age, WAL archive health, restore drill age, and failover drill results are visible. |
 | L5 security/product | Aggregate abuse and activation signals are visible. | Low-cardinality auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented. |
 
-The live preview is currently L1 with part of L3 instrumentation started. Basic Golden Signal
-dashboard data exists and deployed product counters are visible. It is not L2 yet because product
-alert rules are not deployed and tested. The repository now has a CI/local full browser API journey,
-but the live system is not L3 until that journey or an equivalent external probe is deployed,
-scraped, and shown on the dashboard.
+The live preview is currently L1 with product alert rules deployed and part of L3 instrumentation
+started. Basic Golden Signal dashboard data exists and deployed product counters are visible. It is
+not fully L2 yet because Alertmanager notification routing and a controlled delivered alert have not
+been configured and tested. The repository now has a CI/local full browser API journey, but the live
+system is not L3 until that journey or an equivalent external probe is deployed, scraped, and shown
+on the dashboard.
 
 ## Current Dashboard Gaps
 
@@ -327,7 +336,12 @@ scraped, and shown on the dashboard.
 - Grafana image rendering is unavailable, so automated screenshot/PDF-style evidence needs either a
   renderer deployment or a separate browser automation path.
 - No SLO, error-budget, or burn-rate panels are implemented.
-- No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
+- First product alert rules are deployed and loaded by `vmalert`, covering target loss, replica
+  loss, 5xx ratio, latency, pending requests, build-info absence, preview PostgreSQL readiness, and
+  migration hook failure.
+- Alert delivery is not tested yet. Alertmanager notification routing still needs a real receiver
+  and a controlled smoke alert.
+- No multi-window SLO burn-rate rules or panels are implemented yet.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
 - Build/version panel is deployed and returns live `password_vault_build_info` data with the product
   commit SHA for published images. Local images may report `unknown` when built without the build
@@ -372,16 +386,25 @@ Minimum MVP dashboard rows:
 
 Implement in this order:
 
-1. Page: `up{job="password-vault-api"} == 0` for a sustained window.
-2. Page: fast 5xx error-budget burn on product endpoints.
-3. Page or urgent ticket: sustained p99 latency above the auth or product endpoint SLO with enough
+1. Deployed rule: `up{job="password-vault-api"} == 0` for a sustained window.
+2. Deployed rule: fewer than three scrapeable `password-vault-api` targets for the current preview
+   replica contract.
+3. Deployed rule: sustained 5xx ratio on non-health product endpoints with enough request volume.
+4. Deployed rule: sustained p95 latency above the MVP product endpoint threshold with enough
    request volume.
-4. Page: all replicas not ready or readiness failures causing zero serving endpoints.
-5. Urgent ticket: sustained `axum_http_requests_pending` growth above baseline.
-6. Urgent ticket: DB pool saturation, DB wait latency, or DB error spike once DB metrics exist.
-7. Security ticket/page by severity: rate-limit bypass signal, CSRF spike, repeated TOTP failures,
+5. Deployed rule: sustained pending request pressure.
+6. Deployed rule: missing `password_vault_build_info`.
+7. Deployed rule: preview PostgreSQL not ready.
+8. Deployed rule: migration hook failed.
+9. Next: configure Alertmanager notification routing and send a controlled smoke alert.
+10. Next: add multi-window SLO burn-rate rules on product endpoints.
+11. Page or urgent ticket: sustained p99 latency above the auth or product endpoint SLO with enough
+   request volume.
+12. Page: all replicas not ready or readiness failures causing zero serving endpoints.
+13. Urgent ticket: DB pool saturation, DB wait latency, or DB error spike once DB metrics exist.
+14. Security ticket/page by severity: rate-limit bypass signal, CSRF spike, repeated TOTP failures,
    or session/token anomaly spike once security metrics exist.
-8. Ticket: dashboard data missing, scrape stale, or release/version metric absent after deployment.
+15. Ticket: dashboard data missing, scrape stale, or release/version metric absent after deployment.
 
 Use multi-window burn-rate alerts rather than single-threshold paging. For the 99.5% availability
 SLO, the budget is `0.005`; example rule thresholds can compare the 5xx ratio to multiples of that
@@ -396,7 +419,9 @@ Before calling the MVP observable:
 - Scraping produces `up{job="password-vault-api"} == 1` for deployed API targets.
 - Dashboard has panels for request rate, 5xx ratio, p95/p99 latency, pending requests, and target
   health.
-- Alert rules exist for target down and fast 5xx burn-rate.
+- Alert rules exist for target down and basic 5xx/latency/pending-request warnings.
+- Alertmanager delivery route is configured and a controlled notification smoke test has passed.
+- Multi-window burn-rate alerts exist for product endpoint SLOs.
 - Metrics labels are low-cardinality and public safe; random 404 paths, login handles, account IDs,
   device IDs, item IDs, OTP values, and secrets do not appear in `/metrics`.
 - Ingress or network policy blocks public access to `/metrics` when public ingress is enabled.
