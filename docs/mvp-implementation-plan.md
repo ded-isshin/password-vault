@@ -34,9 +34,13 @@ Current implementation status, 2026-06-08:
 - A dependency-free Node browser API synthetic journey exists in
   `load/synthetic/browser-api-journey.mjs`. It exercises registration, TOTP enrollment, logout,
   return login, login-time TOTP, vault unlock, encrypted item create, sync, MAC/head validation, and
-  item decryption. It is wired into PR container smoke and the manual `load-smoke` workflow, but it
-  still needs a live edge run before the deployed browser path can be treated as proven end-to-end.
-- Recovery-code verification remains unimplemented.
+  item decryption. It also verifies recovery-code login into an `mfa_recovery` session, confirms
+  that recovery sessions cannot access vault APIs, and re-enrolls TOTP. It is wired into PR
+  container smoke and the manual `load-smoke` workflow, but it still needs a live edge run after
+  each deployed change before the deployed browser path can be treated as proven end-to-end.
+- Recovery-code verification is implemented for the MVP preview. It can only be used after primary
+  login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
+  vault access, and requires TOTP re-enrollment before vault APIs are available again.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request

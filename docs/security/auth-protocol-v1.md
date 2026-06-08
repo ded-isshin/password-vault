@@ -242,7 +242,9 @@ code, returns one-time recovery codes, rotates the session token, and upgrades t
 restart. Login-finish and login-time TOTP verification are merged and deployed in the current
 preview: successful password proof either creates a setup session when no verified TOTP factor
 exists, or creates a one-shot pre-MFA challenge; successful TOTP verification consumes that challenge
-and creates an `mfa_verified` session.
+and creates an `mfa_verified` session. Recovery-code verification is also implemented for the same
+post-primary-auth pre-MFA challenge: it consumes one unused recovery code, creates an `mfa_recovery`
+session with `vault_access=false`, and requires TOTP re-enrollment before vault APIs are available.
 
 ## Session Flow
 

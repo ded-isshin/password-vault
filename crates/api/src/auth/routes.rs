@@ -65,6 +65,7 @@ const XCHACHA20POLY1305_NONCE_BYTES: usize = 24;
 const RECOVERY_CODE_COUNT: usize = 10;
 const RECOVERY_CODE_RANDOM_BYTES: usize = 16;
 const RECOVERY_CODE_SALT_BYTES: usize = 16;
+const MAX_RECOVERY_CODE_BYTES: usize = 128;
 type HmacSha256 = Hmac<Sha256>;
 
 pub(crate) fn router() -> Router<AppState> {
@@ -74,6 +75,10 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/v1/auth/login/start", post(login_start))
         .route("/v1/auth/login/finish", post(login_finish))
         .route("/v1/auth/mfa/totp/verify", post(totp_verify))
+        .route(
+            "/v1/auth/mfa/recovery-code/verify",
+            post(recovery_code_verify),
+        )
         .route("/v1/auth/logout", post(logout))
         .route("/v1/mfa/totp/enroll/start", post(totp_enroll_start))
         .route("/v1/mfa/totp/enroll/confirm", post(totp_enroll_confirm))
@@ -275,6 +280,20 @@ struct TotpVerifyRequest {
 struct TotpVerifyResponse {
     result: &'static str,
     session: SessionResponse,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryCodeVerifyRequest {
+    mfa_challenge_id: Uuid,
+    recovery_code: String,
+}
+
+#[derive(Serialize)]
+struct RecoveryCodeVerifyResponse {
+    result: &'static str,
+    session: SessionResponse,
+    next_step: &'static str,
 }
 
 #[derive(Serialize)]
@@ -1019,7 +1038,7 @@ async fn login_finish(
             LoginFinishMfaRequiredResponse {
                 result: "mfa_required",
                 mfa_challenge_id,
-                available_methods: vec!["totp"],
+                available_methods: vec!["totp", "recovery_code"],
                 expires_at: format_rfc3339(expires_at)?,
             },
         ));
@@ -1266,6 +1285,110 @@ async fn totp_verify(
                 idle_expires_at: format_rfc3339(idle_expires_at)?,
                 absolute_expires_at: format_rfc3339(absolute_expires_at)?,
             },
+        },
+    );
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&session_cookie(&session_token))
+            .map_err(|_| ApiError::service_unavailable())?,
+    );
+    Ok(response)
+}
+
+async fn recovery_code_verify(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    StrictJson(request): StrictJson<RecoveryCodeVerifyRequest>,
+) -> Result<Response, ApiError> {
+    ensure_unsafe_request_context(&headers)?;
+    let pool = database_pool(&state)?;
+    let now = now_utc_second()?;
+    let mut transaction = pool
+        .begin()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    let challenge = load_pre_mfa_challenge(&mut transaction, request.mfa_challenge_id, now).await?;
+    let Some(challenge) = challenge else {
+        telemetry::mfa_event("recovery_code_login", "challenge_unavailable");
+        return Err(ApiError::mfa_verification_failed());
+    };
+    if challenge.attempts >= MFA_CHALLENGE_MAX_ATTEMPTS {
+        telemetry::mfa_event("recovery_code_login", "attempts_exhausted");
+        return Err(ApiError::mfa_verification_failed());
+    }
+    let device = challenge.metadata.device.into_validated()?;
+
+    let recovery_code = validate_recovery_code(&request.recovery_code).ok();
+    let recovery_code_id = if let Some(recovery_code) = recovery_code {
+        find_matching_recovery_code(&mut transaction, challenge.account_id, &recovery_code).await?
+    } else {
+        None
+    };
+    let Some(recovery_code_id) = recovery_code_id else {
+        increment_challenge_attempts(&mut transaction, challenge.id, now).await?;
+        insert_audit_event(
+            &mut transaction,
+            challenge.account_id,
+            None,
+            "mfa_recovery_code_login_failed",
+            json!({}),
+        )
+        .await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| ApiError::service_unavailable())?;
+        telemetry::mfa_event("recovery_code_login", "failed");
+        return Err(ApiError::mfa_verification_failed());
+    };
+
+    consume_recovery_code(
+        &mut transaction,
+        challenge.account_id,
+        recovery_code_id,
+        now,
+    )
+    .await?;
+
+    let (device_id, session_token, idle_expires_at, absolute_expires_at) =
+        create_session_with_device(
+            &mut transaction,
+            challenge.account_id,
+            &device,
+            "mfa_recovery",
+            now,
+        )
+        .await?;
+
+    consume_auth_challenge(&mut transaction, challenge.id, now).await?;
+    insert_audit_event(
+        &mut transaction,
+        challenge.account_id,
+        Some(device_id),
+        "mfa_recovery_code_login_verified",
+        json!({}),
+    )
+    .await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    telemetry::mfa_event("recovery_code_login", "verified");
+    telemetry::session_event("created", "mfa_recovery");
+
+    let mut response = no_store_json(
+        StatusCode::OK,
+        RecoveryCodeVerifyResponse {
+            result: "session_created",
+            session: SessionResponse {
+                state: "mfa_recovery",
+                vault_access: false,
+                idle_expires_at: format_rfc3339(idle_expires_at)?,
+                absolute_expires_at: format_rfc3339(absolute_expires_at)?,
+            },
+            next_step: "reenroll_totp",
         },
     );
     response.headers_mut().insert(
@@ -1786,6 +1909,13 @@ struct InsertChallengeTx<'a> {
     expires_at: OffsetDateTime,
 }
 
+struct PreMfaChallenge {
+    id: Uuid,
+    account_id: Uuid,
+    metadata: PreMfaChallengeMetadata,
+    attempts: i32,
+}
+
 async fn insert_auth_challenge(input: InsertChallenge<'_>) -> Result<(), ApiError> {
     sqlx::query(
         "
@@ -1862,6 +1992,60 @@ async fn consume_auth_challenge(
         .map_err(|_| ApiError::service_unavailable())?;
 
     Ok(())
+}
+
+async fn load_pre_mfa_challenge(
+    transaction: &mut Transaction<'_, Postgres>,
+    challenge_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<Option<PreMfaChallenge>, ApiError> {
+    let challenge = sqlx::query(
+        "
+        SELECT
+            id,
+            account_id,
+            public_metadata,
+            attempts
+        FROM auth_challenges
+        WHERE id = $1
+          AND challenge_type = 'pre_mfa'
+          AND auth_protocol = $2
+          AND consumed_at IS NULL
+          AND expires_at >= $3
+        FOR UPDATE
+        ",
+    )
+    .bind(challenge_id)
+    .bind(AUTH_PROTOCOL)
+    .bind(now)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let Some(challenge) = challenge else {
+        return Ok(None);
+    };
+    let id = challenge
+        .try_get::<Uuid, _>("id")
+        .map_err(|_| ApiError::service_unavailable())?;
+    let account_id = challenge
+        .try_get::<Option<Uuid>, _>("account_id")
+        .map_err(|_| ApiError::service_unavailable())?
+        .ok_or_else(ApiError::service_unavailable)?;
+    let public_metadata = challenge
+        .try_get::<SqlJson<Value>, _>("public_metadata")
+        .map_err(|_| ApiError::service_unavailable())?
+        .0;
+    let attempts = challenge
+        .try_get::<i32, _>("attempts")
+        .map_err(|_| ApiError::service_unavailable())?;
+
+    Ok(Some(PreMfaChallenge {
+        id,
+        account_id,
+        metadata: decode_pre_mfa_challenge_metadata(public_metadata)?,
+        attempts,
+    }))
 }
 
 async fn increment_challenge_attempts(
@@ -2160,6 +2344,101 @@ fn recovery_code_hash(
     hasher.update([0]);
     hasher.update(code.trim().to_ascii_lowercase().as_bytes());
     hasher.finalize().into()
+}
+
+fn validate_recovery_code(code: &str) -> Result<String, ApiError> {
+    let code = code.trim().to_ascii_lowercase();
+    if code.is_empty()
+        || code.len() > MAX_RECOVERY_CODE_BYTES
+        || !code.starts_with("pvrc-")
+        || code.chars().any(char::is_whitespace)
+        || code.chars().any(|character| {
+            !(character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-')
+        })
+    {
+        return Err(ApiError::mfa_verification_failed());
+    }
+    Ok(code)
+}
+
+async fn find_matching_recovery_code(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    recovery_code: &str,
+) -> Result<Option<Uuid>, ApiError> {
+    let rows = sqlx::query(
+        "
+        SELECT id, code_salt, code_hash
+        FROM recovery_codes
+        WHERE account_id = $1
+          AND used_at IS NULL
+        FOR UPDATE
+        ",
+    )
+    .bind(account_id)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    let mut matched_id = None;
+    for row in rows {
+        let id = row
+            .try_get::<Uuid, _>("id")
+            .map_err(|_| ApiError::service_unavailable())?;
+        let salt = recovery_code_salt_from_vec(
+            row.try_get::<Vec<u8>, _>("code_salt")
+                .map_err(|_| ApiError::service_unavailable())?,
+        )?;
+        let stored_hash = row
+            .try_get::<Vec<u8>, _>("code_hash")
+            .map_err(|_| ApiError::service_unavailable())?;
+        let candidate_hash = recovery_code_hash(account_id, &salt, recovery_code);
+        if stored_hash.len() == candidate_hash.len()
+            && stored_hash
+                .as_slice()
+                .ct_eq(candidate_hash.as_slice())
+                .into()
+        {
+            matched_id = Some(id);
+        }
+    }
+
+    Ok(matched_id)
+}
+
+async fn consume_recovery_code(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_id: Uuid,
+    recovery_code_id: Uuid,
+    now: OffsetDateTime,
+) -> Result<(), ApiError> {
+    let result = sqlx::query(
+        "
+        UPDATE recovery_codes
+        SET used_at = $1
+        WHERE id = $2
+          AND account_id = $3
+          AND used_at IS NULL
+        ",
+    )
+    .bind(now)
+    .bind(recovery_code_id)
+    .bind(account_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| ApiError::service_unavailable())?;
+
+    if result.rows_affected() == 1 {
+        Ok(())
+    } else {
+        Err(ApiError::mfa_verification_failed())
+    }
+}
+
+fn recovery_code_salt_from_vec(value: Vec<u8>) -> Result<[u8; RECOVERY_CODE_SALT_BYTES], ApiError> {
+    value
+        .try_into()
+        .map_err(|_| ApiError::service_unavailable())
 }
 
 pub(crate) async fn insert_audit_event(
@@ -2747,11 +3026,14 @@ pub(crate) async fn add_no_store_header(
 mod tests {
     use axum::http::{HeaderMap, HeaderValue, header};
 
+    use uuid::Uuid;
+
     use crate::auth::{encoding::encode_base64url, tokens};
 
     use super::{
-        SESSION_COOKIE_NAME, csrf_token_from_headers, normalize_login_handle,
-        session_token_from_headers, synthetic_login_metadata,
+        SESSION_COOKIE_NAME, csrf_token_from_headers, normalize_login_handle, recovery_code_hash,
+        recovery_code_salt_from_vec, session_token_from_headers, synthetic_login_metadata,
+        validate_recovery_code,
     };
 
     #[test]
@@ -2847,5 +3129,40 @@ mod tests {
                 .expect("test csrf header is valid"),
         );
         assert!(csrf_token_from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn recovery_code_validation_normalizes_only_expected_shape() {
+        assert_eq!(
+            validate_recovery_code(" PVRC-abcd-2345-efgh ").expect("valid code normalizes"),
+            "pvrc-abcd-2345-efgh"
+        );
+        assert!(validate_recovery_code("abcd-2345").is_err());
+        assert!(validate_recovery_code("pvrc-abcd 2345").is_err());
+        assert!(validate_recovery_code("pvrc-abcd_2345").is_err());
+        assert!(validate_recovery_code(&format!("pvrc-{}", "a".repeat(129))).is_err());
+    }
+
+    #[test]
+    fn recovery_code_hash_is_normalized_and_account_bound() {
+        let account_id =
+            Uuid::parse_str("00000000-0000-4000-8000-000000000123").expect("uuid fixture parses");
+        let other_account_id =
+            Uuid::parse_str("00000000-0000-4000-8000-000000000124").expect("uuid fixture parses");
+        let salt = [0x42; 16];
+
+        assert_eq!(
+            recovery_code_hash(account_id, &salt, "PVRC-ABCD-2345"),
+            recovery_code_hash(account_id, &salt, " pvrc-abcd-2345 ")
+        );
+        assert_ne!(
+            recovery_code_hash(account_id, &salt, "pvrc-abcd-2345"),
+            recovery_code_hash(other_account_id, &salt, "pvrc-abcd-2345")
+        );
+        assert_eq!(
+            recovery_code_salt_from_vec(salt.to_vec()).expect("salt length is valid"),
+            salt
+        );
+        assert!(recovery_code_salt_from_vec(vec![0x42; 15]).is_err());
     }
 }

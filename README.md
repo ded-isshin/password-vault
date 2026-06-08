@@ -27,8 +27,9 @@ documentation, logs, and CI output as public.
 - Current blockers: PostgreSQL HA/backup/restore, SLO alerts, external synthetic checks, and
   stricter internal metrics/network controls remain unfinished. Registration, setup-session, TOTP
   enrollment, login finish, login-time TOTP verification, browser vault unlock, encrypted item
-  CRUD/sync, GHCR image publishing, Helm/GitOps, a basic Grafana dashboard, and a CI/local full
-  browser API synthetic journey are implemented for the current preview.
+  CRUD/sync, self-service recovery-code login into TOTP re-enrollment, GHCR image publishing,
+  Helm/GitOps, a basic Grafana dashboard, and a CI/local full browser API synthetic journey are
+  implemented for the current preview.
 
 ## MVP Scope
 
@@ -37,7 +38,7 @@ In scope:
 - personal user account
 - login
 - TOTP enrollment and verification
-- recovery codes for initial TOTP enrollment
+- recovery codes for self-service TOTP recovery and re-enrollment
 - personal vault
 - encrypted vault items
 - item revisions

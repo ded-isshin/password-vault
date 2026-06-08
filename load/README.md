@@ -78,7 +78,7 @@ k6 scenario.
 - `login_start.js`: unknown-account login challenge issuance with synthetic metadata.
 - `smoke.js`: mixed health/register/login smoke with low default rate.
 - `synthetic/browser-api-journey.mjs`: one protected-user journey:
-  `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
+  `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt -> logout -> login -> verify recovery code -> deny vault access -> re-enroll TOTP`.
 
 ## Defaults
 

@@ -38,17 +38,23 @@ Answer the current stabilization questions for the deployed Password Vault MVP p
 - The API pods are spread across three worker nodes.
 - A historical fixed-name migration `Job` remains as pruning debt, but it no longer blocks the
   current Argo CD operation.
-- Grafana contains the provisioned `Password Vault Overview` dashboard with 12 panels.
+- Grafana contains the provisioned `Password Vault Overview` dashboard with Golden Signal and
+  product-event panels.
 - VictoriaMetrics query `sum(up{job="password-vault-api"}) or vector(0)` returned `3`.
-- The build info metric is present, but `revision="unknown"` is currently reported.
-- Fresh 5-minute product journey rates can be zero when no synthetic or manual traffic exercises
-  registration, MFA, vault writes, or sync.
+- The build info metric is present and reports a concrete product source revision for the current
+  deployed image.
+- One-hour product event checks returned live series for registration, account creation, login, MFA,
+  encrypted item create, and sync. Fresh 5-minute rates can still be zero when no synthetic or
+  manual traffic exercises those paths.
 - The live product database is still one `postgres:17-bookworm` StatefulSet replica with one
   `local-path` PVC.
 - CloudNativePG CRDs exist, but no product `Cluster`, `Backup`, or `ScheduledBackup` resource was
   found in the `password-vault` namespace.
 - No CloudNativePG operator/controller deployment was found in the live cluster scan.
-- No `NetworkPolicy` resource exists in the `password-vault` namespace.
+- `NetworkPolicy` resources exist for both API and PostgreSQL. API HTTP ingress remains source-open
+  for the current edge route, metrics ingress is restricted to the observability scraper, API egress
+  is restricted to PostgreSQL plus DNS, and PostgreSQL ingress is restricted to API and migration
+  pods.
 - Product CI previously used PostgreSQL 18 while the preview deployment used PostgreSQL 17. This
   report updates the workflows and docs to use `postgres:17-bookworm` for database-backed CI and
   load-smoke checks.
@@ -144,19 +150,18 @@ The right target is not "no migrations." The target is:
 
 ## Minimum Stabilization Queue
 
-1. Full synthetic browser/API journey for register, TOTP, login, unlock, encrypted item create,
-   sync, and read/decrypt.
-2. NetworkPolicy or separate internal metrics listener so `/metrics` and PostgreSQL are not exposed
-   more broadly than required.
-3. L2 alerting: target down, fast 5xx burn-rate, all replicas not ready, and missing build metric.
-4. Fix `password_vault_build_info` so the runtime reports a useful source revision instead of
-   `unknown`.
-5. Product-owned CloudNativePG cluster plus WAL archiving, scheduled backups, restore drill, and
+1. Live external or edge-equivalent synthetic browser/API journey that publishes dashboard-visible
+   pass/fail for register, TOTP, login, unlock, encrypted item create, sync, and read/decrypt.
+2. Alertmanager notification routing and a controlled delivered alert test. Product alert rules are
+   loaded, but useful delivery is not proven.
+3. Product-owned CloudNativePG cluster plus WAL archiving, scheduled backups, restore drill, and
    failover drill.
-6. Database pool/query/error metrics and auth hash saturation metrics.
-7. Security aggregate metrics for CSRF failures, rate-limit hits, recovery-code attempts, and TOTP
+4. Database pool/query/error metrics and auth hash saturation metrics.
+5. Security aggregate metrics for CSRF failures, rate-limit hits, recovery-code attempts, and TOTP
    failures.
-8. Documentation cleanup: canonical docs hold current truth; dated agent reports remain evidence
+6. Namespace-level policy hardening after the edge route can be represented by selector-based
+   in-cluster ingress instead of source-open HTTP ingress.
+7. Documentation cleanup: canonical docs hold current truth; dated agent reports remain evidence
    logs only.
 
 ## Waste Reduction
@@ -184,7 +189,8 @@ Summary of output:
 
 - Confirmed the existing docs are mostly correct but the deployed state is still preview-only.
 - Flagged the biggest blockers before real secrets: single PostgreSQL StatefulSet, no active CNPG
-  operator/cluster, no backup/WAL/restore drill, no NetworkPolicy, and no L2 SLO alerting.
+  operator/cluster, no backup/WAL/restore drill, and no tested alert delivery. NetworkPolicy has
+  since been added and verified as a first isolation layer.
 - Confirmed MacBook should use the mini-PC edge ports, not LXD/Kubernetes addresses.
 - Confirmed there is no database conflict with another product if product isolation stays strict.
 - Recommended aligning CI PostgreSQL version with deployed preview PostgreSQL.
@@ -266,9 +272,11 @@ Grafana MCP checks:
 
 - Direct browser access from the MacBook itself.
 - A full synthetic browser/API journey.
-- NetworkPolicy behavior, because it is not enabled yet.
+- Full NetworkPolicy behavior under failure/deny scenarios. Resource shape was inspected live, but
+  deny-path traffic tests were not run in this report.
 - CloudNativePG failover or restore, because no product CNPG cluster exists yet.
-- Alert delivery, because product alert rules are not deployed yet.
+- Alert delivery, because product alert rules are deployed but notification routing and a delivered
+  smoke alert are not tested yet.
 
 ## Open Questions
 

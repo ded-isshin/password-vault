@@ -96,8 +96,10 @@ only after password/auth proof succeeds.
 user enters login handle and approved auth proof
 server asks for TOTP
 user selects account recovery code
+client calls POST /v1/auth/mfa/recovery-code/verify
 server verifies one-time recovery code hash
 server invalidates the used code
+server creates mfa_recovery session without vault access
 server lets user re-enroll TOTP
 ```
 

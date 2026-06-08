@@ -75,13 +75,17 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - Live verification after deployment found the dashboard and product metric series. Fresh 5-minute
   checks can legitimately return zero for registration, MFA, vault item, and sync panels when no
   synthetic or manual traffic is exercising those paths.
+- A later live one-hour query returned non-zero product-event series for registration, account
+  creation, login, MFA, encrypted item create, and sync. This proves the current dashboard can show
+  product events when traffic exists, but it is not a replacement for a scheduled external
+  synthetic probe.
 - The repository includes `load/synthetic/browser-api-journey.mjs`, a dependency-free Node
   browser-API synthetic journey for
   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
   It is a CI/local proof and can be run manually against the live edge route with explicit
   `SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL=true`.
 - The build info panel returns `password_vault_build_info` with
-  `revision="afb800d4f918127e508db43b06e1a1f688a73274"` for the deployed 2026-06-08 preview image.
+  `revision="69b576558c58333e0498025364dc1e7e3aec000e"` in the current live preview check.
   CI and published images should set the `revision` label from the GitHub commit SHA through the
   `PASSWORD_VAULT_BUILD_REVISION` Rust compile-time environment variable. Local ad-hoc builds that
   do not pass the build arg can still report `revision="unknown"`.
@@ -195,7 +199,7 @@ login-handle, OTP, path, host, or secret labels.
 | `password_vault_login_starts_total` | counter | `outcome` | Separate login metadata/challenge issuance from proof verification. |
 | `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | Track proof verification success and coarse failure classes. |
 | `password_vault_session_events_total` | counter | `event`, `outcome` | Track session creation and MFA upgrade outcomes. |
-| `password_vault_mfa_events_total` | counter | `event`, `outcome` | Track TOTP enrollment and login MFA outcomes. |
+| `password_vault_mfa_events_total` | counter | `event`, `outcome` | Track TOTP enrollment, login MFA, and recovery-code login outcomes. |
 | `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | Track encrypted item create/update/delete success and conflict rates. |
 | `password_vault_sync_requests_total` | counter | `outcome`, `page` | Track vault delta-sync success, conflict, and pagination. |
 
@@ -304,7 +308,7 @@ user, account, vault, item, email, login handle, device, IP, path, or encrypted-
 | Returning access | Login proof and MFA succeed, vault metadata decrypts in the browser. | Counting `login/start` as success even if users cannot pass MFA or unlock. |
 | Core write success | Encrypted item create/update/delete produces a valid revision and later sync returns it. | Counting server `200` only, without proving client can decrypt/sync the result. |
 | Sync conflict rate | Low stale-revision/conflict rate under normal synthetic and manual use. | Treating all conflicts as failures; some conflicts are expected protection against overwrite. |
-| Recovery readiness | Recovery-code verification flow exists and is monitored. | Treating recovery-code issuance as proof that account recovery is usable. |
+| Recovery readiness | Recovery-code verification and TOTP re-enrollment flow exists and is monitored. | Treating recovery-code issuance as proof that account recovery is usable. |
 | Data survival | Backup/restore/failover drills are recent and successful. | Treating database pod readiness as proof that saved secrets are durable. |
 
 For the current MVP, the north-star synthetic journey is:
