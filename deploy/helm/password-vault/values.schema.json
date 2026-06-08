@@ -42,6 +42,9 @@
             },
             "podSelector": {
               "type": "object"
+            },
+            "podSelectorOverride": {
+              "type": "object"
             }
           }
         },

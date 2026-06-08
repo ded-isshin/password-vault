@@ -1,4 +1,8 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $databasePodSelector := .Values.networkPolicy.database.podSelector }}
+{{- if .Values.networkPolicy.database.podSelectorOverride }}
+{{- $databasePodSelector = .Values.networkPolicy.database.podSelectorOverride }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -30,7 +34,7 @@ spec:
   egress:
     - to:
         - podSelector:
-            {{- toYaml .Values.networkPolicy.database.podSelector | nindent 12 }}
+            {{- toYaml $databasePodSelector | nindent 12 }}
       ports:
         - protocol: TCP
           port: {{ .Values.networkPolicy.database.port }}

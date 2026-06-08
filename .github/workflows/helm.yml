@@ -58,6 +58,15 @@ jobs:
           grep -q 'port: 5432' /tmp/password-vault-networkpolicy-rendered.yaml
           grep -q 'port: 53' /tmp/password-vault-networkpolicy-rendered.yaml
           ! grep -q -- '- {}' /tmp/password-vault-networkpolicy-rendered.yaml
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set networkPolicy.enabled=true \
+            --set-string 'networkPolicy.database.podSelectorOverride.matchLabels.cnpg\.io/cluster=password-vault-cnpg' \
+            >/tmp/password-vault-networkpolicy-cnpg-rendered.yaml
+          grep -q 'cnpg.io/cluster: password-vault-cnpg' /tmp/password-vault-networkpolicy-cnpg-rendered.yaml
+          ! grep -q 'app.kubernetes.io/name: password-vault-postgres' /tmp/password-vault-networkpolicy-cnpg-rendered.yaml
           cat >/tmp/password-vault-no-match-label-keys-values.yaml <<'YAML'
           topologySpreadConstraints:
             matchLabelKeys: []

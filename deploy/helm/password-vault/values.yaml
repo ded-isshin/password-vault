@@ -138,6 +138,7 @@ networkPolicy:
       matchLabels:
         app.kubernetes.io/name: password-vault-postgres
         app.kubernetes.io/part-of: password-vault
+    podSelectorOverride: {}
   dns:
     enabled: true
     port: 53
