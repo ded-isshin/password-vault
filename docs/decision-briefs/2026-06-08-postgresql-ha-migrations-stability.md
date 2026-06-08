@@ -22,6 +22,12 @@ Runtime assumption for this decision:
 - CloudNativePG CRDs are present in the Kubernetes cluster.
 - There are currently no CloudNativePG `Cluster` resources for `password-vault`.
 - The current `password-vault` database is a single PostgreSQL `StatefulSet`.
+- The current `hiringtrace` PostgreSQL deployment, if present, is a separate product runtime and
+  must not be reused as a `password-vault` database, schema, credential source, PVC, or backup
+  target.
+
+This brief is a product decision document. It does not change code, Helm manifests, infrastructure,
+Kubernetes resources, or runtime secrets.
 
 This is public-repository safe: it uses product and Kubernetes resource categories only. It does
 not include secrets, private IP addresses, kubeconfigs, private hostnames, or live connection
@@ -59,6 +65,15 @@ does not remove the need to version application-owned tables, constraints, index
 fields, sync metadata, and crypto/key-wrapping metadata. The goal is not "no migrations"; the goal
 is fewer, deliberate, backward-compatible migrations that support live rollout.
 
+PostgreSQL version policy and application schema policy are separate:
+
+- use a supported PostgreSQL major version and keep it on current minor releases;
+- treat PostgreSQL major upgrades as platform/database projects;
+- treat SQL migrations as product data-contract changes;
+- do not add migrations for speculative ideas or cosmetic churn;
+- do add migrations when persisted authentication, security, sync, audit, or encrypted-vault
+  metadata must change.
+
 ## Why Clustered PostgreSQL Is Required
 
 The application is a password manager. A user saving a password expects an acknowledged write to
@@ -82,10 +97,41 @@ This does not replace backups. HA handles common instance or node failures. Back
 data corruption, accidental deletes, bad migrations, credential mistakes, operator mistakes, and
 disaster recovery.
 
-## No Conflict With Other Products
+## Path From Preview StatefulSet To CloudNativePG
 
-There is no inherent conflict with another product using PostgreSQL if the boundary is one
-CloudNativePG `Cluster` per product and namespace.
+The current single PostgreSQL `StatefulSet` should be treated as a preview data source, not as the
+final database topology. There is no safe "turn the StatefulSet into a CloudNativePG cluster"
+shortcut. The migration should be staged and reversible.
+
+Recommended path:
+
+1. Install or confirm the shared CloudNativePG operator through infrastructure GitOps.
+2. Select and document the backup target, credentials path, retention, and restore-drill namespace.
+3. Create a product-owned `password-vault` CloudNativePG `Cluster` with three instances, separate
+   PVCs, product-specific Services, product-specific Secrets, and no public PostgreSQL exposure.
+4. Configure synchronous replication, node spread/anti-affinity, resource requests, monitoring, and
+   NetworkPolicies before accepting real user secrets.
+5. Enable continuous WAL archiving and scheduled base backups.
+6. Run the product schema migrations against the new cluster using an explicit migration job, not API
+   pod startup.
+7. If preview data needs to be preserved, perform a reviewed dump/import or logical migration from
+   the preview `StatefulSet`; otherwise treat preview data as disposable and initialize from
+   migrations.
+8. Run a restore drill into a separate namespace or separate `Cluster` object before cutover.
+9. Cut the API over by changing the runtime database Secret/Service reference through GitOps, then
+   roll API pods with `maxUnavailable: 0`.
+10. Validate health, readiness, synthetic user journeys, backup status, replication state,
+    failover behavior, and dashboards.
+11. Keep the old preview `StatefulSet` quarantined for a short rollback window if data was migrated;
+    remove it only after the cutover and restore evidence are recorded.
+
+The cutover must be blocked if the backup target, WAL archiving, restore drill, or runtime Secret
+handling is incomplete.
+
+## No Conflict With HiringTrace Or Other Products
+
+There is no inherent conflict with HiringTrace or another product using PostgreSQL if the boundary
+is one product-owned database deployment per product and namespace.
 
 Required isolation:
 
@@ -103,6 +149,11 @@ Required isolation:
 The CloudNativePG operator itself can be shared cluster infrastructure. The database clusters it
 manages should be product-owned. This is the same distinction as sharing Kubernetes but not sharing
 application Secrets or tables.
+
+A conflict would exist only if `password-vault` tried to reuse HiringTrace's PostgreSQL database,
+role, connection Secret, PVCs, backup prefix, migration pipeline, or operational ownership. That is
+not the recommended architecture. The safe shared layer is the operator and Kubernetes platform, not
+the product data plane.
 
 ## Sync Versus Async Replication
 
@@ -126,6 +177,10 @@ Expected tradeoff:
 - if only the primary remains without a suitable standby, writes may pause;
 - degraded write unavailability must alert loudly and be handled operationally;
 - this is acceptable for real secrets because durability is the higher priority.
+
+This choice is specifically for password-manager writes. A generic CRUD application may choose
+availability over write durability more often; this product should not silently acknowledge saved
+secrets that can disappear after a primary failure.
 
 ### Where Async Is Acceptable
 
@@ -167,12 +222,25 @@ backup.
 CloudNativePG recovery should be treated as creating a new recovered cluster from backup material,
 not overwriting the live database during the first drills.
 
+Backup/restore is a release gate, not documentation only. Real user secrets remain blocked until:
+
+- at least one scheduled backup has completed successfully;
+- WAL archiving health is observable;
+- restore into a non-live target has been completed;
+- the restored database can run the application schema and a controlled application connection;
+- the restore result records observed RTO, observed RPO, and any missing Secrets or manual steps.
+
 ## Why Schema Migrations Are Still Required
 
 Stable PostgreSQL versions and schema migrations solve different problems.
 
 Stable PostgreSQL means the database engine behavior is predictable. It does not define the product
 schema and it does not evolve application data contracts.
+
+PostgreSQL's versioning policy covers engine releases: major versions introduce new features and
+can require dump/reload or `pg_upgrade`, while minor releases contain fixes and should normally be
+kept current for the selected major version. That is not the same lifecycle as changing
+`password-vault` tables, indexes, constraints, auth state, sync state, or key-wrapping metadata.
 
 This product already has real schema evolution pressure:
 
@@ -199,6 +267,15 @@ Migrations are needed for:
 Removing migrations would not make the product more stable. It would make schema drift harder to
 audit, harder to test, and harder to recover.
 
+The stable target is therefore:
+
+- one intentional, reviewed migration chain;
+- migration files committed with product code;
+- CI proving a clean database can be created from scratch;
+- production-like rollout using explicit migration jobs;
+- no implicit DDL from API pod startup;
+- no unmanaged manual schema edits.
+
 ## How To Minimize Migration Churn
 
 The policy is deliberate migrations, not frequent schema churn.
@@ -217,6 +294,17 @@ Rules:
 
 Some migrations are still the safest path. For example, adding an explicit constraint or index can
 be safer than trusting every API code path forever.
+
+Do not add a migration when the change can be handled safely as:
+
+- application-only validation with no persisted contract change;
+- a feature flag over already-existing columns;
+- encrypted client payload evolution that does not require new searchable/server-visible metadata;
+- a documentation or API-shape clarification that does not change stored data.
+
+Add a migration when the database must enforce a new invariant, store new security metadata, support
+a new sync/authentication state, or provide an index/constraint required for reliable latency and
+uniqueness.
 
 ## Live Rollout Migration Policy
 
@@ -295,5 +383,7 @@ Official documentation:
 - https://cloudnative-pg.io/docs/1.29/replication/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/
+- https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/
+- https://www.postgresql.org/support/versioning/
 - https://www.postgresql.org/docs/current/sql-altertable.html
 - https://www.postgresql.org/docs/current/sql-createindex.html
