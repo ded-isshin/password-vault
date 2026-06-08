@@ -31,10 +31,11 @@ Current implementation status, 2026-06-08:
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
-  changes, sync requests, and build information are implemented locally in the current branch and
-  covered by a low-cardinality metrics test. The infrastructure dashboard intent has matching
-  panels, but the new product metrics are not live until the branch is built, published, and rolled
-  out.
+  changes, sync requests, and build information are merged, published, deployed, and covered by a
+  low-cardinality metrics test. Live checks verified `password_vault_build_info`,
+  `password_vault_registration_events_total`, and `password_vault_login_starts_total` in
+  VictoriaMetrics after a synthetic smoke run. MFA, vault item, and sync counters still need a
+  fuller synthetic journey before non-zero live values can be verified.
 - CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
   `Backup`, or `ScheduledBackup` resources are present yet. A live scan also found no running
   CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
