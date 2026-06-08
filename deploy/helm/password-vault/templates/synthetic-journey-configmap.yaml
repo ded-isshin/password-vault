@@ -1,0 +1,13 @@
+{{- if .Values.syntheticJourney.cronJob.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "password-vault.fullname" . }}-synthetic-journey
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+    component: synthetic-journey
+data:
+  browser-api-journey.mjs: |-
+{{ .Files.Get "files/synthetic/browser-api-journey.mjs" | indent 4 }}
+{{- end }}

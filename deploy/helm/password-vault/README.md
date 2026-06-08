@@ -15,6 +15,9 @@ The chart can also emit a disabled-by-default synthetic cleanup `CronJob` for bo
 test data. It is operational hygiene only; it does not replace scheduled end-to-end synthetic
 monitoring.
 
+The chart can emit a separate disabled-by-default full synthetic journey `CronJob`. That job runs
+the same dependency-free browser/API journey used in CI against a configured base URL.
+
 ## Runtime Secrets
 
 The chart expects Kubernetes Secrets created outside this public repository:
@@ -98,6 +101,59 @@ allow that component.
 
 Do not point cleanup at real user domains. Do not treat cleanup logs as synthetic monitoring proof:
 scheduled synthetic pass/fail metrics are a separate acceptance gate.
+
+## Synthetic Journey
+
+The chart can schedule the full protected-user browser/API synthetic journey with
+`syntheticJourney.cronJob.enabled=true`.
+
+The job runs the pinned Node image from `syntheticJourney.cronJob.nodeImage` and executes the
+vendored `browser-api-journey.mjs` script from a read-only ConfigMap. The journey exercises:
+
+- health and readiness;
+- registration start/finish;
+- browser-side key derivation;
+- TOTP enrollment and confirmation;
+- logout and return login;
+- login-time TOTP verification;
+- vault unlock;
+- encrypted item create;
+- sync/read/decrypt;
+- recovery-code login;
+- forced TOTP re-enrollment.
+
+Required production-like value:
+
+```yaml
+syntheticJourney:
+  cronJob:
+    enabled: true
+    baseUrl: https://<mini-pc-lan-ip>:11443
+    allowNonLocalBaseUrl: true
+    tlsInsecure: true
+    checkMetrics: false
+```
+
+`baseUrl` is required when the CronJob is enabled. Prefer the same LAN/edge URL that a browser uses
+so the synthetic detects edge routing failures, not only in-cluster service health. Keep real LAN
+addresses out of public product documentation and use placeholders unless disclosure is explicitly
+approved.
+
+The script refuses non-local base URLs unless `allowNonLocalBaseUrl=true`, rejects non-`.invalid`
+synthetic email domains, prints no account secret keys, TOTP seeds, OTP codes, recovery codes,
+cookies, item IDs, vault IDs, or plaintext item passwords, and uses reserved synthetic accounts.
+
+When `networkPolicy.enabled=true`, the chart can also emit an egress-only policy for
+`component=synthetic-journey`. By default it allows the synthetic pod to reach API pods on the chart
+service port plus DNS. For edge-route checks, production values should add the reviewed edge
+destination as an explicit `syntheticJourney.networkPolicy.externalEgress` CIDR and port list. The
+schema accepts only narrow IPv4 CIDRs; use `/32` for a single edge host. Broad egress such as
+`0.0.0.0/0` is intentionally rejected.
+
+The first scheduled-journey implementation exposes pass/fail through Kubernetes CronJob/Job status
+and kube-state-metrics. It is useful operational evidence, but it is not yet a custom
+low-cardinality product metric such as `password_vault_synthetic_journey_last_success_timestamp`.
+Add that metric only with a reviewed persistence/export path that does not expose secrets.
 
 ## Rollout Policy
 

@@ -100,8 +100,8 @@ regressions should usually create tickets unless they imply data loss, lockout, 
 | Golden signal | Password Vault interpretation | Current repository-visible state | Gaps |
 | --- | --- | --- | --- |
 | Latency | HTTP route latency, successful vs failed latency, auth/MFA proof latency, DB query latency, synthetic journey duration. | HTTP duration histogram exists through the Axum metrics layer. Readiness DB pool wait and `SELECT 1` query duration metrics are implemented in code. | Auth/MFA step duration, broad per-operation DB query latency, and journey duration metrics are planned. |
-| Traffic | Request rate and meaningful product operation rates: registration, login, MFA, session, vault item, sync. | HTTP counters and product counters are implemented in code. | Active session gauge and scheduled external synthetic traffic are planned. |
-| Errors | 5xx ratio, policy failures, rate-limit hits, MFA failures, CSRF/security rejections, synthetic failures, DB errors. | HTTP status counters, login/MFA outcome counters, rate-limit counter, vault/sync outcome counters, and readiness DB error counters are implemented in code. | CSRF/security rejection counters and synthetic pass/fail metrics are planned. |
+| Traffic | Request rate and meaningful product operation rates: registration, login, MFA, session, vault item, sync. | HTTP counters and product counters are implemented in code. The Helm chart can render a disabled-by-default full synthetic journey CronJob. | Active session gauge and deployed scheduled external synthetic traffic are planned. |
+| Errors | 5xx ratio, policy failures, rate-limit hits, MFA failures, CSRF/security rejections, synthetic failures, DB errors. | HTTP status counters, login/MFA outcome counters, rate-limit counter, vault/sync outcome counters, and readiness DB error counters are implemented in code. Scheduled journey pass/fail can be observed through Kubernetes Job status once the CronJob is enabled. | CSRF/security rejection counters and custom synthetic pass/fail metrics are planned. |
 | Saturation | Pending requests, DB pool pressure, DB wait, auth challenge pressure, pod CPU/memory, PostgreSQL lag/disk, backup/WAL backlog. | HTTP pending requests, DB pool connection gauges, and readiness DB pool wait histograms are implemented in code. | Auth/MFA step duration, PostgreSQL HA/backup/failover panels, and capacity alerts are planned. |
 
 ## Implemented Application Metrics
@@ -187,6 +187,8 @@ The repository contains two load/synthetic surfaces:
   mixed low-rate smoke.
 - A dependency-free Node browser-API journey:
   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt -> logout -> login -> verify recovery code -> deny vault access -> re-enroll TOTP`.
+- A disabled-by-default Helm `syntheticJourney` CronJob that can run the full browser-API journey
+  from Kubernetes against a configured browser/edge base URL.
 
 Synthetic and load work must follow these rules:
 
@@ -195,6 +197,9 @@ Synthetic and load work must follow these rules:
   secrets, account IDs, vault IDs, item IDs, or device IDs.
 - Do not run scheduled live-edge probes until the target route, cleanup lifecycle, alert routing,
   and rate limits are explicitly configured.
+- Scheduled journey pass/fail is initially observable through Kubernetes CronJob/Job status and
+  kube-state-metrics. Treat that as L3-enabling evidence only after the CronJob is deployed,
+  unsuspended, and verified through Grafana/VictoriaMetrics.
 - Load tests should expose aggregate results: request rate, latency percentiles, failure ratio,
   synthetic journey pass/fail, step duration, and cleanup result counts.
 - The synthetic account cleanup command is operational hygiene, not proof that synthetic monitoring
@@ -337,6 +342,21 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
     `PasswordVaultCnpgBackupMissing`.
   - Six-hour product counters showed successful synthetic registration, MFA, recovery-code login,
     encrypted item creation, and sync events.
+- A follow-up 2026-06-08T23:26Z session-restart check confirmed:
+  - a fresh terminal session had no default `kubectl` context, so read-only cluster checks used the
+    explicit production kubeconfig path;
+  - Password Vault, Grafana, and Argo CD edge sockets were bound to the mini-PC LAN address, not the
+    LXD bridge address and not wildcard sockets for the browser-facing ports;
+  - Password Vault `GET /`, Grafana `/api/health`, and Argo CD `/healthz` returned HTTP 200 through
+    the mini-PC LAN edge paths from the mini-PC;
+  - Argo CD reported `prod-root` and `password-vault` as `Synced` and `Healthy`;
+  - the `password-vault-cnpg` CloudNativePG cluster reported three ready instances and a healthy
+    phase;
+  - no `ObjectStore`, `ScheduledBackup`, or `Backup` resources existed in the `password-vault`
+    namespace, so the base-backup/restore gate remained open;
+  - Grafana datasource checks returned API targets `3`, CNPG targets `3`, build revision data,
+    black-box `internal-readyz` and `edge-readyz` success `1`, cleanup CronJob present `1`, and
+    backup availability `0`.
 
 ## Current Dashboard And Alert Gaps
 
