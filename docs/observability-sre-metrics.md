@@ -215,8 +215,9 @@ The main dashboard should be organized by questions, not metric names.
 | L4 durability | Data survival is measured. | Replication, backup age, WAL archive, restore drill, and failover drill are visible. |
 | L5 security/product | Aggregate abuse and activation health are visible. | Auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented and verified. |
 
-Current repository state supports parts of L0/L1 and product counter instrumentation. The live
-deployment level must be re-evaluated after each GitOps rollout.
+Current repository state supports parts of L0/L1, product counter instrumentation, and a
+pre-cutover CloudNativePG scrape for `password-vault-cnpg`. The live deployment level must be
+re-evaluated after each GitOps rollout.
 
 ## Current Dashboard And Alert Gaps
 
@@ -229,8 +230,8 @@ Do not mark these complete without runtime evidence:
 - External synthetic browser/API probes are not documented as scheduled, scraped, and dashboarded.
 - Synthetic pass/fail, step duration, and cleanup metrics are planned.
 - DB query latency, DB errors, DB pool wait, and auth hash pressure metrics are planned.
-- PostgreSQL HA, backup age, WAL archive, restore drill, and failover drill panels are required
-  before real secrets.
+- PostgreSQL HA scrape data exists for the pre-cutover CloudNativePG cluster, but backup age, WAL
+  archive health, restore drill, and failover drill panels are still required before real secrets.
 - Security panels for CSRF/origin rejection, recovery failures, and session/token anomalies are
   planned.
 - A panel cannot prove `/metrics` is blocked from the wrong network path. That needs an explicit
