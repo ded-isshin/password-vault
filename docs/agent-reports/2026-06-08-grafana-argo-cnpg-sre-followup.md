@@ -140,11 +140,20 @@ Kubernetes `LoadBalancer` addresses are backend/internal targets for this home p
 not be given to a normal MacBook browser unless that client has explicit routing into the
 Kubernetes/LXD network.
 
-Verified from the mini-PC:
+Verified from the mini-PC in the earlier 2026-06-08 re-check:
 
 - edge listeners were bound to `0.0.0.0` for the three expected LAN-facing ports;
 - Password Vault health, Grafana health, and Argo CD health/root checks returned success through
   the edge path.
+
+Later runtime correction at 2026-06-08T22:20Z:
+
+- the edge listeners for Password Vault, Grafana, and Argo CD were bound to the reviewed mini-PC LAN
+  address rather than wildcard sockets;
+- Password Vault `GET /`, Grafana `/api/health`, and Argo CD `/healthz` returned HTTP 200 through
+  the mini-PC LAN edge paths from the mini-PC;
+- Kubernetes/LXD `LoadBalancer` addresses remain internal service-routing details, not default
+  MacBook browser URLs.
 
 Needs verification from the MacBook:
 
@@ -269,6 +278,27 @@ Follow-up review:
   blocker.
 - Verified locally after Claude follow-up: the infra worktree was clean and equal to `origin/main`;
   the legacy PostgreSQL StatefulSet remains present in GitOps and runtime.
+
+Additional 2026-06-08T22:20Z Claude Code review:
+
+- Purpose: independent architecture/SRE review of edge access, CNPG HA/durability, migrations,
+  Google SRE observability, and waste reduction.
+- Prompt/task given: read-only review of the product repository and current infrastructure GitOps
+  worktree with no file edits.
+- Accepted: data durability is the real preview-to-real-secrets gate; off-node backup, PITR,
+  restore drill, failover drill, and Alertmanager delivery must happen before real secrets.
+- Accepted: scheduled external synthetic pass/fail should be added before broader per-step dashboard
+  expansion.
+- Accepted: schema migrations remain necessary on stable PostgreSQL, but should stay rare,
+  reviewed, forward-only after real data, and run through controlled jobs rather than API startup.
+- Accepted: report sprawl is a real drift risk; canonical docs should remain the current source of
+  truth, and agent reports should stay historical evidence.
+- Corrected: Claude flagged `ansible/playbooks/nginx_streams.yml` as absent from its inspected
+  context. The current infrastructure worktree does contain that playbook, and runtime evidence
+  shows the edge bind hardening has already been applied.
+- Corrected: Claude described WAL archiving as absent from manifests. The accepted runtime finding
+  is narrower: no `ObjectStore`, `Backup`, or `ScheduledBackup` exists, backup availability remains
+  `0`, and restore/failover evidence is missing.
 
 Deferred suggestions:
 

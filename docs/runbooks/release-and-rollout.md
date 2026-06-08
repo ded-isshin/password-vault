@@ -177,8 +177,8 @@ curl -kfsS https://<mini-pc-lan-ip>:3000/api/health >/dev/null
 curl -kfsS https://<mini-pc-lan-ip>:9443/healthz >/dev/null
 ```
 
-The listeners should bind to a LAN-facing address such as `0.0.0.0` or the mini-PC LAN address, not
-only `127.0.0.1`.
+The listeners should bind to the reviewed mini-PC LAN address for the browser-facing ports, not to
+`0.0.0.0`, `[::]`, or only `127.0.0.1`.
 
 `-k` is a LAN/self-signed certificate convenience for the current home edge only. Remove it when a
 real trusted certificate model exists.
