@@ -1048,9 +1048,11 @@ async function assertMetrics(config) {
     ["password_vault_mfa_events_total", { event: "totp_enrollment", outcome: "confirmed" }],
     ["password_vault_mfa_events_total", { event: "totp_login", outcome: "challenge_issued" }],
     ["password_vault_mfa_events_total", { event: "totp_login", outcome: "verified" }],
+    ["password_vault_mfa_events_total", { event: "recovery_code_login", outcome: "verified" }],
     ["password_vault_session_events_total", { event: "created", outcome: "mfa_enrollment_required" }],
     ["password_vault_session_events_total", { event: "upgraded", outcome: "mfa_verified" }],
     ["password_vault_session_events_total", { event: "created", outcome: "mfa_verified" }],
+    ["password_vault_session_events_total", { event: "created", outcome: "mfa_recovery" }],
     ["password_vault_vault_item_changes_total", { operation: "create", outcome: "success" }],
     ["password_vault_sync_requests_total", { outcome: "success", page: "complete" }],
   ];
@@ -1141,6 +1143,8 @@ async function main() {
   let accountSecretKey;
   let loginUnlockKey;
   let totpSeed;
+  let recoveryTotpSeed;
+  let recoveryCode;
   let writerVault;
   let readerVault;
 
@@ -1226,6 +1230,8 @@ async function main() {
     assert(enrollConfirm.session?.state === "mfa_verified", "TOTP confirm must upgrade session.");
     assert(enrollConfirm.session?.vault_access === true, "TOTP confirm must grant vault access.");
     assert(Array.isArray(enrollConfirm.recovery_codes), "TOTP confirm must return recovery codes once.");
+    assert(enrollConfirm.recovery_codes.length === 10, "TOTP confirm must return 10 recovery codes.");
+    recoveryCode = enrollConfirm.recovery_codes[0];
 
     const { body: verifiedSetupSession } = await requestJson(config, "/v1/session", {
       jar: registrationJar,
@@ -1377,6 +1383,115 @@ async function main() {
     assert(readItem.fields.password === plaintext.password, "Synced item password mismatch.");
     assert(readItem.fields.notes === plaintext.notes, "Synced item notes mismatch.");
 
+    logStep("checking recovery-code login and forced TOTP re-enrollment");
+    const recoveryLogoutCsrf = await getCsrf(config, loginJar);
+    await requestText(config, "/v1/auth/logout", {
+      method: "POST",
+      jar: loginJar,
+      csrfToken: recoveryLogoutCsrf,
+      body: {},
+      expectStatus: 204,
+      expectNoStore: true,
+      label: "recovery prep logout",
+    });
+
+    const recoveryJar = new CookieJar("recovery-login");
+    const recoveryClientNonce = randomBytes(32);
+    const { body: recoveryLoginStart } = await requestJson(config, "/v1/auth/login/start", {
+      method: "POST",
+      body: {
+        login_handle: config.loginHandle,
+        auth_protocol: AUTH_PROTOCOL,
+        client_nonce: base64Url(recoveryClientNonce),
+      },
+      expectNoStore: true,
+      label: "recovery login start",
+    });
+    validateLoginStart(recoveryLoginStart);
+    const { payload: recoveryLoginFinishPayload } = await buildLoginFinishPayload(
+      recoveryLoginStart,
+      {
+        loginHandle: config.loginHandle,
+        masterPassword: config.masterPassword,
+        accountSecretKey,
+      },
+      recoveryClientNonce,
+    );
+    wipe(recoveryClientNonce);
+    const { body: recoveryLoginFinish } = await requestJson(config, "/v1/auth/login/finish", {
+      method: "POST",
+      jar: recoveryJar,
+      body: recoveryLoginFinishPayload,
+      expectNoStore: true,
+      label: "recovery login finish",
+    });
+    assert(recoveryLoginFinish.result === "mfa_required", "Recovery login must require MFA.");
+    assert(
+      (recoveryLoginFinish.available_methods || []).includes("recovery_code"),
+      "Recovery code must be an available MFA method.",
+    );
+    const { response: recoveryVerifyResponse, body: recoveryVerify } = await requestJson(
+      config,
+      "/v1/auth/mfa/recovery-code/verify",
+      {
+        method: "POST",
+        jar: recoveryJar,
+        body: {
+          mfa_challenge_id: recoveryLoginFinish.mfa_challenge_id,
+          recovery_code: recoveryCode,
+        },
+        expectNoStore: true,
+        label: "recovery code verify",
+      },
+    );
+    assertSessionCookieFlags(recoveryVerifyResponse, "recovery code verify");
+    assert(recoveryVerify.session?.state === "mfa_recovery", "Recovery code must create recovery session.");
+    assert(recoveryVerify.session?.vault_access === false, "Recovery session must not have vault access.");
+    assert(recoveryVerify.next_step === "reenroll_totp", "Recovery session must require TOTP re-enrollment.");
+    const { body: recoveryVaults } = await requestJson(config, "/v1/vaults", {
+      jar: recoveryJar,
+      expectStatus: 403,
+      expectNoStore: true,
+      label: "recovery session vault denial",
+    });
+    assert(recoveryVaults.error?.code === "mfa_required", "Recovery session must not access vaults.");
+
+    const recoveryEnrollStartCsrf = await getCsrf(config, recoveryJar);
+    const { body: recoveryEnrollStart } = await requestJson(config, "/v1/mfa/totp/enroll/start", {
+      method: "POST",
+      jar: recoveryJar,
+      csrfToken: recoveryEnrollStartCsrf,
+      body: {},
+      expectNoStore: true,
+      label: "recovery totp enroll start",
+    });
+    recoveryTotpSeed = decodeBase32NoPadding(recoveryEnrollStart.manual_secret);
+    const recoveryEnrollConfirmCsrf = await getCsrf(config, recoveryJar);
+    const recoveryEnrollCode = await totpCode(recoveryTotpSeed, recoveryEnrollStart.totp_profile, 0);
+    const { body: recoveryEnrollConfirm } = await requestJson(
+      config,
+      "/v1/mfa/totp/enroll/confirm",
+      {
+        method: "POST",
+        jar: recoveryJar,
+        csrfToken: recoveryEnrollConfirmCsrf,
+        body: {
+          factor_id: recoveryEnrollStart.factor_id,
+          code: recoveryEnrollCode,
+        },
+        expectNoStore: true,
+        label: "recovery totp enroll confirm",
+      },
+    );
+    assert(
+      recoveryEnrollConfirm.session?.state === "mfa_verified",
+      "Recovery TOTP confirm must restore verified session.",
+    );
+    assert(
+      recoveryEnrollConfirm.session?.vault_access === true,
+      "Recovery TOTP confirm must restore vault access.",
+    );
+
     if (config.checkMetrics) {
       logStep("checking product metrics");
       await assertMetrics(config);
@@ -1387,14 +1502,14 @@ async function main() {
     console.log(
       JSON.stringify({
         status: "ok",
-        journey: "register_totp_return_login_unlock_create_sync_read",
+        journey: "register_totp_return_login_unlock_create_sync_read_recovery_reenroll",
         metrics_checked: config.checkMetrics,
         vault_head_seq: readerVault.headSeq,
         item_count: readerVault.items.size,
       }),
     );
   } finally {
-    wipe(accountSecretKey, loginUnlockKey, totpSeed, writerVault?.vaultKey, writerVault?.integrityKey);
+    wipe(accountSecretKey, loginUnlockKey, totpSeed, recoveryTotpSeed, writerVault?.vaultKey, writerVault?.integrityKey);
     wipe(readerVault?.vaultKey, readerVault?.integrityKey);
   }
 }

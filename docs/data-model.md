@@ -5,8 +5,8 @@ The first migration creates the base account/auth/session/MFA/vault schema, the 
 adds the registration-finish key-material tables and session/device metadata required by the first
 runtime auth slice, and the third migration records the browser-native PBKDF2 MVP KDF profile.
 Registration, session, TOTP enrollment, login finish, and login-time TOTP verification now have
-local implementation coverage. Recovery-code verification, sync, and vault-item runtime flows are
-not implemented yet.
+local implementation coverage. Recovery-code verification, vault-item create/sync/read flows, and
+the browser/API synthetic journey also have MVP preview coverage.
 
 This document records the product data boundaries and the first implemented schema direction. The
 schema can still change while the auth, key-derivation, recovery, and sync implementation is built.

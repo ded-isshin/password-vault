@@ -2017,7 +2017,7 @@ mod tests {
         assert_eq!(mfa_finish_body["result"], "mfa_required");
         assert_eq!(
             mfa_finish_body["available_methods"],
-            serde_json::json!(["totp"])
+            serde_json::json!(["totp", "recovery_code"])
         );
         let mfa_challenge_id = mfa_finish_body["mfa_challenge_id"]
             .as_str()
@@ -2131,6 +2131,180 @@ mod tests {
         assert_eq!(verified_session_body["authenticated"], true);
         assert_eq!(verified_session_body["session_state"], "mfa_verified");
         assert_eq!(verified_session_body["vault_access"], true);
+    }
+
+    #[tokio::test]
+    async fn recovery_code_verify_creates_limited_reenrollment_session() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping recovery code database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        let auth_secret = [0x45u8; 32];
+        let router = build_app(ApiConfig {
+            bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            metrics_bind_addr: "127.0.0.1:0"
+                .parse()
+                .expect("hard-coded test socket address is valid"),
+            database_url: Some(database_url.clone()),
+            synthetic_metadata_key: Some([9u8; 32]),
+            totp_seed_key: Some([8u8; 32]),
+            require_database: true,
+            run_migrations_on_startup: false,
+        })
+        .await
+        .expect("app builds with database");
+
+        let setup_cookie = cookie_pair(
+            &register_account_with_auth_secret_and_return_set_cookie(
+                &router,
+                "recovery-login@example.com",
+                "00000000-0000-4000-8000-000000000792",
+                &auth_secret,
+            )
+            .await,
+        );
+        let (_seed, _verified_cookie, recovery_codes) =
+            enroll_totp_and_return_verified_cookie_and_recovery_codes(
+                &router,
+                &pool,
+                "recovery-login@example.com",
+                &setup_cookie,
+            )
+            .await;
+        let recovery_code = recovery_codes
+            .first()
+            .expect("at least one recovery code is returned")
+            .to_string();
+
+        let recovery_login_payload =
+            build_login_finish_payload(&router, "recovery-login@example.com", &auth_secret, false)
+                .await;
+        let recovery_login = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/login/finish",
+                &recovery_login_payload,
+            ))
+            .await
+            .expect("recovery login finish returns a response");
+        assert_eq!(recovery_login.status(), http::StatusCode::OK);
+        let recovery_login_body = response_json(recovery_login).await;
+        assert_eq!(recovery_login_body["result"], "mfa_required");
+        assert_eq!(
+            recovery_login_body["available_methods"],
+            serde_json::json!(["totp", "recovery_code"])
+        );
+        let recovery_challenge_id = recovery_login_body["mfa_challenge_id"]
+            .as_str()
+            .expect("mfa challenge id is present");
+
+        let recovery_verify_payload = serde_json::json!({
+            "mfa_challenge_id": recovery_challenge_id,
+            "recovery_code": &recovery_code,
+        })
+        .to_string();
+        let recovery_verify = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/mfa/recovery-code/verify",
+                &recovery_verify_payload,
+            ))
+            .await
+            .expect("recovery verify returns a response");
+        assert_eq!(recovery_verify.status(), http::StatusCode::OK);
+        let recovery_cookie = recovery_verify
+            .headers()
+            .get("set-cookie")
+            .and_then(|value| value.to_str().ok())
+            .expect("recovery verify sets a session cookie")
+            .to_string();
+        let recovery_cookie = cookie_pair(&recovery_cookie);
+        let recovery_verify_body = response_json(recovery_verify).await;
+        assert_eq!(recovery_verify_body["result"], "session_created");
+        assert_eq!(recovery_verify_body["session"]["state"], "mfa_recovery");
+        assert_eq!(recovery_verify_body["session"]["vault_access"], false);
+        assert_eq!(recovery_verify_body["next_step"], "reenroll_totp");
+
+        let recovery_session = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/session", &recovery_cookie))
+            .await
+            .expect("recovery session returns a response");
+        assert_eq!(recovery_session.status(), http::StatusCode::OK);
+        let recovery_session_body = response_json(recovery_session).await;
+        assert_eq!(recovery_session_body["authenticated"], true);
+        assert_eq!(recovery_session_body["session_state"], "mfa_recovery");
+        assert_eq!(recovery_session_body["vault_access"], false);
+
+        let recovery_vaults = router
+            .clone()
+            .oneshot(get_request_with_cookie("/v1/vaults", &recovery_cookie))
+            .await
+            .expect("recovery vault list returns a response");
+        assert_eq!(recovery_vaults.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(recovery_vaults).await["error"]["code"],
+            "mfa_required"
+        );
+
+        let replay_login_payload =
+            build_login_finish_payload(&router, "recovery-login@example.com", &auth_secret, false)
+                .await;
+        let replay_login = router
+            .clone()
+            .oneshot(json_request("/v1/auth/login/finish", &replay_login_payload))
+            .await
+            .expect("replay login finish returns a response");
+        assert_eq!(replay_login.status(), http::StatusCode::OK);
+        let replay_login_body = response_json(replay_login).await;
+        let replay_challenge_id = replay_login_body["mfa_challenge_id"]
+            .as_str()
+            .expect("replay mfa challenge id is present");
+        let replay_payload = serde_json::json!({
+            "mfa_challenge_id": replay_challenge_id,
+            "recovery_code": &recovery_code,
+        })
+        .to_string();
+        let replay_verify = router
+            .clone()
+            .oneshot(json_request(
+                "/v1/auth/mfa/recovery-code/verify",
+                &replay_payload,
+            ))
+            .await
+            .expect("replayed recovery code returns a response");
+        assert_eq!(replay_verify.status(), http::StatusCode::FORBIDDEN);
+        assert_eq!(
+            response_json(replay_verify).await["error"]["code"],
+            "mfa_verification_failed"
+        );
+
+        let recovery_csrf = csrf_for_cookie(&router, &recovery_cookie).await;
+        let reenroll_start = router
+            .clone()
+            .oneshot(json_request_with_cookie_and_csrf(
+                "/v1/mfa/totp/enroll/start",
+                "{}",
+                &recovery_cookie,
+                &recovery_csrf,
+            ))
+            .await
+            .expect("recovery session can start TOTP re-enrollment");
+        assert_eq!(reenroll_start.status(), http::StatusCode::OK);
     }
 
     #[tokio::test]
@@ -3110,6 +3284,23 @@ mod tests {
         login_handle: &str,
         setup_cookie: &str,
     ) -> (Vec<u8>, String) {
+        let (seed, verified_cookie, _recovery_codes) =
+            enroll_totp_and_return_verified_cookie_and_recovery_codes(
+                router,
+                pool,
+                login_handle,
+                setup_cookie,
+            )
+            .await;
+        (seed, verified_cookie)
+    }
+
+    async fn enroll_totp_and_return_verified_cookie_and_recovery_codes(
+        router: &axum::Router,
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        setup_cookie: &str,
+    ) -> (Vec<u8>, String, Vec<String>) {
         let csrf_response = router
             .clone()
             .oneshot(get_request_with_cookie("/v1/csrf", setup_cookie))
@@ -3163,6 +3354,18 @@ mod tests {
             .and_then(|value| value.to_str().ok())
             .expect("totp enroll confirm rotates the session cookie")
             .to_string();
+        let confirm_body = response_json(confirm_response).await;
+        let recovery_codes = confirm_body["recovery_codes"]
+            .as_array()
+            .expect("recovery codes are returned")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("recovery code is a string")
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
         let verified_cookie = cookie_pair(&verified_cookie);
 
         sqlx::query(
@@ -3179,7 +3382,7 @@ mod tests {
         .await
         .expect("test can reset TOTP replay state");
 
-        (seed, verified_cookie)
+        (seed, verified_cookie, recovery_codes)
     }
 
     async fn assert_csrf_hash_persisted(

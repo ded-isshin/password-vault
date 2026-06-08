@@ -59,6 +59,9 @@ const elements = {
   loginMfaForm: document.querySelector("#loginMfaForm"),
   loginTotpCode: document.querySelector("#loginTotpCode"),
   verifyLoginTotpButton: document.querySelector("#verifyLoginTotpButton"),
+  loginRecoveryForm: document.querySelector("#loginRecoveryForm"),
+  loginRecoveryCode: document.querySelector("#loginRecoveryCode"),
+  verifyLoginRecoveryButton: document.querySelector("#verifyLoginRecoveryButton"),
   recoveryPanel: document.querySelector("#recoveryPanel"),
   recoveryCodes: document.querySelector("#recoveryCodes"),
   sessionPanel: document.querySelector("#sessionPanel"),
@@ -118,7 +121,10 @@ function setTotpBusy(isBusy) {
 function setLoginTotpBusy(isBusy) {
   elements.verifyLoginTotpButton.disabled = isBusy;
   elements.loginTotpCode.disabled = isBusy;
+  elements.verifyLoginRecoveryButton.disabled = isBusy;
+  elements.loginRecoveryCode.disabled = isBusy;
   elements.verifyLoginTotpButton.textContent = isBusy ? "Verifying..." : "Verify";
+  elements.verifyLoginRecoveryButton.textContent = isBusy ? "Working..." : "Recover";
 }
 
 function setVaultBusy(isBusy, label = "Save") {
@@ -191,8 +197,12 @@ function resetOutputs() {
   elements.loginMfaPanel.hidden = true;
   elements.loginTotpCode.value = "";
   elements.loginTotpCode.disabled = false;
+  elements.loginRecoveryCode.value = "";
+  elements.loginRecoveryCode.disabled = false;
   elements.verifyLoginTotpButton.disabled = false;
   elements.verifyLoginTotpButton.textContent = "Verify";
+  elements.verifyLoginRecoveryButton.disabled = false;
+  elements.verifyLoginRecoveryButton.textContent = "Recover";
   elements.recoveryPanel.hidden = true;
   elements.recoveryCodes.replaceChildren();
   elements.sessionPanel.hidden = true;
@@ -1764,6 +1774,51 @@ async function submitLoginTotp(event) {
   }
 }
 
+async function submitLoginRecoveryCode(event) {
+  event.preventDefault();
+  const recoveryCode = elements.loginRecoveryCode.value.trim();
+  let completed = false;
+  if (!state.loginMfaChallengeId) {
+    setStatus("Start sign in first.", "error");
+    return;
+  }
+  if (!recoveryCode) {
+    setStatus("Enter a recovery code.", "error");
+    return;
+  }
+
+  setLoginTotpBusy(true);
+  setStatus("Verifying recovery code...");
+
+  try {
+    beginStep("login-mfa");
+    const verification = await jsonFetch("/v1/auth/mfa/recovery-code/verify", {
+      method: "POST",
+      body: {
+        mfa_challenge_id: state.loginMfaChallengeId,
+        recovery_code: recoveryCode,
+      },
+    });
+    state.loginMfaChallengeId = "";
+    finishStep("login-mfa");
+    elements.loginTotpCode.value = "";
+    elements.loginRecoveryCode.value = "";
+    elements.loginMfaPanel.hidden = true;
+
+    await startTotpEnrollment(verification.session);
+    completed = true;
+    setStatus("Recovery code accepted. Enroll a new TOTP factor.", "success");
+  } catch (error) {
+    failActiveStep();
+    setStatus(error.message, "error");
+  } finally {
+    if (!completed) {
+      setLoginTotpBusy(false);
+    }
+    refreshStatus();
+  }
+}
+
 async function submitTotp(event) {
   event.preventDefault();
   const code = elements.totpCode.value.replace(/\s/g, "");
@@ -1825,6 +1880,7 @@ elements.secretSavedCheckbox.addEventListener("change", updateSecretSavedState);
 elements.continueEnrollmentButton.addEventListener("click", continueEnrollment);
 elements.totpForm.addEventListener("submit", submitTotp);
 elements.loginMfaForm.addEventListener("submit", submitLoginTotp);
+elements.loginRecoveryForm.addEventListener("submit", submitLoginRecoveryCode);
 elements.vaultItemForm.addEventListener("submit", saveVaultItem);
 elements.syncVaultButton.addEventListener("click", () => {
   syncVault().catch((error) => setStatus(error.message, "error"));

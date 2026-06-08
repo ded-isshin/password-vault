@@ -326,7 +326,7 @@ Response `200` when TOTP is required:
 {
   "result": "mfa_required",
   "mfa_challenge_id": "00000000-0000-4000-8000-000000000021",
-  "available_methods": ["totp"],
+  "available_methods": ["totp", "recovery_code"],
   "expires_at": "2026-06-07T00:05:00Z"
 }
 ```
@@ -418,11 +418,19 @@ Response `200`:
 ```
 
 Recovery-code verification consumes the code permanently and does not reveal or change vault
-decryption material.
+decryption material. It can only be used after the primary login proof succeeds and a pre-MFA
+challenge is issued. It is not a password reset, account-secret recovery, or vault recovery path.
 
-Implementation status: recovery codes are generated during TOTP enrollment, but
-`/v1/auth/mfa/recovery-code/verify` is not implemented yet. `login/finish` therefore advertises
-only `totp` in `available_methods` until recovery-code verification is implemented.
+Verification policy:
+
+- unknown, malformed, reused, rate-limited, or expired-challenge recovery-code attempts return the
+  same generic MFA failure;
+- failed recovery-code attempts count against the same pre-MFA challenge attempt limit as TOTP;
+- a valid unused recovery code is marked used before the recovery session is created;
+- the resulting `mfa_recovery` session cannot access vault APIs;
+- the user must enroll and confirm a new TOTP factor to return to `mfa_verified`.
+
+Implementation status: implemented for the MVP browser/API preview.
 
 ## TOTP Enrollment And Recovery Codes
 

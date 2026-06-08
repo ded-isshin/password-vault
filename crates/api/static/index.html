@@ -232,6 +232,20 @@
             Verify
           </button>
         </form>
+        <form id="loginRecoveryForm" class="totp-form">
+          <label for="loginRecoveryCode">Recovery code</label>
+          <input
+            id="loginRecoveryCode"
+            name="loginRecoveryCode"
+            type="text"
+            autocomplete="one-time-code"
+            spellcheck="false"
+            placeholder="pvrc-..."
+          />
+          <button id="verifyLoginRecoveryButton" class="secondary-action" type="submit">
+            Recover
+          </button>
+        </form>
       </section>
 
       <section id="recoveryPanel" class="output-band" hidden aria-labelledby="recoveryTitle">
