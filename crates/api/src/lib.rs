@@ -14,6 +14,7 @@ use sqlx::PgPool;
 
 pub mod auth;
 pub mod db;
+pub mod maintenance;
 pub(crate) mod telemetry;
 pub mod vault;
 
@@ -485,6 +486,7 @@ mod tests {
 
     use axum::{body::Body, body::to_bytes, http::Request};
     use serde_json::Value;
+    use time::{Duration, OffsetDateTime};
     use tokio::sync::{Mutex, MutexGuard};
     use tower::ServiceExt;
 
@@ -496,7 +498,7 @@ mod tests {
             totp::{self, TotpProfile},
             transcript::{self, LoginAuthMessage},
         },
-        db,
+        db, maintenance,
     };
 
     use super::{ApiConfig, app, build_app, metrics_app};
@@ -794,6 +796,151 @@ mod tests {
         let body = String::from_utf8(body.to_vec()).unwrap();
         assert!(body.contains("\"status\":\"not_ready\""));
         assert!(body.contains("\"status\":\"unavailable\""));
+    }
+
+    #[test]
+    fn synthetic_cleanup_options_reject_non_reserved_domains() {
+        assert!(
+            maintenance::SyntheticCleanupOptions::new("synthetic", "example.com", 24, true, 100)
+                .is_err()
+        );
+        assert!(
+            maintenance::SyntheticCleanupOptions::new(
+                "synthetic",
+                "loadtest.invalid",
+                24,
+                true,
+                100
+            )
+            .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn synthetic_cleanup_deletes_only_old_reserved_domain_accounts() {
+        let Some(database_url) = std::env::var("PV_TEST_DATABASE_URL").ok() else {
+            eprintln!(
+                "skipping synthetic cleanup database test because PV_TEST_DATABASE_URL is not set"
+            );
+            return;
+        };
+        let _guard = db_test_guard().await;
+
+        let pool = db::connect(&database_url)
+            .await
+            .expect("test database must be reachable");
+        db::run_migrations(&pool)
+            .await
+            .expect("migrations must apply cleanly");
+        reset_auth_route_test_data(&pool).await;
+
+        insert_test_account(
+            &pool,
+            "00000000-0000-0000-0000-000000000a01",
+            "synthetic-old-alpha@loadtest.invalid",
+        )
+        .await;
+        insert_test_account(
+            &pool,
+            "00000000-0000-0000-0000-000000000a02",
+            "synthetic-old-beta@loadtest.invalid",
+        )
+        .await;
+        insert_test_account(
+            &pool,
+            "00000000-0000-0000-0000-000000000a03",
+            "synthetic-fresh-alpha@loadtest.invalid",
+        )
+        .await;
+        insert_test_account(
+            &pool,
+            "00000000-0000-0000-0000-000000000a04",
+            "synthetic-old-alpha@example.invalid",
+        )
+        .await;
+        insert_test_account(
+            &pool,
+            "00000000-0000-0000-0000-000000000a05",
+            "real@example.com",
+        )
+        .await;
+        insert_test_account(
+            &pool,
+            "00000000-0000-0000-0000-000000000a06",
+            "synthetic-old-alpha@nested@loadtest.invalid",
+        )
+        .await;
+
+        let cutoff = OffsetDateTime::now_utc() - Duration::hours(1);
+        let old_created_at = cutoff - Duration::hours(1);
+        for login_handle in [
+            "synthetic-old-alpha@loadtest.invalid",
+            "synthetic-old-beta@loadtest.invalid",
+            "synthetic-old-alpha@example.invalid",
+            "real@example.com",
+            "synthetic-old-alpha@nested@loadtest.invalid",
+        ] {
+            set_account_created_at(&pool, login_handle, old_created_at).await;
+        }
+
+        let dry_run = maintenance::SyntheticCleanupOptions::for_test(
+            "synthetic",
+            "loadtest.invalid",
+            cutoff,
+            true,
+            1,
+        )
+        .expect("test cleanup config is valid");
+        let dry_run_report = maintenance::cleanup_synthetic_accounts(&pool, &dry_run)
+            .await
+            .expect("dry-run cleanup succeeds");
+        assert_eq!(dry_run_report.matched, 2);
+        assert_eq!(dry_run_report.deleted, 0);
+        assert_eq!(account_count(&pool).await, 6);
+
+        let first_delete = maintenance::SyntheticCleanupOptions::for_test(
+            "synthetic",
+            "loadtest.invalid",
+            cutoff,
+            false,
+            1,
+        )
+        .expect("test cleanup config is valid");
+        let first_report = maintenance::cleanup_synthetic_accounts(&pool, &first_delete)
+            .await
+            .expect("first cleanup succeeds");
+        assert_eq!(first_report.matched, 2);
+        assert_eq!(first_report.deleted, 1);
+        assert_eq!(account_count(&pool).await, 5);
+        assert!(
+            account_exists(&pool, "synthetic-old-alpha@loadtest.invalid").await
+                ^ account_exists(&pool, "synthetic-old-beta@loadtest.invalid").await
+        );
+        assert!(account_exists(&pool, "synthetic-fresh-alpha@loadtest.invalid").await);
+        assert!(account_exists(&pool, "synthetic-old-alpha@example.invalid").await);
+        assert!(account_exists(&pool, "real@example.com").await);
+        assert!(account_exists(&pool, "synthetic-old-alpha@nested@loadtest.invalid").await);
+
+        let final_delete = maintenance::SyntheticCleanupOptions::for_test(
+            "synthetic",
+            "loadtest.invalid",
+            cutoff,
+            false,
+            100,
+        )
+        .expect("test cleanup config is valid");
+        let final_report = maintenance::cleanup_synthetic_accounts(&pool, &final_delete)
+            .await
+            .expect("final cleanup succeeds");
+        assert_eq!(final_report.matched, 1);
+        assert_eq!(final_report.deleted, 1);
+        assert_eq!(account_count(&pool).await, 4);
+        assert!(!account_exists(&pool, "synthetic-old-alpha@loadtest.invalid").await);
+        assert!(!account_exists(&pool, "synthetic-old-beta@loadtest.invalid").await);
+        assert!(account_exists(&pool, "synthetic-fresh-alpha@loadtest.invalid").await);
+        assert!(account_exists(&pool, "synthetic-old-alpha@example.invalid").await);
+        assert!(account_exists(&pool, "real@example.com").await);
+        assert!(account_exists(&pool, "synthetic-old-alpha@nested@loadtest.invalid").await);
     }
 
     #[tokio::test]
@@ -3571,6 +3718,41 @@ mod tests {
             .fetch_one(pool)
             .await
             .expect("account count query succeeds")
+    }
+
+    async fn account_exists(pool: &sqlx::PgPool, login_handle: &str) -> bool {
+        sqlx::query_scalar(
+            "
+            SELECT EXISTS (
+                SELECT 1
+                FROM accounts
+                WHERE login_handle_normalized = $1
+            )
+            ",
+        )
+        .bind(login_handle)
+        .fetch_one(pool)
+        .await
+        .expect("account exists query succeeds")
+    }
+
+    async fn set_account_created_at(
+        pool: &sqlx::PgPool,
+        login_handle: &str,
+        created_at: OffsetDateTime,
+    ) {
+        sqlx::query(
+            "
+            UPDATE accounts
+            SET created_at = $2
+            WHERE login_handle_normalized = $1
+            ",
+        )
+        .bind(login_handle)
+        .bind(created_at)
+        .execute(pool)
+        .await
+        .expect("account created_at update succeeds");
     }
 
     async fn session_count(pool: &sqlx::PgPool) -> i64 {

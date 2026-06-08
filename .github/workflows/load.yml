@@ -62,6 +62,10 @@ jobs:
           docker run --rm --network host \
             -e PV_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/password_vault_test \
             password-vault-api:load-smoke migrate
+          docker run --rm --network host \
+            -e PV_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/password_vault_test \
+            password-vault-api:load-smoke cleanup-synthetic --dry-run \
+            | grep 'synthetic_cleanup dry_run=true'
           docker run -d --rm --name password-vault-api-load --network host \
             -e PV_BIND_ADDR=127.0.0.1:8080 \
             -e PV_METRICS_BIND_ADDR=127.0.0.1:9090 \

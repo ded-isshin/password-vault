@@ -84,6 +84,10 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
   It is a CI/local proof and can be run manually against the live edge route with explicit
   `SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL=true`.
+- The current branch includes a `cleanup-synthetic` maintenance command for reserved-domain
+  synthetic accounts. It is dry-run by default, requires `--confirm` for deletion, only accepts
+  `.invalid` domains, and emits aggregate cleanup counts. It is not a replacement for a scheduled
+  external probe with first-class pass/fail metrics.
 - The build info panel returns `password_vault_build_info` with
   `revision="69b576558c58333e0498025364dc1e7e3aec000e"` in the current live preview check.
   CI and published images should set the `revision` label from the GitHub commit SHA through the
@@ -121,6 +125,8 @@ Planned:
 - Database HA, backup, restore, and PostgreSQL health panels.
 - External synthetic browser/API probes from outside the Kubernetes/LXD network.
 - Live dashboard panels for synthetic pass/fail once an external probe is approved.
+- Dashboard-visible synthetic cleanup and external probe outcome metrics. The maintenance command
+  currently emits stdout/log aggregate counts only.
 
 ## SLO And Error Budget Principles
 
