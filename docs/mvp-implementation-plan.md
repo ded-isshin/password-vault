@@ -2,10 +2,13 @@
 
 Status: draft. Created for milestone `v0.2-working-mvp`.
 
-Current implementation status, 2026-06-07:
+Current implementation status, 2026-06-08:
 
-- Deployed browser preview, health/readiness/metrics, PostgreSQL, Helm/GitOps, and Grafana
+- Deployed browser preview, health/readiness/metrics, preview PostgreSQL, Helm/GitOps, and Grafana
   dashboard exist.
+- The current GitOps preview is `Synced/Healthy` in Argo CD. API pods are three ready replicas,
+  spread one per worker after the production rollout strategy was changed to
+  `maxUnavailable: 1` and `maxSurge: 0` for strict topology spreading.
 - `/v1/auth/register/start`, `/v1/auth/login/start`, `/v1/auth/register/finish`,
   `/v1/session`, `/v1/csrf`, `/v1/auth/logout`, `/v1/mfa/totp/enroll/start`, and
   `/v1/mfa/totp/enroll/confirm` are implemented.
@@ -24,6 +27,11 @@ Current implementation status, 2026-06-07:
   unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
+- Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
+  rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
+- CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
+  `Backup`, or `ScheduledBackup` resources are present yet. The current preview database is still
+  a single PostgreSQL `StatefulSet`, so it remains a blocker before real password data.
 
 ## Stabilization-First Queue
 

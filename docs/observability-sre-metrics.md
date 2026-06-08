@@ -18,7 +18,7 @@ paths as metric labels.
 
 ## Current Deployed State
 
-Implemented in the current GitOps preview:
+Implemented and verified in the current GitOps preview as of 2026-06-08:
 
 - Password Vault API is scraped with job label `password-vault-api`.
 - The infrastructure repository provisions a basic Grafana dashboard named
@@ -26,7 +26,18 @@ Implemented in the current GitOps preview:
 - The dashboard covers scrape target health, request rate, 5xx ratio, p95 request duration, pending
   requests, and unmatched 404 rate.
 - The current dashboard queries have been verified against the live VictoriaMetrics datasource after
-  synthetic traffic.
+  edge health/readiness traffic:
+  - `sum(up{job="password-vault-api"}) or vector(0)` returned `3`.
+  - 5xx ratio returned `0`.
+  - request-rate data returned for `/healthz` and `/readyz`.
+  - p95 request duration returned roughly millisecond-level data for `/healthz` and `/readyz`.
+  - pending requests returned `0`.
+  - unmatched 404 rate returned `0`.
+- Argo CD reports the Password Vault application as `Synced` and `Healthy`.
+- The API Deployment has three ready replicas and is pinned to an immutable GHCR image digest.
+- Strict node spreading is enabled. Production rollout values use `maxUnavailable: 1` and
+  `maxSurge: 0` to avoid a surge-pod scheduling deadlock with
+  `whenUnsatisfiable: DoNotSchedule`.
 
 Important label note:
 
