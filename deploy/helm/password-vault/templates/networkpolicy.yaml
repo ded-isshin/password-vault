@@ -73,6 +73,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
+      # Keep this selector aligned with the infrastructure CNPG ingress allow-list.
       {{- include "password-vault.baseSelectorLabels" . | nindent 6 }}
       component: synthetic-cleanup
   policyTypes:
