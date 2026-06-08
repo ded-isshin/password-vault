@@ -207,7 +207,8 @@ Deployment is planned through GitOps. Direct cluster mutation from this reposito
 - Backend: Rust, Axum, Tokio, SQLx.
 - Frontend: TypeScript, React, Vite.
 - Browser crypto: WebCrypto where possible.
-- Browser KDF: Argon2id through reviewed WASM as the target; PBKDF2 fallback only if documented.
+- Browser KDF: `pbkdf2-sha256-browser-v1` through WebCrypto for the current browser MVP; Argon2id
+  through reviewed WASM remains the target, not an unreviewed runtime fallback.
 - Primary database: PostgreSQL.
 - Kubernetes database operator: CloudNativePG.
 - PostgreSQL replication: quorum synchronous replication is the target for real user data, with

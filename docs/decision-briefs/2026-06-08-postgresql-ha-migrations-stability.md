@@ -17,13 +17,14 @@ Inputs inspected:
 - `migrations/*.sql`
 - `deploy/helm/password-vault`
 
-Runtime assumption for this decision:
+Runtime state verified after the 2026-06-08 cutover:
 
 - CloudNativePG CRDs and the shared CloudNativePG operator are present in the Kubernetes cluster.
-- A product-owned `password-vault-cnpg` CloudNativePG `Cluster` exists as a pre-cutover validation
-  target with three PostgreSQL instances.
-- The current live `password-vault` API database is still the single PostgreSQL `StatefulSet`; the
-  API has not been cut over to `password-vault-cnpg`.
+- A product-owned `password-vault-cnpg` CloudNativePG `Cluster` exists with three PostgreSQL 18.4
+  instances spread across the three worker nodes.
+- The live `password-vault` API is cut over to the `password-vault-cnpg` application Secret.
+- The legacy single PostgreSQL `StatefulSet` may remain briefly as rollback debt, but it is no
+  longer the active API database.
 - There are currently no CloudNativePG `Backup` or `ScheduledBackup` resources for `password-vault`.
 - The current `hiringtrace` PostgreSQL deployment, if present, is a separate product runtime and
   must not be reused as a `password-vault` database, schema, credential source, PVC, or backup
@@ -102,14 +103,14 @@ disaster recovery.
 
 ## Path From Preview StatefulSet To CloudNativePG
 
-The current single PostgreSQL `StatefulSet` should be treated as a preview data source, not as the
-final database topology. There is no safe "turn the StatefulSet into a CloudNativePG cluster"
-shortcut. The migration should be staged and reversible.
+The previous single PostgreSQL `StatefulSet` was a preview data source, not the final database
+topology. There is no safe "turn the StatefulSet into a CloudNativePG cluster" shortcut. The staged
+cutover path below remains the audit trail and template for future database moves.
 
 Recommended path:
 
 1. Confirm the shared CloudNativePG operator through infrastructure GitOps.
-2. Keep the product-owned `password-vault-cnpg` CloudNativePG pre-cutover cluster healthy with three
+2. Keep the product-owned `password-vault-cnpg` CloudNativePG cluster healthy with three
    instances, separate PVCs, product-specific Services, product-specific Secrets, no public
    PostgreSQL exposure, monitoring, and NetworkPolicy.
 3. Select and document the backup target, credentials path, retention, and restore-drill namespace.
@@ -124,11 +125,12 @@ Recommended path:
    roll API pods with `maxUnavailable: 0`.
 9. Validate health, readiness, synthetic user journeys, backup status, replication state,
     failover behavior, and dashboards.
-10. Keep the old preview `StatefulSet` quarantined for a short rollback window if data was migrated;
-    remove it only after the cutover and restore evidence are recorded.
+10. Keep the old preview `StatefulSet` quarantined for a short rollback window; remove it only after
+    the cutover and restore evidence are recorded.
 
-The cutover must be blocked if the backup target, WAL archiving, restore drill, or runtime Secret
-handling is incomplete.
+The API cutover is complete for the current preview, but real-secret use remains blocked until the
+backup target, successful base backup, WAL archive health, restore drill, failover drill, and
+runtime Secret handling are proven.
 
 ## No Conflict With HiringTrace Or Other Products
 
@@ -348,19 +350,20 @@ changes, even on stable PostgreSQL.
 
 Blocking before real user secrets:
 
-- replace the single PostgreSQL `StatefulSet` with a product-owned CloudNativePG `Cluster`;
-- spread three PostgreSQL instances across workers where capacity allows;
-- configure synchronous replication with one required synchronous standby;
-- configure continuous WAL archiving and scheduled base backups;
-- run and document a restore drill into a separate namespace or cluster object;
+- keep the active product-owned CloudNativePG `Cluster` healthy with three PostgreSQL instances
+  spread across workers;
+- keep synchronous replication with one required synchronous standby verified through
+  `pg_stat_replication`;
+- configure scheduled base backups and keep WAL archive health observable;
+- run and document restore and failover drills into non-live targets where appropriate;
 - define alerts for replication health, backup failures, WAL archive failures, disk pressure,
   migration-job failures, and database unavailability;
 - keep startup migrations disabled for real-user API pods.
 
 Non-blocking for the current preview:
 
-- keep the single PostgreSQL `StatefulSet` only if the environment is explicitly treated as
-  bootstrap/demo and no real secrets are stored;
+- keep the legacy single PostgreSQL `StatefulSet` only as a short rollback artifact while the
+  environment is explicitly treated as preview/no-real-secrets;
 - use asynchronous or disposable database modes for CI and load testing;
 - defer destructive contract migrations until there is real production data and a mature rollout
   process;

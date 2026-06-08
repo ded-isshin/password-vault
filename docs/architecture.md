@@ -7,8 +7,9 @@ Status: MVP architecture draft.
 The repository contains a deployed browser/API MVP preview with registration, TOTP enrollment,
 login, browser-side vault unlock, encrypted item create/update/delete, delta sync, health,
 readiness, metrics, Helm, GHCR image publishing, GitOps deployment, and a basic Grafana dashboard.
-It is not approved for real user secrets yet because PostgreSQL HA, backup/restore/failover drills,
-SLO alerts, full synthetic journey checks, and stricter network/metrics controls are still missing.
+It is not approved for real user secrets yet because PostgreSQL backup/WAL/restore/failover drills,
+SLO alert delivery, scheduled synthetic journey checks, and stricter network/metrics controls are
+still missing.
 
 ## High-Level Architecture
 
@@ -108,9 +109,12 @@ verify TOTP during login. User vault item decryption is not.
 
 ## PostgreSQL HA Direction
 
-Production-like deployment should use CloudNativePG with three PostgreSQL instances distributed
-across worker nodes where possible. For real user data, the target is quorum synchronous replication
-with one synchronous standby.
+The current preview deployment uses a product-owned CloudNativePG cluster with three PostgreSQL
+18.4 instances distributed across the three worker nodes. The API is cut over to the CNPG
+application Secret and the legacy single-instance PostgreSQL StatefulSet is retained only as a short
+rollback artifact.
+
+For real user data, the target remains quorum synchronous replication with one synchronous standby.
 
 - `required` favors acknowledged-write durability and can pause writes if the required standby set
   is unavailable.
@@ -128,7 +132,9 @@ failing over to a replicated PostgreSQL instance on another worker, not by remou
 worker's volume elsewhere.
 
 Backups are mandatory before real user secrets. The deployment design should use WAL archiving and
-physical base backups to object storage, plus periodic restore drills.
+physical base backups to object storage, plus periodic restore drills. The current preview has a
+healthy CNPG cluster, but backup availability, restore drills, and failover drills are still red
+gates.
 
 ## Cryptography Boundaries
 

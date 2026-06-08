@@ -1,6 +1,9 @@
 # Agent Report: Grafana, Argo CD, PostgreSQL, SRE, And Waste Review
 
-Status: evidence report. Date: 2026-06-08.
+Status: historical evidence report. Date: 2026-06-08.
+
+Supersession note: this report recorded the state before the later 2026-06-08 CloudNativePG API
+cutover. Use the current canonical docs and later session reports for present runtime state.
 
 ## Goal
 
