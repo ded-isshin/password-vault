@@ -33,7 +33,13 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   - p95 request duration returned roughly millisecond-level data for `/healthz` and `/readyz`.
   - pending requests returned `0`.
   - unmatched 404 rate returned `0`.
-- Argo CD reports the Password Vault application as `Synced` and `Healthy`.
+- The Grafana browser route is reachable through the mini-PC LAN-facing edge port. The Kubernetes
+  `LoadBalancer` address is not the default client URL for a MacBook or other LAN-only browser.
+- Argo CD is reachable through the mini-PC LAN-facing edge stream port and reports the product
+  application as `Synced` and `Healthy`.
+- Grafana image rendering is not installed, so dashboard PNG rendering is not available from the
+  Grafana MCP path. Dashboard verification must currently use live browser access plus datasource
+  query checks rather than rendered-image evidence.
 - The API Deployment has three ready replicas and is pinned to an immutable GHCR image digest.
 - Strict node spreading is enabled. Production rollout values use `maxUnavailable: 1` and
   `maxSurge: 0` to avoid a surge-pod scheduling deadlock with
@@ -218,6 +224,8 @@ product-specific alerts and journey metrics are not complete.
 
 - The current infrastructure dashboard is useful but still basic; it is not yet a full SLO
   dashboard.
+- Grafana image rendering is unavailable, so automated screenshot/PDF-style evidence needs either a
+  renderer deployment or a separate browser automation path.
 - No SLO, error-budget, or burn-rate panels are implemented.
 - No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.

@@ -37,16 +37,51 @@ down. Treat that as safer than making unavailable pods serve traffic.
 
 Production app pods should not run migrations automatically by default.
 
-The current public preview used startup migrations as a bootstrap shortcut while no real user data
-was accepted. Treat that as an exception, not the target operating model. Before real-user use,
-production values must keep `PV_RUN_MIGRATIONS_ON_STARTUP=false` and schema changes must run through
-an explicit migration job or another reviewed operator step.
+Production values must keep `PV_RUN_MIGRATIONS_ON_STARTUP=false`. Schema changes should run through
+the chart-controlled migration `Job` or another reviewed operator step.
+
+The product image supports:
+
+```bash
+password-vault-api migrate
+```
+
+The command requires `PV_DATABASE_URL`, applies bundled SQLx migrations, and exits. It does not
+start the HTTP server and does not require the TOTP or synthetic metadata keys.
+
+For Argo CD, enable the chart migration job with:
+
+```yaml
+migrations:
+  job:
+    enabled: true
+    argocdHook:
+      enabled: true
+```
+
+The chart intentionally rejects `migrations.job.enabled=true` without
+`migrations.job.argocdHook.enabled=true`, because a normal fixed-name Kubernetes Job can fail on
+later GitOps/Helm applies when its immutable pod template changes. Use a separate reviewed operator
+step for non-Argo migration execution.
+
+The Argo `PreSync` hook runs before the API Deployment rollout. If the migration job fails, Argo
+stops the sync and does not proceed with the deployment. The default hook delete policy is
+`BeforeHookCreation`, which leaves the completed job visible as evidence until the next sync
+recreates it.
+
+Leave `ttlSecondsAfterFinished` unset for Argo-managed migration hooks unless there is a separate
+evidence-retention decision. Kubernetes TTL cleanup can remove completed Jobs before the next sync.
 
 Stable PostgreSQL versions do not remove application schema migrations. PostgreSQL stability means
 the engine behavior is supported and predictable; it does not create password-vault tables,
 constraints, indexes, auth fields, MFA state, or encrypted revision metadata for us. The goal is not
 "no migrations." The goal is few, deliberate, backward-compatible migrations with clear rollout and
 rollback behavior.
+
+PostgreSQL schema changes are still operational changes. Some `ALTER TABLE` forms take strong locks,
+scan tables, rebuild indexes, rewrite table storage, or temporarily require extra disk. Review each
+real-user migration for expected lock behavior, runtime, and rollback compatibility before enabling
+the GitOps migration job for that release.
 
 Use expand/contract migrations:
 
@@ -83,6 +118,16 @@ Verify metrics through Grafana/VictoriaMetrics:
 up{job="password-vault-api"}
 sum(rate(axum_http_requests_total{job="password-vault-api"}[5m]))
 ```
+
+Browser-access check for the current home platform:
+
+```text
+Password Vault: https://<mini-pc-lan-ip>:11443/
+Grafana:        https://<mini-pc-lan-ip>:3000/
+Argo CD:        https://<mini-pc-lan-ip>:9443/
+```
+
+Do not use Kubernetes/LXD `LoadBalancer` addresses as the default browser URLs for LAN clients.
 
 ## Rollback
 

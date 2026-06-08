@@ -32,6 +32,10 @@ Current implementation status, 2026-06-08:
 - CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
   `Backup`, or `ScheduledBackup` resources are present yet. The current preview database is still
   a single PostgreSQL `StatefulSet`, so it remains a blocker before real password data.
+- A controlled migration runner is implemented locally in the current product branch: the API image
+  supports a `password-vault-api migrate` command, and Helm can emit an opt-in Kubernetes migration
+  `Job`. Production values still need to enable and validate the job through GitOps before
+  schema-changing real-user releases.
 
 ## Stabilization-First Queue
 
@@ -42,8 +46,8 @@ MVP dependable:
    login-time TOTP APIs. Vault CRUD is not meaningful until a user can return after registration.
 2. Add browser vault unlock plus encrypted item create/read/update/delete with revision conflict
    checks.
-3. Keep production startup migrations off and introduce a controlled migration job/runbook before
-   schema-changing real-user releases.
+3. Keep production startup migrations off and enable the controlled migration job/runbook through
+   GitOps before schema-changing real-user releases.
 4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.

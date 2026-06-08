@@ -1,4 +1,4 @@
-use password_vault_api::db;
+use password_vault_api::{db, run_database_migrations};
 
 const EXPECTED_TABLES: &[&str] = &[
     "accounts",
@@ -67,7 +67,7 @@ async fn migrations_apply_and_create_expected_schema() {
         .await
         .expect("test database must be reachable");
 
-    db::run_migrations(&pool)
+    run_database_migrations(&database_url)
         .await
         .expect("migrations must apply cleanly");
     reset_test_data(&pool).await;
