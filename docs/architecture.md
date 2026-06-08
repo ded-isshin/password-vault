@@ -195,4 +195,5 @@ Current artifact direction:
 - [ADR 0002: Backend Stack Direction](adr/0002-backend-stack-rust.md)
 - [ADR 0003: Auth And Crypto Direction](adr/0003-auth-and-crypto-direction.md)
 - [ADR 0004: Kubernetes Data Platform Direction](adr/0004-kubernetes-data-platform-direction.md)
+- [ADR 0006: Browser Access Through Edge Routing](adr/0006-browser-access-edge-routing.md)
 - [Auth login protocol options](research/auth-login-protocol-options.md)

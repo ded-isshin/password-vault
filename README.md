@@ -100,6 +100,7 @@ Use placeholders such as `<redacted-secret>`, `<redacted-domain>`, and
 - [docs/adr/0003-auth-and-crypto-direction.md](docs/adr/0003-auth-and-crypto-direction.md)
 - [docs/adr/0004-kubernetes-data-platform-direction.md](docs/adr/0004-kubernetes-data-platform-direction.md)
 - [docs/adr/0005-mfa-session-and-csrf-policy.md](docs/adr/0005-mfa-session-and-csrf-policy.md)
+- [docs/adr/0006-browser-access-edge-routing.md](docs/adr/0006-browser-access-edge-routing.md)
 - [docs/research/initial-stack-analysis.md](docs/research/initial-stack-analysis.md)
 - [docs/research/auth-crypto-v1-analysis.md](docs/research/auth-crypto-v1-analysis.md)
 - [docs/research/totp-seed-custody-mfa-hardening-2026-06-07.md](docs/research/totp-seed-custody-mfa-hardening-2026-06-07.md)
