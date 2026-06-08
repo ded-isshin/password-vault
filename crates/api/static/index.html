@@ -18,7 +18,7 @@
           </div>
           <div>
             <p>Password Vault</p>
-            <h1>Account setup</h1>
+            <h1>Vault access</h1>
           </div>
         </div>
 
@@ -29,10 +29,19 @@
       </header>
 
       <div class="workspace">
-        <section class="panel register-panel" aria-labelledby="registrationTitle">
+        <section class="panel auth-panel" aria-labelledby="authPanelTitle">
           <div class="panel-heading">
-            <p class="eyebrow">Registration</p>
-            <h2 id="registrationTitle">Create vault</h2>
+            <p class="eyebrow">Account</p>
+            <h2 id="authPanelTitle">Open Password Vault</h2>
+          </div>
+
+          <div class="mode-switch" role="tablist" aria-label="Account flow">
+            <button id="showRegisterButton" type="button" role="tab" aria-selected="true">
+              Create
+            </button>
+            <button id="showLoginButton" type="button" role="tab" aria-selected="false">
+              Sign in
+            </button>
           </div>
 
           <form id="registrationForm" class="stack">
@@ -75,6 +84,44 @@
               Ready.
             </p>
           </form>
+
+          <form id="loginForm" class="stack" hidden>
+            <label for="returnLoginHandle">Login handle</label>
+            <input
+              id="returnLoginHandle"
+              name="returnLoginHandle"
+              type="text"
+              autocomplete="username"
+              spellcheck="false"
+              placeholder="you@example.com"
+              required
+            />
+
+            <label for="loginMasterPassword">Master password</label>
+            <input
+              id="loginMasterPassword"
+              name="loginMasterPassword"
+              type="password"
+              autocomplete="current-password"
+              minlength="12"
+              required
+            />
+
+            <label for="accountSecretInput">Account secret key</label>
+            <input
+              id="accountSecretInput"
+              name="accountSecretInput"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="PVSK1-..."
+              required
+            />
+
+            <button id="loginButton" class="primary-action" type="submit">
+              Continue
+            </button>
+          </form>
         </section>
 
         <section class="panel flow-panel" aria-labelledby="flowTitle">
@@ -89,6 +136,9 @@
             <li data-step="register-finish">Register finish</li>
             <li data-step="totp-start">TOTP start</li>
             <li data-step="totp-confirm">TOTP confirm</li>
+            <li data-step="login-start">Login start</li>
+            <li data-step="login-proof">Login proof</li>
+            <li data-step="login-mfa">Login MFA</li>
             <li data-step="session">Session</li>
           </ol>
         </section>
@@ -152,6 +202,30 @@
             required
           />
           <button id="confirmTotpButton" class="primary-action secondary-size" type="submit">
+            Verify
+          </button>
+        </form>
+      </section>
+
+      <section id="loginMfaPanel" class="output-band compact" hidden aria-labelledby="loginMfaTitle">
+        <div class="section-heading">
+          <p class="eyebrow">MFA</p>
+          <h2 id="loginMfaTitle">Verify sign in</h2>
+        </div>
+        <form id="loginMfaForm" class="totp-form">
+          <label for="loginTotpCode">TOTP code</label>
+          <input
+            id="loginTotpCode"
+            name="loginTotpCode"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            placeholder="123456"
+            required
+          />
+          <button id="verifyLoginTotpButton" class="primary-action secondary-size" type="submit">
             Verify
           </button>
         </form>
