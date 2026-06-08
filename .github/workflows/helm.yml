@@ -2,9 +2,15 @@ name: helm
 
 on:
   pull_request:
+    paths:
+      - .github/workflows/helm.yml
+      - deploy/helm/**
   push:
     branches:
       - main
+    paths:
+      - .github/workflows/helm.yml
+      - deploy/helm/**
 
 permissions:
   contents: read
