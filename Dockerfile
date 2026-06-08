@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.18
-
 ARG RUST_VERSION=1.96.0
 ARG BUILD_REVISION=unknown
 

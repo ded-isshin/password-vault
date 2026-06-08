@@ -94,6 +94,15 @@ The live synthetic journey used reserved `.invalid` synthetic data and did not p
 keys, TOTP seeds, TOTP codes, recovery codes, cookies, plaintext item passwords, account IDs, vault
 IDs, item IDs, or device IDs.
 
+## Container CI Follow-Up
+
+The PR smoke build initially failed while resolving `docker.io/docker/dockerfile:1.18` with a Docker
+Hub gateway timeout before product code was built. The Dockerfile does not use features requiring a
+custom Dockerfile frontend, so the optional `# syntax=docker/dockerfile:1.18` directive was removed.
+This keeps product image builds on GitHub Actions/GHCR while reducing unnecessary Docker Hub
+dependency during the build setup path. Docker Hub remains acceptable for reviewed, trusted,
+versioned base/test images; it should not be the product release registry.
+
 ## Observability
 
 The observability plan is aligned with Google SRE guidance:
@@ -203,6 +212,8 @@ Product repository:
 - `docs/decision-briefs/2026-06-08-postgresql-ha-migrations-stability.md`
 - `docs/mvp-implementation-plan.md`
 - `docs/agent-reports/2026-06-08-grafana-argo-cnpg-sre-followup.md`
+- `Dockerfile`
+- `docs/research/container-ci-observability-load-2026-06-07.md`
 
 Infrastructure worktree:
 
@@ -230,6 +241,9 @@ BASE_URL=https://<mini-pc-lan-ip>:11443 SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL=true 
 git diff --check
 ```
 
+The Dockerfile frontend dependency was removed after PR smoke hit Docker Hub 504 while fetching the
+optional `docker/dockerfile` frontend image.
+
 Grafana MCP was used for read-only dashboard and VictoriaMetrics datasource checks.
 
 ## Sources Consulted
@@ -242,6 +256,8 @@ Grafana MCP was used for read-only dashboard and VictoriaMetrics datasource chec
   <https://cloudnative-pg.io/docs/1.25/replication/>
 - Barman Cloud Plugin documentation:
   <https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/>
+- Dockerfile reference:
+  <https://docs.docker.com/reference/dockerfile/>
 
 ## Risks
 

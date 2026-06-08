@@ -42,6 +42,10 @@ deployment.
 - Docker-hosted GitHub runner images already include current Docker Buildx/BuildKit. The separate
   Docker setup-buildx action creates a containerized builder by default, which can introduce an extra
   Docker Hub pull for the BuildKit daemon image before the product image build even starts.
+- Docker's `# syntax=...` parser directive is optional. If it is set to `docker/dockerfile:*`,
+  BuildKit pulls a Dockerfile frontend image before the build. The current product Dockerfile uses
+  only stable baseline Dockerfile instructions, so it intentionally relies on the bundled BuildKit
+  frontend instead of requiring an extra `docker/dockerfile` pull.
 - GitHub's image publishing docs include GHCR publishing and artifact attestation examples.
 - BuildKit cache can use GitHub Actions cache through `docker/build-push-action`.
 - Docker Build provenance can expose build args, so build args must not carry secrets.
@@ -66,6 +70,8 @@ deployment.
   requires a builder driver that supports attestations; the default Docker driver does not.
 - Prefer the default GitHub-hosted runner Buildx/BuildKit path for single-platform MVP builds instead
   of a separate containerized BuildKit builder. This reduces Docker Hub dependency during CI setup.
+- Do not add a Dockerfile syntax directive unless a reviewed Dockerfile feature requires a newer
+  frontend than the GitHub-hosted runner already provides.
 - Use k6 as the first load-test tool. Locust and wrk/Vegeta are deferred.
 - Add low-cardinality Prometheus HTTP metrics through `/metrics`; do not label metrics with login
   handles, user IDs, device IDs, item IDs, or secret-bearing values.
