@@ -38,8 +38,8 @@ Implement the session and CSRF foundation needed before TOTP enrollment and auth
 ## Commands Run
 
 ```bash
-git -C /home/roman/ai-workspace/products/password-vault status --short --branch
-git -C /home/roman/ai-workspace/worktrees/infrastructure-home-password-vault-observability status --short --branch
+git -C <redacted-path>/products/password-vault status --short --branch
+git -C <redacted-path>/worktrees/infrastructure-home-password-vault-observability status --short --branch
 KUBECONFIG=<redacted-path> kubectl -n argocd get app prod-root password-vault -o custom-columns=NAME:.metadata.name,SYNC:.status.sync.status,HEALTH:.status.health.status,REV:.status.sync.revision --no-headers
 docker run --rm -v "$PWD:/workspace" -w /workspace rust:1.96-bookworm bash -c 'set -euo pipefail; export PATH=/usr/local/cargo/bin:$PATH; cargo fmt --all; cargo test --locked --workspace'
 docker run -d --rm --name "pv-test-postgres-<pid>" -e POSTGRES_USER=pv -e POSTGRES_PASSWORD=pv -e POSTGRES_DB=pv -p 127.0.0.1::5432 postgres:18-alpine

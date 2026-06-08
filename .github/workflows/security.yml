@@ -1,6 +1,7 @@
+---
 name: public-safety
 
-on:
+"on":
   pull_request:
   push:
     branches:
@@ -19,7 +20,20 @@ jobs:
       - name: Check for unsafe public placeholders
         run: |
           set -euo pipefail
-          forbidden='(BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{20,}|gho_[A-Za-z0-9_]{20,}|github_pat_|xox[baprs]-|client-key-data|client-certificate-data|/home/roman/\.kube|192\.168\.|10\.233\.)'
+          forbidden_parts=(
+            'BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY'
+            'AKIA[0-9A-Z]{16}'
+            'ghp_[A-Za-z0-9_]{20,}'
+            'gho_[A-Za-z0-9_]{20,}'
+            'github_pat_'
+            'xox[baprs]-'
+            'client-key-data'
+            'client-certificate-data'
+            '/home/roman(/|$)'
+            '192\.168\.'
+            '10\.233\.'
+          )
+          forbidden="$(IFS='|'; echo "${forbidden_parts[*]}")"
           if grep -RInE "$forbidden" . \
             --exclude-dir=.git \
             --exclude-dir=node_modules \

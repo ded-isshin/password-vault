@@ -114,10 +114,10 @@ The Google SRE Golden Signals apply, but they need product-specific interpretati
 
 | Signal | Technical metric | Product interpretation |
 | --- | --- | --- |
-| Latency | HTTP p95/p99, auth latency, DB query/wait latency, auth hash duration | Users must be able to log in, pass MFA, unlock, save, and sync without unacceptable delay. |
+| Latency | HTTP p95/p99, auth latency, DB query/wait latency, auth/MFA step duration | Users must be able to log in, pass MFA, unlock, save, and sync without unacceptable delay. |
 | Traffic | RPS, registration/login/MFA/vault/sync operation rates | Demand is not one number; first-run, returning access, and vault sync are separate journeys. |
 | Errors | 5xx, policy errors, auth failure class, vault conflicts, DB errors | 4xx can be expected or abusive; page on user-visible failure, saturation, or security thresholds. |
-| Saturation | pending requests, DB pool pressure, auth hash active work, pod CPU/memory, DB disk/replica lag | Password-manager saturation includes expensive auth work and write durability, not only HTTP queue depth. |
+| Saturation | pending requests, DB pool pressure, auth challenge pressure, pod CPU/memory, DB disk/replica lag | Password-manager saturation includes auth challenge pressure and write durability, not only HTTP queue depth. |
 
 The first business/product SLI should be protected activation:
 
@@ -159,7 +159,7 @@ The right target is not "no migrations." The target is:
    loaded, but useful delivery is not proven.
 3. Product-owned CloudNativePG cluster plus WAL archiving, scheduled backups, restore drill, and
    failover drill.
-4. Database pool/query/error metrics and auth hash saturation metrics.
+4. Database pool/query/error metrics and auth/MFA step duration metrics.
 5. Security aggregate metrics for CSRF failures, rate-limit hits, recovery-code attempts, and TOTP
    failures.
 6. Namespace-level policy hardening after the edge route can be represented by selector-based

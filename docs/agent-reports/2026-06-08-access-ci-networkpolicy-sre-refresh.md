@@ -93,7 +93,7 @@ Google SRE's Four Golden Signals still map cleanly to this product:
 - Traffic: RPS plus product operation counters such as registration, login, MFA, item writes, and
   sync pulls.
 - Errors: 5xx, policy errors, failed synthetic journeys, and product-level failure ratios.
-- Saturation: pending requests, DB pool pressure, auth hash active work, CPU/memory, replication lag,
+- Saturation: pending requests, DB pool pressure, auth challenge pressure, CPU/memory, replication lag,
   disk pressure, backup age, and WAL/archive health.
 
 Product/business metrics should not be vanity metrics. The MVP dashboard should focus on:

@@ -80,10 +80,10 @@ regressions should usually create tickets unless they imply data loss, lockout, 
 
 | Golden signal | Password Vault interpretation | Current repository-visible state | Gaps |
 | --- | --- | --- | --- |
-| Latency | HTTP route latency, successful vs failed latency, auth hash latency, DB query latency, synthetic journey duration. | HTTP duration histogram exists through the Axum metrics layer. | Auth hash duration, DB query latency, DB pool wait latency, and journey duration metrics are planned. |
+| Latency | HTTP route latency, successful vs failed latency, auth/MFA proof latency, DB query latency, synthetic journey duration. | HTTP duration histogram exists through the Axum metrics layer. | Auth/MFA step duration, DB query latency, DB pool wait latency, and journey duration metrics are planned. |
 | Traffic | Request rate and meaningful product operation rates: registration, login, MFA, session, vault item, sync. | HTTP counters and product counters are implemented in code. | Active session gauge and scheduled external synthetic traffic are planned. |
 | Errors | 5xx ratio, policy failures, rate-limit hits, MFA failures, CSRF/security rejections, synthetic failures, DB errors. | HTTP status counters, login/MFA outcome counters, rate-limit counter, and vault/sync outcome counters are implemented in code. | CSRF/security rejection counters, DB error counters, and synthetic pass/fail metrics are planned. |
-| Saturation | Pending requests, DB pool pressure, DB wait, auth hash active work, pod CPU/memory, PostgreSQL lag/disk, backup/WAL backlog. | HTTP pending requests and DB pool connection gauges are implemented in code. | DB wait histogram, auth hash active gauge, PostgreSQL HA/backup/failover panels, and capacity alerts are planned. |
+| Saturation | Pending requests, DB pool pressure, DB wait, auth challenge pressure, pod CPU/memory, PostgreSQL lag/disk, backup/WAL backlog. | HTTP pending requests and DB pool connection gauges are implemented in code. | DB wait histogram, auth/MFA step duration, PostgreSQL HA/backup/failover panels, and capacity alerts are planned. |
 
 ## Implemented Application Metrics
 
@@ -123,8 +123,7 @@ Guardrails:
 | `password_vault_db_pool_wait_duration_seconds_bucket` | histogram | `operation` | Early warning before pool starvation causes user-visible failures. |
 | `password_vault_db_query_duration_seconds_bucket` | histogram | `operation`, `outcome` | Separates database latency from application latency. |
 | `password_vault_db_errors_total` | counter | `operation`, `error_class` | Detects DB failures without leaking SQL or values. |
-| `password_vault_auth_hash_duration_seconds_bucket` | histogram | `flow`, `outcome` | Tracks expensive password hashing cost and DoS risk. |
-| `password_vault_auth_hash_active` | gauge | none | Shows concurrent expensive auth work. |
+| `password_vault_auth_step_duration_seconds_bucket` | histogram | `step`, `outcome` | Tracks server-side auth/MFA proof verification and challenge handling latency. The expensive password KDF is browser-side in the MVP. |
 | `password_vault_request_rejections_total` | counter | `reason`, `endpoint` | Tracks body-size, content-type, CSRF, origin, and validation rejections. |
 | `password_vault_security_events_total` | counter | `event_class`, `severity` | Aggregated security posture without user-identifying labels. |
 | `password_vault_background_job_runs_total` | counter | `job`, `outcome` | Tracks migrations, cleanup, and future maintenance jobs. |
@@ -200,7 +199,7 @@ The main dashboard should be organized by questions, not metric names.
 | Auth and unlock | Can returning users login, pass MFA, and unlock? | Login starts/attempts, MFA outcomes, session events, auth latency. | Synthetic journey or manual test generates visible metrics. |
 | Save and sync | Can users save and retrieve encrypted items? | Vault item outcomes, sync outcomes, conflict/stale-revision rate. | Synthetic write/read/sync run and datasource verification. |
 | Durability | Will acknowledged saves survive failure? | PostgreSQL HA state, replica lag, backup age, WAL archive health, restore drill age. | DB operator metrics plus recorded restore/failover drill. |
-| Saturation/capacity | Are we close to limits? | DB pool usage/wait, auth hash active work, CPU/memory, disk, tail latency. | Saturation panels use implemented metrics and platform metrics. |
+| Saturation/capacity | Are we close to limits? | DB pool usage/wait, auth challenge pressure, CPU/memory, disk, tail latency. | Saturation panels use implemented metrics and platform metrics. |
 | Security posture | Is abuse visible? | Rate-limit hits, MFA failures, CSRF/origin rejects, recovery failures, unmatched 404s. | Low-cardinality counters exist and are scraped. |
 | Release context | What changed? | Build info, image digest, Argo revision, migration/maintenance job outcome. | Current deployment revision matches expected release. |
 
@@ -280,7 +279,7 @@ Do not mark these complete without runtime evidence:
 - Multi-window, multi-burn-rate rules remain a next step.
 - External synthetic browser/API probes are not documented as scheduled, scraped, and dashboarded.
 - Synthetic pass/fail, step duration, and cleanup metrics are planned.
-- DB query latency, DB errors, DB pool wait, and auth hash pressure metrics are planned.
+- DB query latency, DB errors, DB pool wait, and auth/MFA step duration metrics are planned.
 - Business/product panels currently use aggregate counters. Next maturity should add derived
   product SLIs for protected activation, returning access, vault write+sync success, and recovery
   success.
@@ -316,7 +315,7 @@ Recommended order:
    failed restore/failover drill.
 5. Urgent ticket: replica count below target but service still serving.
 6. Urgent ticket: sustained p95/p99 latency regression with enough traffic.
-7. Urgent ticket: DB pool wait, auth hash active work, or resource saturation approaching limits.
+7. Urgent ticket: DB pool wait, auth challenge pressure, or resource saturation approaching limits.
 8. Security ticket/page by severity: rate-limit spikes, repeated MFA/recovery failures, CSRF/origin
    rejection spikes, or suspicious session events.
 9. Ticket: missing build info, stale scrape, missing dashboard data, or missing synthetic cleanup.

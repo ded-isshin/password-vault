@@ -99,7 +99,7 @@ Minimum next observability work:
 
 - `password_vault_build_info` release/revision metric;
 - DB pool/query/error metrics;
-- auth hash duration and active-work metrics;
+- auth/MFA step duration metrics;
 - auth/MFA/security aggregate counters;
 - external synthetic journeys through the browser edge path;
 - Password Vault-specific VMRule alerts for target down, 5xx burn, latency, pending requests, and

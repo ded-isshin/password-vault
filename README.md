@@ -77,11 +77,12 @@ Use placeholders such as `<redacted-secret>`, `<redacted-domain>`, and
 
 ## Start Here
 
+Canonical product docs:
+
 - [AGENTS.md](AGENTS.md)
 - [docs/product-brief.md](docs/product-brief.md)
 - [docs/whitepaper.md](docs/whitepaper.md)
 - [docs/foundational-decisions.md](docs/foundational-decisions.md)
-- [docs/decision-briefs/README.md](docs/decision-briefs/README.md)
 - [docs/feature-map.md](docs/feature-map.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/development.md](docs/development.md)
@@ -95,17 +96,25 @@ Use placeholders such as `<redacted-secret>`, `<redacted-domain>`, and
 - [docs/security/auth-protocol-v1.md](docs/security/auth-protocol-v1.md)
 - [docs/security/crypto-design-draft.md](docs/security/crypto-design-draft.md)
 - [docs/security/revision-freshness.md](docs/security/revision-freshness.md)
+
+Current operational docs:
+
+- [docs/mvp-implementation-plan.md](docs/mvp-implementation-plan.md)
+- [docs/observability-sre-metrics.md](docs/observability-sre-metrics.md)
+- [docs/runbooks/README.md](docs/runbooks/README.md)
+- [docs/runbooks/release-and-rollout.md](docs/runbooks/release-and-rollout.md)
+
+Decision records and decision briefs:
+
 - [docs/adr/0001-initial-product-direction.md](docs/adr/0001-initial-product-direction.md)
 - [docs/adr/0002-backend-stack-rust.md](docs/adr/0002-backend-stack-rust.md)
 - [docs/adr/0003-auth-and-crypto-direction.md](docs/adr/0003-auth-and-crypto-direction.md)
 - [docs/adr/0004-kubernetes-data-platform-direction.md](docs/adr/0004-kubernetes-data-platform-direction.md)
 - [docs/adr/0005-mfa-session-and-csrf-policy.md](docs/adr/0005-mfa-session-and-csrf-policy.md)
 - [docs/adr/0006-browser-access-edge-routing.md](docs/adr/0006-browser-access-edge-routing.md)
-- [docs/research/initial-stack-analysis.md](docs/research/initial-stack-analysis.md)
-- [docs/research/auth-crypto-v1-analysis.md](docs/research/auth-crypto-v1-analysis.md)
-- [docs/research/totp-seed-custody-mfa-hardening-2026-06-07.md](docs/research/totp-seed-custody-mfa-hardening-2026-06-07.md)
-- [docs/research/vault-openbao-platform-secrets.md](docs/research/vault-openbao-platform-secrets.md)
-- [docs/research/cloudnativepg-platform-analysis.md](docs/research/cloudnativepg-platform-analysis.md)
-- [docs/research/github-control-plane.md](docs/research/github-control-plane.md)
-- [docs/research/source-baseline-2026-06-06.md](docs/research/source-baseline-2026-06-06.md)
-- [docs/research/product-architecture-ux-subagent-2026-06-06.md](docs/research/product-architecture-ux-subagent-2026-06-06.md)
+- [docs/decision-briefs/README.md](docs/decision-briefs/README.md)
+
+Supporting research and evidence logs:
+
+- [docs/research/](docs/research/)
+- [docs/agent-reports/](docs/agent-reports/)

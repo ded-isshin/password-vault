@@ -35,10 +35,10 @@ Vault, they should be interpreted through user-visible security journeys:
 
 | Golden signal | Password Vault interpretation |
 | --- | --- |
-| Latency | Separate normal API latency from expensive auth/MFA/unlock paths. Fast 500s are still failed requests; slow auth may be expected but must have its own SLO. |
+| Latency | Separate normal API latency from auth/MFA/unlock paths. Fast 500s are still failed requests; slow auth may be expected but must have its own SLO. |
 | Traffic | Track total HTTP demand, but also registration, login, MFA, vault item writes, and sync demand. RPS alone does not describe the product. |
 | Errors | Track 5xx, policy failures, MFA/auth failures, CSRF/rate-limit failures, synthetic journey failure, and bad content/correctness failures where HTTP status is insufficient. |
-| Saturation | Track pending HTTP requests, DB pool pressure, DB query latency, auth hash concurrency, CPU/memory, PostgreSQL replica lag, disk/WAL/backup pressure. |
+| Saturation | Track pending HTTP requests, DB pool pressure, DB query latency, auth challenge pressure, CPU/memory, PostgreSQL replica lag, disk/WAL/backup pressure. |
 
 Google SRE also distinguishes symptoms from causes. The dashboard should first answer what users
 see: can they reach the app, authenticate, unlock, save, and sync? Cause-level panels such as DB
@@ -97,7 +97,7 @@ register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create i
 | DB pool usage and wait latency | Password Vault will fail or slow down when DB connections are exhausted. | High |
 | DB query latency and DB error class counters | Needed to separate API slowness from database slowness. | High |
 | PostgreSQL HA, replica lag, WAL/archive, backup age, restore drill age | A password manager is not stable until acknowledged writes survive node/database failure. | High |
-| Auth hash duration and active auth work | Login can be intentionally expensive and is a DoS pressure point. | High |
+| Auth/MFA step duration and challenge pressure | Server-side auth proof verification should stay bounded; the expensive password KDF is browser-side in the MVP. | Medium |
 | CPU/memory/restarts/PDB/topology spread panels | Needed to explain saturation and rollout safety. | Medium |
 | Metrics freshness and scrape age | Distinguishes "healthy zero" from missing telemetry. | Medium |
 | Public `/metrics` denial evidence | Security-sensitive metrics should be internal only. | Medium |
@@ -145,7 +145,7 @@ The dashboard should be organized by operator/product questions, not by metric n
 | Auth and MFA | Login starts, login outcomes, MFA enrollment/verification outcomes, auth latency. |
 | Vault and sync | Item write success, sync success, conflict/stale revision rate, synthetic read/decrypt result. |
 | Durability | PostgreSQL primary/replica health, replication lag, WAL/archive state, backup age, restore drill age. |
-| Saturation | DB pool wait, auth hash active work, CPU/memory, pending requests, disk pressure. |
+| Saturation | DB pool wait, auth challenge pressure, CPU/memory, pending requests, disk pressure. |
 | Release context | Build revision, image digest, Argo revision, rollout generation, migration hook status. |
 | Abuse/security | Rate-limit hits, CSRF failures, invalid origin/fetch metadata, MFA failure rate, unmatched 404s. |
 

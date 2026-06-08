@@ -1,6 +1,10 @@
 # Decision Brief: PostgreSQL HA And Backup
 
-Status: draft.
+Status: superseded historical draft.
+
+Superseded by:
+[2026-06-08 PostgreSQL HA, migrations, and stability](2026-06-08-postgresql-ha-migrations-stability.md).
+Keep this file only as early backup decision context.
 
 ## Question
 

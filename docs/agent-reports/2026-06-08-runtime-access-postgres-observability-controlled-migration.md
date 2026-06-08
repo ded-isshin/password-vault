@@ -160,7 +160,7 @@ P0 means it blocks a credible stable MVP.
 | --- | --- | --- |
 | P0 | Prove browser access from the MacBook/client path for Password Vault, Grafana, and Argo CD. | Mini-PC local `200` responses do not prove client routing, TLS warning handling, or browser login usability. |
 | P0 | Implement browser vault unlock and encrypted item CRUD/sync with revision conflict checks. | This is the core product, not optional feature work. |
-| P0 | Add product-specific application metrics: build info, DB pool/wait/query metrics, auth hash pressure, rate-limit, CSRF/security rejection counters. | Golden Signals alone do not prove password-manager correctness or abuse resistance. |
+| P0 | Add product-specific application metrics: build info, DB pool/wait/query metrics, auth/MFA step duration, rate-limit, CSRF/security rejection counters. | Golden Signals alone do not prove password-manager correctness or abuse resistance. |
 | P0 | Add SLO/burn-rate and target-down alerts after live metrics exist. | A dashboard without actionable alerts is not enough for operations. |
 | P0 | Replace preview PostgreSQL with a product-specific CloudNativePG cluster plus backup/restore/failover drills. | Real secrets require durable write survival and recovery evidence. |
 | P0 | Add external synthetic journey probes from a client-equivalent route. | Internal scrape health is not the same as "a user can reach and use it." |

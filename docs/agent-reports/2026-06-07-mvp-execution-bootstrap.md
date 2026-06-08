@@ -8,8 +8,8 @@ Project fields, official-docs research, and a durable implementation plan.
 ## Active Context
 
 - Active context: `password-vault + infrastructure-home`
-- Product repository: `/home/roman/ai-workspace/products/password-vault`
-- Infrastructure repository: `/home/roman/infrastructure-home`, read-only inspection only
+- Product repository: `<redacted-path>/products/password-vault`
+- Infrastructure repository: `<redacted-path>/infrastructure-home`, read-only inspection only
 - GitHub repository: `ded-isshin/password-vault`
 - GitHub Project: <https://github.com/users/ded-isshin/projects/2>
 
@@ -141,8 +141,8 @@ Deferred suggestions:
 - `gh issue create ...`
 - `gh project item-add 2 --owner ded-isshin --url ...`
 - `gh project item-edit ...`
-- `find /home/roman/infrastructure-home/kubernetes/gitops/prod -maxdepth 4 -type f`
-- `sed -n ... /home/roman/infrastructure-home/kubernetes/gitops/prod/apps/hiringtrace/application.yaml`
+- `find <redacted-path>/infrastructure-home/kubernetes/gitops/prod -maxdepth 4 -type f`
+- `sed -n ... <redacted-path>/infrastructure-home/kubernetes/gitops/prod/apps/hiringtrace/application.yaml`
 - `git switch -c docs/mvp-execution-plan`
 - official web searches for Rust, Axum, SQLx, React, Vite, WebCrypto, RFCs, OWASP, Kubernetes,
   Argo CD, Helm, CloudNativePG, and GitHub Actions
@@ -166,10 +166,10 @@ Deferred suggestions:
 - `docs/architecture.md`
 - `docs/research/initial-stack-analysis.md`
 - `docs/agent-reports/2026-06-07-threat-model-v1.md`
-- `/home/roman/infrastructure-home/CODEX.md`
-- `/home/roman/infrastructure-home/kubernetes/gitops/prod/apps/hiringtrace/application.yaml`
-- `/home/roman/infrastructure-home/kubernetes/gitops/prod/apps/hiringtrace/values-prod.yaml`
-- `/home/roman/infrastructure-home/kubernetes/gitops/prod/apps/kustomization.yaml`
+- `<redacted-path>/infrastructure-home/CODEX.md`
+- `<redacted-path>/infrastructure-home/kubernetes/gitops/prod/apps/hiringtrace/application.yaml`
+- `<redacted-path>/infrastructure-home/kubernetes/gitops/prod/apps/hiringtrace/values-prod.yaml`
+- `<redacted-path>/infrastructure-home/kubernetes/gitops/prod/apps/kustomization.yaml`
 
 ## Files Changed
 
