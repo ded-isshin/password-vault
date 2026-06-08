@@ -5,8 +5,8 @@ Status: MVP chart.
 The chart deploys the API service only. PostgreSQL, backup, and production secret creation remain
 infrastructure responsibilities.
 
-The chart targets Kubernetes `>=1.26`, because it renders topology spread node inclusion policies
-used to make rollout scheduling explicit.
+The chart targets Kubernetes `>=1.27`, because it renders topology spread node inclusion policies and
+`matchLabelKeys` for Deployment revision-aware spreading.
 
 Schema migrations are also an infrastructure/operator responsibility. Application pods do not run
 migrations by default.
@@ -69,7 +69,14 @@ Defaults are set for live rolling updates:
 - topology spread constraints across Kubernetes nodes.
 - topology spread policies set `nodeAffinityPolicy: Honor` and `nodeTaintsPolicy: Honor` so
   tainted control-plane nodes and node affinity exclusions do not distort skew calculations.
+- topology spread uses `matchLabelKeys: [pod-template-hash]` so each Deployment revision is spread
+  independently during rolling updates.
 - writable `/tmp` `emptyDir` while keeping the container root filesystem read-only.
+
+The chart default keeps `whenUnsatisfiable: ScheduleAnyway` as a portable soft-spread default.
+Production values can enforce one-new-ReplicaSet-pod-per-worker spreading by pairing
+`whenUnsatisfiable: DoNotSchedule` with `matchLabelKeys: [pod-template-hash]` and
+`nodeTaintsPolicy: Honor`.
 
 Schema migrations are not run by app pods by default.
 

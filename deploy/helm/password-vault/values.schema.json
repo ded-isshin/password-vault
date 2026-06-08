@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "topologySpreadConstraints": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "maxSkew": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "topologyKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "whenUnsatisfiable": {
+          "type": "string",
+          "enum": [
+            "DoNotSchedule",
+            "ScheduleAnyway"
+          ]
+        },
+        "matchLabelKeys": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "nodeAffinityPolicy": {
+          "type": "string",
+          "enum": [
+            "Honor",
+            "Ignore"
+          ]
+        },
+        "nodeTaintsPolicy": {
+          "type": "string",
+          "enum": [
+            "Honor",
+            "Ignore"
+          ]
+        }
+      }
+    }
+  }
+}
