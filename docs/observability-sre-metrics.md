@@ -222,6 +222,9 @@ deployment level must be re-evaluated after each GitOps rollout.
 Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up checks:
 
 - Grafana dashboard UID `password-vault-overview` is provisioned.
+- The dashboard has 23 panels and was visible through the Grafana API. Grafana Image Renderer is not
+  installed, so evidence is based on dashboard metadata and live datasource queries rather than PNG
+  rendering.
 - The API uses the `password-vault-cnpg` CloudNativePG application Secret, and the API Deployment has
   three ready replicas.
 - CNPG dashboard panels are deployed for targets, streaming replicas, PostgreSQL version, backup
@@ -242,12 +245,15 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   or on() vector(0)` returned a single-digit millisecond value during the follow-up check.
 - All dashboard PromQL expressions parsed and returned live data or an explicit justified zero when
   evaluated with representative `5m` rate and `6h` range windows.
-- A recent live edge synthetic journey generated visible registration, MFA, encrypted item, and sync
-  product counters. Scheduled synthetic pass/fail metrics are still planned.
+- A recent live edge synthetic journey generated visible product counters. A follow-up `6h` window
+  query returned registration start/finish successes, login successes, TOTP enrollment/login
+  outcomes, recovery-code login verification, encrypted item create success, and sync success.
+  Scheduled synthetic pass/fail metrics are still planned.
 - `PasswordVaultCnpgBackupMissing` is expected to be pending or firing while no available base
   backup exists. This is not noise; it is the visible real-secret-use blocker.
-- Grafana image rendering is not installed in the current environment, so dashboard evidence uses
-  Grafana API checks and live datasource queries rather than rendered PNG screenshots.
+- The mini-PC edge route for Grafana was reachable from the mini-PC with `https` and the local
+  self-signed certificate path. MacBook/browser reachability must still be verified from the client
+  side before this becomes full external-access evidence.
 
 ## Current Dashboard And Alert Gaps
 

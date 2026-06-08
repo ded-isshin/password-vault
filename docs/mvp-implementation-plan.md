@@ -39,6 +39,9 @@ Current implementation status, 2026-06-08:
   container smoke and the manual `load-smoke` workflow. A live edge run after the CNPG cutover
   succeeded on 2026-06-08; future deployed changes still need a fresh live edge run before their
   browser path can be treated as proven end-to-end.
+- The browser synthetic now has a local `SYNTHETIC_SELF_TEST_ONLY=true` crypto guard that checks
+  AES-GCM rejection for tampered ciphertext, nonce, and authenticated metadata before any API
+  account is created.
 - The current branch adds a dry-run-first `cleanup-synthetic` maintenance command for old
   reserved-domain synthetic accounts. This enables bounded cleanup of live-test data, but a
   scheduled external synthetic probe and cleanup job are still future work.
@@ -47,6 +50,9 @@ Current implementation status, 2026-06-08:
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
+- Grafana and Argo CD are also reachable through the mini-PC HTTPS edge route from the mini-PC.
+  MacBook/browser reachability still needs a client-side check; do not use Kubernetes/LXD
+  `LoadBalancer` addresses as MacBook URLs.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
@@ -78,22 +84,24 @@ MVP dependable:
    warning.
 2. Run the full synthetic browser/API journey in CI and against the live edge route:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
-3. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
+3. Keep browser crypto tests non-negotiable: keep the local tamper self-test and add future test
+   vectors only when they directly protect the accepted crypto format.
+4. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
    not schedule production cleanup until HA/backup posture is understood.
-4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
+5. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
    backup/WAL/restore/failover gates, and remove the legacy preview PostgreSQL rollback artifact only
    after recorded restore evidence exists. Do not accept real secrets before this is complete.
-5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
-6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
+6. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
+7. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
-7. Deploy and test SLO/alert rules for target-down and fast 5xx burn-rate before adding broader
+8. Deploy and test SLO/alert rules for target-down and fast 5xx burn-rate before adding broader
    alert volume.
-8. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
+9. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability
    further to database health, backup freshness, and security aggregate metrics.
-9. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
+10. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
    from inside the Kubernetes/LXD network.
-10. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
+11. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
    stale bootstrap claims do not become false work items.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.
