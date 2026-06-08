@@ -223,6 +223,149 @@
           }
         }
       }
+    },
+    "syntheticJourney": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "cronJob": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeZone": {
+              "type": "string",
+              "minLength": 1
+            },
+            "suspend": {
+              "type": "boolean"
+            },
+            "concurrencyPolicy": {
+              "type": "string",
+              "enum": [
+                "Allow",
+                "Forbid",
+                "Replace"
+              ]
+            },
+            "startingDeadlineSeconds": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "successfulJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failedJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "backoffLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ttlSecondsAfterFinished": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "nodeImage": {
+              "type": "string",
+              "pattern": "^.+@sha256:[a-f0-9]{64}$"
+            },
+            "imagePullPolicy": {
+              "type": "string",
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ]
+            },
+            "baseUrl": {
+              "type": "string"
+            },
+            "allowNonLocalBaseUrl": {
+              "type": "boolean"
+            },
+            "tlsInsecure": {
+              "type": "boolean"
+            },
+            "checkMetrics": {
+              "type": "boolean"
+            },
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 1000
+            },
+            "loginPrefix": {
+              "type": "string",
+              "pattern": "^[a-z0-9.-]{1,32}$"
+            },
+            "emailDomain": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\\.invalid$",
+              "maxLength": 80
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "allowApiServiceEgress": {
+              "type": "boolean"
+            },
+            "externalEgress": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "cidr",
+                  "ports"
+                ],
+                "properties": {
+                  "cidr": {
+                    "type": "string",
+                    "description": "Narrow IPv4 CIDR for explicit synthetic journey egress. Use /32 for a single edge host.",
+                    "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})/(?:1[6-9]|2[0-9]|3[0-2])$"
+                  },
+                  "ports": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

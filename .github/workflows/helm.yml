@@ -25,6 +25,7 @@ jobs:
       - name: Lint and render chart
         run: |
           set -euo pipefail
+          cmp load/synthetic/browser-api-journey.mjs deploy/helm/password-vault/files/synthetic/browser-api-journey.mjs
           docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
             lint deploy/helm/password-vault
           docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
@@ -144,6 +145,82 @@ jobs:
             --set image.tag=ci \
             --set syntheticCleanup.cronJob.enabled=true \
             --set syntheticCleanup.cronJob.domain='bad..invalid'
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set networkPolicy.enabled=true \
+            --set syntheticJourney.cronJob.enabled=true \
+            --set syntheticJourney.cronJob.baseUrl=http://password-vault-api.password-vault.svc.cluster.local:8080 \
+            --set syntheticJourney.networkPolicy.externalEgress[0].cidr=192.0.2.10/32 \
+            --set syntheticJourney.networkPolicy.externalEgress[0].ports[0]=11443 \
+            >/tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'kind: ConfigMap' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'kind: CronJob' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'kind: NetworkPolicy' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'name: password-vault-synthetic-journey' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'component: synthetic-journey' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'browser-api-journey.mjs' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'name: BASE_URL' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'value: "http://password-vault-api.password-vault.svc.cluster.local:8080"' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'name: SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'name: SYNTHETIC_TLS_INSECURE' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'name: SYNTHETIC_CHECK_METRICS' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'name: SYNTHETIC_EMAIL_DOMAIN' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'value: "loadtest.invalid"' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'automountServiceAccountToken: false' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'readOnly: true' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'cidr: "192.0.2.10/32"' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'port: 11443' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'port: 8080' /tmp/password-vault-synthetic-journey-rendered.yaml
+          grep -q 'port: 53' /tmp/password-vault-synthetic-journey-rendered.yaml
+          python3 - <<'PY'
+          from pathlib import Path
+
+          rendered = Path("/tmp/password-vault-synthetic-journey-rendered.yaml").read_text()
+          expected = """  egress:
+              - to:
+                  - podSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: password-vault
+                        app.kubernetes.io/instance: password-vault
+                        component: api
+                ports:
+                  - protocol: TCP
+                    port: 8080
+          """
+          if expected not in rendered:
+              raise SystemExit("synthetic journey NetworkPolicy API egress selector is not rendered with matchLabels")
+          PY
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticJourney.cronJob.enabled=true
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticJourney.cronJob.enabled=true \
+            --set syntheticJourney.cronJob.baseUrl=http://password-vault-api.password-vault.svc.cluster.local:8080 \
+            --set syntheticJourney.cronJob.emailDomain=example.com
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticJourney.cronJob.enabled=true \
+            --set syntheticJourney.cronJob.baseUrl=http://password-vault-api.password-vault.svc.cluster.local:8080 \
+            --set syntheticJourney.networkPolicy.externalEgress[0].cidr=not-a-cidr \
+            --set syntheticJourney.networkPolicy.externalEgress[0].ports[0]=11443
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticJourney.cronJob.enabled=true \
+            --set syntheticJourney.cronJob.baseUrl=http://password-vault-api.password-vault.svc.cluster.local:8080 \
+            --set syntheticJourney.networkPolicy.externalEgress[0].cidr=0.0.0.0/0 \
+            --set syntheticJourney.networkPolicy.externalEgress[0].ports[0]=11443
           ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
             template password-vault deploy/helm/password-vault \
             --namespace password-vault \

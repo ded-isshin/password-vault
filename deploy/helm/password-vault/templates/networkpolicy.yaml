@@ -108,4 +108,64 @@ spec:
     {{- end }}
     {{- end }}
 {{- end }}
+{{- if .Values.syntheticJourney.cronJob.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "password-vault.fullname" . }}-synthetic-journey
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+    component: synthetic-journey
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "password-vault.baseSelectorLabels" . | nindent 6 }}
+      component: synthetic-journey
+  policyTypes:
+    - Egress
+  egress:
+    {{- if .Values.syntheticJourney.networkPolicy.allowApiServiceEgress }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "password-vault.selectorLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
+    {{- end }}
+    {{- range .Values.syntheticJourney.networkPolicy.externalEgress }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr | quote }}
+      ports:
+        {{- range .ports }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- if .Values.networkPolicy.dns.enabled }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.dns.kubeDns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.dns.kubeDns.podSelector | nindent 12 }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    {{- if .Values.networkPolicy.dns.nodeLocal.enabled }}
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.dns.nodeLocal.cidr | quote }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    {{- end }}
+    {{- end }}
+{{- end }}
 {{- end }}

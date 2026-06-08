@@ -1,0 +1,97 @@
+{{- if .Values.syntheticJourney.cronJob.enabled }}
+{{- $baseUrl := required "syntheticJourney.cronJob.baseUrl is required when syntheticJourney.cronJob.enabled=true" .Values.syntheticJourney.cronJob.baseUrl }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "password-vault.fullname" . }}-synthetic-journey
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+    component: synthetic-journey
+  {{- with .Values.syntheticJourney.cronJob.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  schedule: {{ .Values.syntheticJourney.cronJob.schedule | quote }}
+  {{- with .Values.syntheticJourney.cronJob.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  suspend: {{ .Values.syntheticJourney.cronJob.suspend }}
+  concurrencyPolicy: {{ .Values.syntheticJourney.cronJob.concurrencyPolicy }}
+  {{- with .Values.syntheticJourney.cronJob.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ . }}
+  {{- end }}
+  successfulJobsHistoryLimit: {{ .Values.syntheticJourney.cronJob.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.syntheticJourney.cronJob.failedJobsHistoryLimit }}
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "password-vault.labels" . | nindent 8 }}
+        component: synthetic-journey
+    spec:
+      backoffLimit: {{ .Values.syntheticJourney.cronJob.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.syntheticJourney.cronJob.activeDeadlineSeconds }}
+      {{- with .Values.syntheticJourney.cronJob.ttlSecondsAfterFinished }}
+      ttlSecondsAfterFinished: {{ . }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            {{- include "password-vault.labels" . | nindent 12 }}
+            component: synthetic-journey
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: synthetic-journey
+              image: {{ .Values.syntheticJourney.cronJob.nodeImage | quote }}
+              imagePullPolicy: {{ .Values.syntheticJourney.cronJob.imagePullPolicy }}
+              command:
+                - node
+              args:
+                - /synthetic/browser-api-journey.mjs
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              env:
+                - name: BASE_URL
+                  value: {{ $baseUrl | quote }}
+                - name: RUN_ID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+                - name: SYNTHETIC_ALLOW_NON_LOCAL_BASE_URL
+                  value: {{ .Values.syntheticJourney.cronJob.allowNonLocalBaseUrl | quote }}
+                - name: SYNTHETIC_TLS_INSECURE
+                  value: {{ .Values.syntheticJourney.cronJob.tlsInsecure | quote }}
+                - name: SYNTHETIC_CHECK_METRICS
+                  value: {{ .Values.syntheticJourney.cronJob.checkMetrics | quote }}
+                - name: SYNTHETIC_TIMEOUT_MS
+                  value: {{ .Values.syntheticJourney.cronJob.timeoutMs | quote }}
+                - name: SYNTHETIC_LOGIN_PREFIX
+                  value: {{ .Values.syntheticJourney.cronJob.loginPrefix | quote }}
+                - name: SYNTHETIC_EMAIL_DOMAIN
+                  value: {{ .Values.syntheticJourney.cronJob.emailDomain | quote }}
+              resources:
+                {{- toYaml .Values.syntheticJourney.cronJob.resources | nindent 16 }}
+              volumeMounts:
+                - name: synthetic-script
+                  mountPath: /synthetic
+                  readOnly: true
+                {{- if .Values.tmp.enabled }}
+                - name: tmp
+                  mountPath: {{ .Values.tmp.mountPath | quote }}
+                {{- end }}
+          volumes:
+            - name: synthetic-script
+              configMap:
+                name: {{ include "password-vault.fullname" . }}-synthetic-journey
+                defaultMode: 0444
+          {{- if .Values.tmp.enabled }}
+            - name: tmp
+              emptyDir:
+                sizeLimit: {{ .Values.tmp.sizeLimit | quote }}
+          {{- end }}
+{{- end }}

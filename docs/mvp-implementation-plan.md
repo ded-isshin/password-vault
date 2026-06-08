@@ -49,8 +49,10 @@ Current implementation status, 2026-06-08:
   production `app.js` checkpoint storage helpers before any API account is created.
 - A dry-run-first `cleanup-synthetic` maintenance command exists for old reserved-domain synthetic
   accounts. The Helm chart can render a disabled-by-default Kubernetes CronJob for this command, so
-  production values can enable dry-run scheduling before allowing confirmed deletion. Scheduled
-  external synthetic pass/fail metrics are still future work.
+  production values can enable dry-run scheduling before allowing confirmed deletion.
+- The Helm chart can render a disabled-by-default full browser/API synthetic journey CronJob using
+  the same dependency-free Node script as CI. This is chart support only until production GitOps
+  enables it against the LAN edge route and verifies CronJob/Job pass/fail telemetry.
 - Recovery-code verification is implemented for the MVP preview. It can only be used after primary
   login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
@@ -64,6 +66,11 @@ Current implementation status, 2026-06-08:
   and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
   service-routing details. If a MacBook cannot open the services while mini-PC `curl -k` checks pass,
   start with client LAN/VPN/firewall/certificate troubleshooting, not Kubernetes Service rewrites.
+- A follow-up 2026-06-08 session-restart check confirmed that the default `kubectl` context may be
+  empty in a new terminal session and must be set explicitly through the production kubeconfig for
+  read-only cluster verification. The same check confirmed the LAN-bound edge listeners and HTTP 200
+  responses from the mini-PC for Password Vault, Grafana, and Argo CD. This is still not a substitute
+  for a MacBook-side browser or `curl -k` check.
 - The edge publishing layer currently uses a self-signed certificate and LAN-bound host listeners.
   Before real user secrets, edge exposure must be locked down to intended LAN/VPN paths and verified
   from a client-equivalent route.
@@ -120,8 +127,9 @@ MVP dependable:
 10. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability further to database health, backup freshness, and security aggregate
    metrics.
-11. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
-   from inside the Kubernetes/LXD network.
+11. Enable the chart-managed full synthetic journey CronJob from a client-equivalent edge path,
+   verify its Kubernetes Job pass/fail telemetry through kube-state-metrics, and then decide whether
+   a custom low-cardinality synthetic success timestamp/counter is warranted.
 12. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
    stale bootstrap claims do not become false work items.
 
