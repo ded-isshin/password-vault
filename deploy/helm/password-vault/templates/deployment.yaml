@@ -41,6 +41,10 @@ spec:
           {{- with .Values.topologySpreadConstraints.nodeTaintsPolicy }}
           nodeTaintsPolicy: {{ . }}
           {{- end }}
+          {{- with .Values.topologySpreadConstraints.matchLabelKeys }}
+          matchLabelKeys:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           labelSelector:
             matchLabels:
               {{- include "password-vault.selectorLabels" . | nindent 14 }}

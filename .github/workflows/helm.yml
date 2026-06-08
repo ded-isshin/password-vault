@@ -38,6 +38,21 @@ jobs:
           grep -q 'name: PV_METRICS_BIND_ADDR' /tmp/password-vault-rendered.yaml
           grep -q 'name: metrics' /tmp/password-vault-rendered.yaml
           grep -q 'port: metrics' /tmp/password-vault-rendered.yaml
+          grep -q 'matchLabelKeys:' /tmp/password-vault-rendered.yaml
+          grep -q -- '- pod-template-hash' /tmp/password-vault-rendered.yaml
+          grep -q 'nodeAffinityPolicy: Honor' /tmp/password-vault-rendered.yaml
+          grep -q 'nodeTaintsPolicy: Honor' /tmp/password-vault-rendered.yaml
+          cat >/tmp/password-vault-no-match-label-keys-values.yaml <<'YAML'
+          topologySpreadConstraints:
+            matchLabelKeys: []
+          YAML
+          docker run --rm -v "$PWD":/workspace -v /tmp:/tmp -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            -f /tmp/password-vault-no-match-label-keys-values.yaml \
+            >/tmp/password-vault-no-match-label-keys-rendered.yaml
+          ! grep -q 'matchLabelKeys:' /tmp/password-vault-no-match-label-keys-rendered.yaml
           docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
             template password-vault deploy/helm/password-vault \
             --namespace password-vault \

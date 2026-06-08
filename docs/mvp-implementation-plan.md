@@ -8,8 +8,9 @@ Current implementation status, 2026-06-08:
   dashboard exist.
 - The current GitOps preview is `Synced/Healthy/Succeeded` in Argo CD. API pods are three ready
   replicas. The chart now supports topology spread `nodeAffinityPolicy` and `nodeTaintsPolicy`
-  controls so production can combine live `maxUnavailable: 0` / `maxSurge: 1` updates with hard
-  worker-node spreading once the infrastructure values are updated and verified.
+  controls plus `matchLabelKeys: [pod-template-hash]` so production can combine live
+  `maxUnavailable: 0` / `maxSurge: 1` updates with hard worker-node spreading once the
+  infrastructure values are updated and verified.
 - The generated-name Argo CD migration hook fix is merged, published, and rolled out. The previous
   fixed-name `password-vault-migrate` Job from an older digest remains visible as historical
   pruning debt, but it no longer blocks the current application sync.

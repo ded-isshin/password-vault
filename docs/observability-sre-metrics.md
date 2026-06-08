@@ -57,8 +57,10 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - The API Deployment has three ready replicas and is pinned to an immutable GHCR image digest.
 - Topology spreading is enabled. The chart supports `nodeAffinityPolicy: Honor` and
   `nodeTaintsPolicy: Honor` so production can use hard `DoNotSchedule` spreading without counting
-  tainted control-plane nodes as empty topology domains. Until those production values are rolled
-  out, `ScheduleAnyway` is the safe temporary value for live updates.
+  tainted control-plane nodes as empty topology domains. The chart also supports
+  `matchLabelKeys: [pod-template-hash]` so rolling updates spread the new ReplicaSet independently
+  from old pods. The chart default remains soft `ScheduleAnyway`; enforced production spreading
+  requires `DoNotSchedule` plus `matchLabelKeys` in the production values.
 - Read-only cluster checks showed the product database is still a single `postgres:17-bookworm`
   StatefulSet on a node-local `local-path` PVC. CloudNativePG CRDs exist, but there is no active
   product `Cluster`, `Backup`, or `ScheduledBackup`, and no CloudNativePG operator/controller was

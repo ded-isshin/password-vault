@@ -31,13 +31,21 @@ The chart defaults are designed for live updates:
 - graceful SIGTERM in the Rust service.
 - short pre-stop drain before termination to give endpoint updates time to propagate.
 - topology spread constraints with `nodeAffinityPolicy: Honor` and `nodeTaintsPolicy: Honor`.
+- `matchLabelKeys: [pod-template-hash]` so the scheduler calculates spread per Deployment revision
+  during rolling updates instead of letting old ReplicaSet pods distort the placement of new pods.
+
+The chart default keeps `whenUnsatisfiable: ScheduleAnyway`, which is best-effort spreading. The
+production hard-spread guarantee depends on the full pairing of `whenUnsatisfiable: DoNotSchedule`,
+`matchLabelKeys: [pod-template-hash]`, and `nodeTaintsPolicy: Honor`.
 
 On the current three-worker cluster, hard topology spreading with `DoNotSchedule` is compatible with
 `maxSurge: 1` only when tainted control-plane nodes are excluded from skew calculations. Without
 `nodeTaintsPolicy: Honor`, the scheduler can count tainted control-plane nodes as empty topology
-domains and leave the surge pod pending. If the cluster still cannot schedule at least one surge pod,
-a rollout may stall instead of taking the app down. Treat that as safer than making unavailable pods
-serve traffic.
+domains and leave the surge pod pending. Without `matchLabelKeys: [pod-template-hash]`, old
+ReplicaSet pods can distort new ReplicaSet placement and leave the final steady state uneven even
+when the rollout succeeds. If the cluster still cannot schedule at least one surge pod, a rollout
+may stall instead of taking the app down. Treat that as safer than making unavailable pods serve
+traffic.
 
 ## Migration Policy
 
