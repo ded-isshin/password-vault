@@ -47,7 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18-bookworm
+        image: postgres:18-bookworm@sha256:501c9112cb737119b90618d7c09ad4eaab243e4b370050eb280061284cd2ed63
         env:
           POSTGRES_DB: password_vault_test
           POSTGRES_USER: postgres

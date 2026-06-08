@@ -31,6 +31,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ded-isshin/password-vault-api
   NODE_SYNTHETIC_IMAGE: node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
+  K6_IMAGE: grafana/k6:2.0.0@sha256:a33a0cfdc4d2483d6b7a3a22e726a499ff2831a671a49239104cd34a9937523c
   TEST_SYNTHETIC_METADATA_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
   TEST_TOTP_SEED_KEY_B64: YmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWE
 
@@ -42,7 +43,7 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:18-bookworm
+        image: postgres:18-bookworm@sha256:501c9112cb737119b90618d7c09ad4eaab243e4b370050eb280061284cd2ed63
         env:
           POSTGRES_DB: password_vault_test
           POSTGRES_USER: postgres
@@ -130,7 +131,7 @@ jobs:
             -e RUN_ID=ci-${{ github.run_id }} \
             -e LOAD_RATE=2 \
             -e LOAD_DURATION=15s \
-            grafana/k6:2.0.0 run scenarios/smoke.js
+            "$K6_IMAGE" run scenarios/smoke.js
 
   publish:
     if: github.event_name != 'pull_request'

@@ -38,13 +38,13 @@ docker run --rm \
   -u "$(id -u):$(id -g)" \
   -v "$PWD:/workspace" \
   -w /workspace \
-  rust:1.96-bookworm \
+  rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460 \
   sh -lc 'export PATH=/usr/local/cargo/bin:$PATH; cargo test --workspace'
 ```
 
 Rules:
 
-- Pin the Rust image version in docs and CI before implementation PRs depend on it.
+- Pin the Rust image version and digest in docs and CI before implementation PRs depend on it.
 - Do not use `latest`.
 - Add `/usr/local/cargo/bin` to `PATH` inside the container command. The Rust Docker image contains
   the toolchain there, and the shell PATH may not include it by default in this environment.
@@ -74,9 +74,10 @@ Use GitHub-hosted runners only.
 
 Rust CI should run either:
 
-- in a GitHub Actions job container using the pinned Rust Docker Official Image; or
 - on the hosted runner if the runner image already provides the pinned Rust version and the workflow
   verifies `rustc --version`.
+- in a GitHub Actions job container using the pinned Rust Docker Official Image only if hosted-runner
+  `rustup` becomes unsuitable.
 
 Preferred MVP path:
 
@@ -84,18 +85,17 @@ Preferred MVP path:
 jobs:
   rust:
     runs-on: ubuntu-latest
-    container:
-      image: rust:1.96-bookworm
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
       - run: |
-          export PATH=/usr/local/cargo/bin:$PATH
-          cargo test --locked --workspace
+          rustup toolchain install 1.96.0 --profile minimal
+          cargo +1.96.0 test --locked --workspace
 ```
 
-This avoids third-party Rust setup actions for the first MVP baseline.
+This avoids third-party Rust setup actions and avoids a Docker Hub Rust job-container pull for the
+regular Rust CI path.
 
 ### Frontend Commands
 
@@ -107,8 +107,8 @@ environment variables.
 
 ### PostgreSQL Version
 
-The MVP CI migration and smoke jobs use `postgres:18-bookworm`, matching the current CloudNativePG
-preview PostgreSQL major version.
+The MVP CI migration and smoke jobs use `postgres:18-bookworm` pinned by digest, matching the
+current CloudNativePG preview PostgreSQL major version.
 
 The current migration uses PostgreSQL column-specific `ON DELETE SET NULL (device_id)` on a composite
 foreign key, so supported PostgreSQL versions must be PostgreSQL 15 or newer. Keep CI on a supported
@@ -142,11 +142,25 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
 ## Security Considerations
 
 - Containerized local builds avoid modifying the host toolchain.
-- Docker image selection is a supply-chain decision; pin the image tag and consider digest pinning
-  after the first scaffold.
+- Docker image selection is a supply-chain decision; CI and Dockerfile base images should be pinned
+  by digest. Docker Hub may remain an upstream source for trusted Docker Official Images, but
+  repeated Docker Hub availability failures should trigger mirroring reviewed base images into GHCR.
+- Digest pinning prevents silent tag drift and makes base-image changes reviewable. It does not by
+  itself remove Docker Hub availability risk because digest pulls still contact the upstream registry.
 - Public CI must use minimal permissions and must not expose secrets to pull requests.
 - Build containers must not receive kubeconfigs, GitHub tokens, `.env` files with real secrets, SSH
   keys, or host service sockets.
+
+## Image Digest Refresh Procedure
+
+Refresh Docker Hub image digests as dependency changes, not as incidental feature work.
+
+1. Inspect the current tag with `docker buildx imagetools inspect <image>:<tag>`.
+2. Record the index digest and confirm the expected version and source annotations.
+3. Update every reference to that digest in Dockerfile, workflows, and docs in the same PR.
+4. Run the relevant local smoke check, such as `docker build` for base image changes or
+   `docker run <image>@<digest> version` for tool images.
+5. Let GitHub Actions validate the service-container and publish paths before merge.
 
 ## Follow-Up Work
 
@@ -162,7 +176,12 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
 - #20 adds the container image workflow. Pull requests build and smoke-test the image without
   registry writes; pushes to `main` publish to GHCR with SBOM/provenance and GitHub attestation.
 - #21 adds the product Helm chart. Validation uses pinned `alpine/helm:3.19.0` in GitHub Actions.
-- Load smoke tests use pinned `grafana/k6:2.0.0`. PR smoke stays intentionally small; heavier tests
-  use the manual `load-smoke` workflow. The full browser API synthetic journey uses a
+- Load smoke tests use digest-pinned `grafana/k6:2.0.0`. PR smoke stays intentionally small; heavier
+  tests use the manual `load-smoke` workflow. The full browser API synthetic journey uses a
   digest-pinned `node:22-bookworm-slim` Docker Hub image and no npm dependencies.
+- #98 tracks hardening container builds after a Docker Hub token endpoint `504` affected a main image
+  publish. Current mitigation pins Dockerfile, PostgreSQL service, Node synthetic, and k6 images by
+  digest. This is a supply-chain drift mitigation, not a full availability fix. Future mitigation
+  may mirror reviewed base images into GHCR, authenticate to Docker Hub in CI, or add pull
+  retry/backoff if upstream availability keeps affecting release builds.
 - #24 must run its OPAQUE proof-of-concept in this selected build environment.

@@ -16,6 +16,8 @@ deployment.
   <https://docs.docker.com/build/cache/backends/gha/>
 - Docker Build SBOM/provenance attestations:
   <https://docs.docker.com/build/ci/github-actions/attestations/>
+- Docker Build attestations:
+  <https://docs.docker.com/build/metadata/attestations/>
 - GitHub publishing Docker images:
   <https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images>
 - GitHub artifact attestations:
@@ -63,7 +65,12 @@ deployment.
   primary build platform.
 - Use Docker Hub only for trusted base/test images such as Docker Official `rust`, `postgres`,
   `debian`, and trusted `grafana/k6`/`alpine/helm` images.
-- Use pinned image tags and avoid `latest` in CI/load/chart validation.
+- Use pinned image tags plus immutable digests and avoid `latest` in CI/load/chart validation.
+- Treat digest pinning as integrity and drift control, not as a complete Docker Hub availability
+  control. Digest pulls still depend on the upstream registry and its token endpoint.
+- If Docker Hub availability repeatedly blocks release builds, mirror reviewed base/test images into
+  GHCR, authenticate to Docker Hub in CI, or add pull retry/backoff where workflows support it.
+  Update the Dockerfile/workflows to consume any mirrors by digest.
 - Split container CI into a read-only PR smoke job and a separate publish job with `packages`,
   `id-token`, and `attestations` permissions.
 - Add GitHub artifact attestation bound to the pushed image digest. Inline BuildKit SBOM/provenance
@@ -105,6 +112,10 @@ deployment.
   Grafana dashboard provisioning.
 - GitHub Actions builds and publishes images; the mini-PC should not be the release build host.
 - Kubernetes rollout should be GitOps-driven and human-approved before sync.
+- Dockerfile build and runtime stages should pin the selected upstream image tags by digest. Digest
+  refreshes should be reviewed as dependency changes, not hidden inside routine feature work.
+- A digest refresh PR must update all copies of the digest across Dockerfile, workflows, docs, and
+  load-test configuration together.
 
 ## What Not To Do
 
@@ -119,6 +130,8 @@ deployment.
 
 - After the first GHCR image is published, the infrastructure PR must pin the production deployment by
   digest.
+- #98 tracks the follow-up decision on whether Docker Hub base/test image mirrors, Docker Hub
+  authentication, or explicit pull retries are worth operating.
 - Production migration job shape still needs a runbook before live user data.
 - Password Vault dashboard can be rendered now, but real panel data cannot be verified until the app
   is deployed and scraped.
