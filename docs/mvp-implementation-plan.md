@@ -30,6 +30,11 @@ Current implementation status, 2026-06-08:
   The in-cluster app service remains plain HTTP behind the edge proxy.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
+- Product-specific observability counters for registration, login, MFA, sessions, vault item
+  changes, sync requests, and build information are implemented locally in the current branch and
+  covered by a low-cardinality metrics test. The infrastructure dashboard intent has matching
+  panels, but the new product metrics are not live until the branch is built, published, and rolled
+  out.
 - CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
   `Backup`, or `ScheduledBackup` resources are present yet. A live scan also found no running
   CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
@@ -56,8 +61,8 @@ MVP dependable:
 5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
 6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
-7. Expand observability from HTTP Golden Signals to auth/MFA, vault writes/sync, database health,
-   backup freshness, and security aggregate metrics.
+7. Deploy and verify the new auth/MFA/session/vault/sync product metrics, then expand observability
+   further to database health, backup freshness, and security aggregate metrics.
 8. Add SLO and burn-rate alerts after the relevant metrics return live data.
 9. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
    from inside the Kubernetes/LXD network.

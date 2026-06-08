@@ -21,6 +21,7 @@ use crate::{
             load_current_session, no_store_json, now_utc_second, refresh_session_activity,
         },
     },
+    telemetry,
 };
 
 const VAULT_BODY_LIMIT_BYTES: usize = 128 * 1024;
@@ -304,6 +305,7 @@ async fn sync_vault(
     };
 
     if !sync_cursor_matches(pool, path.vault_id, &vault, from_head_seq, &from_head_hash).await? {
+        telemetry::sync_request("conflict", "none");
         return Ok(vault_conflict_response(&vault));
     }
 
@@ -408,6 +410,8 @@ async fn sync_vault(
         });
     }
 
+    telemetry::sync_request("success", if has_more { "partial" } else { "complete" });
+
     Ok(no_store_json(
         StatusCode::OK,
         SyncResponse {
@@ -444,9 +448,11 @@ async fn create_item(
 
     let Some(vault) = lock_vault_head(&mut transaction, session.account_id, path.vault_id).await?
     else {
+        telemetry::vault_item_change("create", "not_found");
         return Err(ApiError::not_found());
     };
     if !head_matches(&vault, request.base_head_seq, &request.base_head_hash) {
+        telemetry::vault_item_change("create", "conflict");
         return Ok(vault_conflict_response(&vault));
     }
 
@@ -521,6 +527,8 @@ async fn create_item(
         .await
         .map_err(|_| ApiError::service_unavailable())?;
 
+    telemetry::vault_item_change("create", "success");
+
     Ok(no_store_json(
         StatusCode::CREATED,
         ItemRevisionWriteResponse {
@@ -552,9 +560,11 @@ async fn create_item_revision(
 
     let Some(vault) = lock_vault_head(&mut transaction, session.account_id, path.vault_id).await?
     else {
+        telemetry::vault_item_change(request.operation, "vault_not_found");
         return Err(ApiError::not_found());
     };
     let Some(item) = lock_item(&mut transaction, path.vault_id, path.item_id).await? else {
+        telemetry::vault_item_change(request.operation, "item_not_found");
         return Err(ApiError::not_found());
     };
 
@@ -562,6 +572,7 @@ async fn create_item_revision(
         || request.base_revision_seq != item.latest_revision_seq
         || item.deleted
     {
+        telemetry::vault_item_change(request.operation, "conflict");
         return Ok(vault_conflict_response(&vault));
     }
 
@@ -634,6 +645,8 @@ async fn create_item_revision(
         .commit()
         .await
         .map_err(|_| ApiError::service_unavailable())?;
+
+    telemetry::vault_item_change(request.operation, "success");
 
     Ok(no_store_json(
         StatusCode::CREATED,

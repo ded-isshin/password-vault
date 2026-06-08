@@ -14,6 +14,7 @@ use sqlx::PgPool;
 
 pub mod auth;
 pub mod db;
+pub(crate) mod telemetry;
 pub mod vault;
 
 #[derive(Clone)]
@@ -287,6 +288,7 @@ async fn healthz() -> Json<HealthResponse> {
 }
 
 async fn metrics(metrics_handle: PrometheusHandle) -> impl IntoResponse {
+    telemetry::record_build_info();
     (
         [(
             header::CONTENT_TYPE,
@@ -526,6 +528,49 @@ mod tests {
         assert!(body.contains("method=\"GET\""));
         assert!(!body.contains("not-found-cardinality-probe"));
         assert!(!body.contains("login_handle"));
+    }
+
+    #[tokio::test]
+    async fn product_metrics_use_low_cardinality_labels() {
+        let app = app(ApiConfig::local_test(false, false));
+
+        crate::telemetry::registration_event("finish", "success");
+        crate::telemetry::account_created("success");
+        crate::telemetry::login_start("issued");
+        crate::telemetry::login_attempt("success", "none");
+        crate::telemetry::session_event("created", "mfa_verified");
+        crate::telemetry::mfa_event("totp_login", "verified");
+        crate::telemetry::sync_request("success", "complete");
+        crate::telemetry::vault_item_change("create", "success");
+
+        let metrics_response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(metrics_response.status(), 200);
+
+        let body = to_bytes(metrics_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("password_vault_build_info"));
+        assert!(body.contains("password_vault_registration_events_total"));
+        assert!(body.contains("password_vault_accounts_created_total"));
+        assert!(body.contains("password_vault_login_starts_total"));
+        assert!(body.contains("password_vault_login_attempts_total"));
+        assert!(body.contains("password_vault_session_events_total"));
+        assert!(body.contains("password_vault_mfa_events_total"));
+        assert!(body.contains("password_vault_sync_requests_total"));
+        assert!(body.contains("password_vault_vault_item_changes_total"));
+        assert!(!body.contains("user@example.com"));
+        assert!(!body.contains("account_id"));
+        assert!(!body.contains("vault_id"));
+        assert!(!body.contains("item_id"));
     }
 
     #[tokio::test]

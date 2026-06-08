@@ -31,6 +31,7 @@ use crate::{
         totp::{self, TotpAlgorithm, TotpProfile},
         transcript::{self, LoginAuthMessage},
     },
+    telemetry,
 };
 
 const AUTH_PROTOCOL: &str = "derived-auth-v1";
@@ -426,6 +427,8 @@ async fn register_start(
     })
     .await?;
 
+    telemetry::registration_event("start", "issued");
+
     Ok(no_store_json(
         StatusCode::OK,
         RegisterStartResponse {
@@ -710,6 +713,10 @@ async fn register_finish(
         .await
         .map_err(|_| ApiError::service_unavailable())?;
 
+    telemetry::registration_event("finish", "success");
+    telemetry::account_created("success");
+    telemetry::session_event("created", "mfa_enrollment_required");
+
     let mut response = no_store_json(
         StatusCode::CREATED,
         RegisterFinishResponse {
@@ -779,6 +786,8 @@ async fn login_start(
     })
     .await?;
 
+    telemetry::login_start("issued");
+
     Ok(no_store_json(
         StatusCode::OK,
         LoginStartResponse {
@@ -804,6 +813,7 @@ async fn login_finish(
     ensure_unsafe_request_context(&headers)?;
     let pool = database_pool(&state)?;
     if request.auth_protocol != AUTH_PROTOCOL {
+        telemetry::login_attempt("failed", "unsupported_protocol");
         return Err(ApiError::auth_failed());
     }
     let client_nonce = decode_base64url_array::<CLIENT_NONCE_BYTES>(&request.client_nonce)
@@ -852,6 +862,7 @@ async fn login_finish(
     .map_err(|_| ApiError::service_unavailable())?;
 
     let Some(challenge) = challenge else {
+        telemetry::login_attempt("failed", "challenge_unavailable");
         return Err(ApiError::auth_failed());
     };
 
@@ -884,6 +895,7 @@ async fn login_finish(
             .commit()
             .await
             .map_err(|_| ApiError::service_unavailable())?;
+        telemetry::login_attempt("failed", "challenge_mismatch");
         return Err(ApiError::auth_failed());
     }
 
@@ -944,6 +956,7 @@ async fn login_finish(
             .commit()
             .await
             .map_err(|_| ApiError::service_unavailable())?;
+        telemetry::login_attempt("failed", "proof_failed");
         return Err(ApiError::auth_failed());
     }
 
@@ -998,6 +1011,9 @@ async fn login_finish(
             .await
             .map_err(|_| ApiError::service_unavailable())?;
 
+        telemetry::login_attempt("success", "none");
+        telemetry::mfa_event("totp_login", "challenge_issued");
+
         return Ok(no_store_json(
             StatusCode::OK,
             LoginFinishMfaRequiredResponse {
@@ -1030,6 +1046,9 @@ async fn login_finish(
         .commit()
         .await
         .map_err(|_| ApiError::service_unavailable())?;
+
+    telemetry::login_attempt("success", "none");
+    telemetry::session_event("created", "mfa_enrollment_required");
 
     let mut response = no_store_json(
         StatusCode::OK,
@@ -1093,6 +1112,7 @@ async fn totp_verify(
     .map_err(|_| ApiError::service_unavailable())?;
 
     let Some(challenge) = challenge else {
+        telemetry::mfa_event("totp_login", "challenge_unavailable");
         return Err(ApiError::mfa_verification_failed());
     };
     let challenge_id = challenge
@@ -1106,6 +1126,7 @@ async fn totp_verify(
         .try_get::<i32, _>("attempts")
         .map_err(|_| ApiError::service_unavailable())?;
     if attempts >= MFA_CHALLENGE_MAX_ATTEMPTS {
+        telemetry::mfa_event("totp_login", "attempts_exhausted");
         return Err(ApiError::mfa_verification_failed());
     }
     let public_metadata = challenge
@@ -1141,6 +1162,7 @@ async fn totp_verify(
     .map_err(|_| ApiError::service_unavailable())?;
 
     let Some(factor) = factor else {
+        telemetry::mfa_event("totp_login", "factor_unavailable");
         return Err(ApiError::mfa_verification_failed());
     };
     let factor_id = factor
@@ -1194,6 +1216,7 @@ async fn totp_verify(
             .commit()
             .await
             .map_err(|_| ApiError::service_unavailable())?;
+        telemetry::mfa_event("totp_login", "failed");
         return Err(ApiError::mfa_verification_failed());
     };
 
@@ -1229,6 +1252,9 @@ async fn totp_verify(
         .commit()
         .await
         .map_err(|_| ApiError::service_unavailable())?;
+
+    telemetry::mfa_event("totp_login", "verified");
+    telemetry::session_event("created", "mfa_verified");
 
     let mut response = no_store_json(
         StatusCode::OK,
@@ -1432,6 +1458,8 @@ async fn totp_enroll_start(
         .await
         .map_err(|_| ApiError::service_unavailable())?;
 
+    telemetry::mfa_event("totp_enrollment", "started");
+
     Ok(no_store_json(
         StatusCode::OK,
         TotpEnrollStartResponse {
@@ -1495,6 +1523,7 @@ async fn totp_enroll_confirm(
     .map_err(|_| ApiError::service_unavailable())?;
 
     let Some(factor) = factor else {
+        telemetry::mfa_event("totp_enrollment", "factor_unavailable");
         return Err(ApiError::mfa_verification_failed());
     };
 
@@ -1503,6 +1532,7 @@ async fn totp_enroll_confirm(
         .try_get::<Option<OffsetDateTime>, _>("verified_at")
         .map_err(|_| ApiError::service_unavailable())?;
     if verified_at.is_some() {
+        telemetry::mfa_event("totp_enrollment", "already_verified");
         return Err(ApiError::mfa_verification_failed());
     }
     let seed_key_id = factor
@@ -1564,6 +1594,7 @@ async fn totp_enroll_confirm(
             .commit()
             .await
             .map_err(|_| ApiError::service_unavailable())?;
+        telemetry::mfa_event("totp_enrollment", "failed");
         return Err(ApiError::mfa_verification_failed());
     };
 
@@ -1652,6 +1683,9 @@ async fn totp_enroll_confirm(
         .commit()
         .await
         .map_err(|_| ApiError::service_unavailable())?;
+
+    telemetry::mfa_event("totp_enrollment", "confirmed");
+    telemetry::session_event("upgraded", "mfa_verified");
 
     let mut response = no_store_json(
         StatusCode::OK,
