@@ -26,3 +26,6 @@ jobs:
           test -f docs/product-brief.md
           test -f docs/architecture.md
           test -f docs/threat-model.md
+
+      - name: Check browser JavaScript syntax
+        run: node --check crates/api/static/app.js

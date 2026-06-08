@@ -4,10 +4,13 @@ const KDF_ITERATIONS = 600000;
 const ACCOUNT_KEYSET_CRYPTO_VERSION = "account-keyset-v1";
 const VAULT_KEY_WRAP_CRYPTO_VERSION = "vault-key-wrap-v1";
 const VAULT_CRYPTO_PROFILE_ID = "vault-crypto-v1";
+const ITEM_ENVELOPE_CRYPTO_VERSION = "item-envelope-v1";
+const ITEM_ENVELOPE_AEAD = "AES-256-GCM";
 const SCRAM_PROFILE_ID = "pv-scram-sha-256-v1";
 const SCRAM_ITERATIONS = 150000;
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 const state = {
   activeStep: "",
@@ -18,6 +21,9 @@ const state = {
   pendingRegisterSession: null,
   registrationFinished: false,
   accountSecretDisplay: "",
+  pendingUnlockKey: null,
+  vault: null,
+  selectedItemId: "",
 };
 
 const elements = {
@@ -57,6 +63,20 @@ const elements = {
   recoveryCodes: document.querySelector("#recoveryCodes"),
   sessionPanel: document.querySelector("#sessionPanel"),
   sessionList: document.querySelector("#sessionList"),
+  vaultPanel: document.querySelector("#vaultPanel"),
+  vaultStatus: document.querySelector("#vaultStatus"),
+  syncVaultButton: document.querySelector("#syncVaultButton"),
+  lockVaultButton: document.querySelector("#lockVaultButton"),
+  vaultItemForm: document.querySelector("#vaultItemForm"),
+  itemTitle: document.querySelector("#itemTitle"),
+  itemUrl: document.querySelector("#itemUrl"),
+  itemUsername: document.querySelector("#itemUsername"),
+  itemPassword: document.querySelector("#itemPassword"),
+  itemNotes: document.querySelector("#itemNotes"),
+  saveItemButton: document.querySelector("#saveItemButton"),
+  newItemButton: document.querySelector("#newItemButton"),
+  deleteItemButton: document.querySelector("#deleteItemButton"),
+  vaultItemList: document.querySelector("#vaultItemList"),
   healthStatus: document.querySelector("#healthStatus"),
   readyStatus: document.querySelector("#readyStatus"),
 };
@@ -101,7 +121,20 @@ function setLoginTotpBusy(isBusy) {
   elements.verifyLoginTotpButton.textContent = isBusy ? "Verifying..." : "Verify";
 }
 
+function setVaultBusy(isBusy, label = "Save") {
+  elements.syncVaultButton.disabled = isBusy || !state.vault;
+  elements.lockVaultButton.disabled = isBusy || !state.vault;
+  elements.vaultItemForm
+    .querySelectorAll("input, textarea, button")
+    .forEach((element) => {
+      element.disabled = isBusy || !state.vault;
+    });
+  elements.deleteItemButton.disabled = isBusy || !state.vault || !state.selectedItemId;
+  elements.saveItemButton.textContent = isBusy ? "Working..." : label;
+}
+
 function resetFlow() {
+  lockVault(false);
   state.activeStep = "";
   state.csrfToken = "";
   state.factorId = "";
@@ -110,6 +143,7 @@ function resetFlow() {
   state.pendingRegisterSession = null;
   state.registrationFinished = false;
   state.accountSecretDisplay = "";
+  clearPendingUnlockKey();
   for (const step of elements.flowSteps.querySelectorAll("li")) {
     step.dataset.status = "pending";
   }
@@ -163,6 +197,7 @@ function resetOutputs() {
   elements.recoveryCodes.replaceChildren();
   elements.sessionPanel.hidden = true;
   elements.sessionList.replaceChildren();
+  renderLockedVault();
 }
 
 function setMode(mode) {
@@ -259,6 +294,21 @@ function jsonBytes(value) {
   return textBytes(JSON.stringify(value));
 }
 
+function stableJson(value) {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+}
+
+function canonicalBytes(value) {
+  return textBytes(stableJson(value));
+}
+
 function normalizeLoginHandle(value) {
   return value.trim().replace(/[A-Z]/g, (char) => char.toLowerCase());
 }
@@ -312,6 +362,21 @@ function wipe(...items) {
       item.fill(0);
     }
   }
+}
+
+function clearPendingUnlockKey() {
+  if (state.pendingUnlockKey) {
+    wipe(state.pendingUnlockKey);
+    state.pendingUnlockKey = null;
+  }
+}
+
+function clearVaultState() {
+  if (state.vault) {
+    wipe(state.vault.vaultKey, state.vault.integrityKey);
+  }
+  state.vault = null;
+  state.selectedItemId = "";
 }
 
 async function pbkdf2Bytes(secretBytes, saltBytes, iterations, hash, lengthBytes = 32) {
@@ -460,26 +525,46 @@ function loginAuthMessage({
   return textBytes(parts.join(""));
 }
 
-async function aesGcmEncrypt(keyBytes, plaintext) {
+async function aesGcmEncrypt(keyBytes, plaintext, aadBytes = null) {
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
     "encrypt",
   ]);
   const nonce = randomBytes(12);
+  const algorithm = {
+    name: "AES-GCM",
+    iv: nonce,
+    tagLength: 128,
+  };
+  if (aadBytes) {
+    algorithm.additionalData = aadBytes;
+  }
   const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt(
-      {
-        name: "AES-GCM",
-        iv: nonce,
-        tagLength: 128,
-      },
-      key,
-      jsonBytes(plaintext),
-    ),
+    await crypto.subtle.encrypt(algorithm, key, jsonBytes(plaintext)),
   );
   return {
     nonce: base64Url(nonce),
     ciphertext: base64Url(ciphertext),
   };
+}
+
+async function aesGcmDecrypt(keyBytes, envelope, aadBytes = null) {
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
+    "decrypt",
+  ]);
+  const algorithm = {
+    name: "AES-GCM",
+    iv: base64UrlToBytes(envelope.nonce),
+    tagLength: 128,
+  };
+  if (aadBytes) {
+    algorithm.additionalData = aadBytes;
+  }
+  const plaintext = await crypto.subtle.decrypt(
+    algorithm,
+    key,
+    base64UrlToBytes(envelope.ciphertext),
+  );
+  return JSON.parse(decoder.decode(plaintext));
 }
 
 async function buildEncryptedRegistrationPayload(startResponse, masterPassword, loginHandle) {
@@ -527,10 +612,11 @@ async function buildEncryptedRegistrationPayload(startResponse, masterPassword, 
 
   const encryptedAccountKeyset = await aesGcmEncrypt(unlockKey, accountKeyset);
   const encryptedVaultKey = await aesGcmEncrypt(unlockKey, vaultKeyMetadata);
-  wipe(accountSalt, verifierSalt, accountSecretKey, accountKey, vaultKey, authSecret, unlockKey);
+  wipe(accountSalt, verifierSalt, accountSecretKey, accountKey, vaultKey, authSecret);
 
   return {
     accountSecretDisplay,
+    unlockKey,
     finishPayload: {
       registration_id: startResponse.registration_id,
       auth_protocol: AUTH_PROTOCOL,
@@ -633,12 +719,11 @@ async function buildLoginFinishPayload(startResponse, input, clientNonce) {
     authVerifierSalt,
     serverNonce,
     authSecret,
-    unlockKey,
     authMessage,
     clientFinalWithoutProof,
     clientProof,
   );
-  return payload;
+  return { payload, unlockKey };
 }
 
 async function jsonFetch(path, options = {}) {
@@ -789,6 +874,619 @@ function renderSession(sessionResponse, fallbackSession) {
   elements.sessionPanel.hidden = false;
 }
 
+function renderLockedVault() {
+  clearVaultState();
+  elements.vaultPanel.hidden = true;
+  elements.vaultStatus.textContent = "Locked.";
+  elements.vaultStatus.className = "status-message";
+  elements.vaultItemList.replaceChildren();
+  resetVaultForm();
+  setVaultBusy(false);
+}
+
+function lockVault(updateStatus = true) {
+  clearPendingUnlockKey();
+  clearVaultState();
+  elements.vaultPanel.hidden = true;
+  elements.vaultStatus.textContent = "Locked.";
+  elements.vaultStatus.className = "status-message";
+  elements.vaultItemList.replaceChildren();
+  resetVaultForm();
+  setVaultBusy(false);
+  if (updateStatus) {
+    setStatus("Vault locked.", "success");
+  }
+}
+
+function resetVaultForm() {
+  state.selectedItemId = "";
+  elements.itemTitle.value = "";
+  elements.itemUrl.value = "";
+  elements.itemUsername.value = "";
+  elements.itemPassword.value = "";
+  elements.itemNotes.value = "";
+  elements.saveItemButton.textContent = "Save";
+  elements.deleteItemButton.disabled = true;
+  renderVaultItems();
+}
+
+function requireUnlockedVault() {
+  if (!state.vault) {
+    throw new Error("Vault is locked.");
+  }
+  return state.vault;
+}
+
+function setVaultStatus(message, type = "") {
+  elements.vaultStatus.textContent = message;
+  elements.vaultStatus.className = `status-message ${type}`.trim();
+}
+
+async function decryptVaultKey(unlockKey, vault) {
+  const wrapped = vault.encrypted_vault_key;
+  if (wrapped.crypto_version !== VAULT_KEY_WRAP_CRYPTO_VERSION) {
+    throw new Error("Unsupported vault key wrap.");
+  }
+  const metadata = await aesGcmDecrypt(unlockKey, wrapped, null);
+  if (
+    metadata.version !== VAULT_KEY_WRAP_CRYPTO_VERSION ||
+    metadata.vault_id !== vault.vault_id ||
+    metadata.crypto_profile_id !== VAULT_CRYPTO_PROFILE_ID
+  ) {
+    throw new Error("Vault key metadata did not match the server vault.");
+  }
+  const vaultKey = base64UrlToBytes(metadata.vault_key);
+  if (vaultKey.length !== 32) {
+    throw new Error("Vault key has an invalid length.");
+  }
+  return {
+    vaultKey,
+    keyId: wrapped.key_id,
+  };
+}
+
+async function deriveVaultIntegrityKey(vaultKey, vaultId) {
+  return hkdfBytes(
+    vaultKey,
+    textBytes(`password-vault/vault-integrity-salt/v1:${vaultId}`),
+    "password-vault/vault-integrity-key/v1",
+  );
+}
+
+async function deriveItemRevisionKey(vaultKey, vaultId, itemId, revisionId) {
+  return hkdfBytes(
+    vaultKey,
+    textBytes(`password-vault/item-revision-salt/v1:${vaultId}:${itemId}:${revisionId}`),
+    "password-vault/item-revision-key/v1",
+  );
+}
+
+function itemAad({ vaultId, itemId, revisionId, operation, baseRevisionSeq, baseHeadSeq, keyId }) {
+  return canonicalBytes({
+    record_type: "vault-item-revision",
+    crypto_version: ITEM_ENVELOPE_CRYPTO_VERSION,
+    aead: ITEM_ENVELOPE_AEAD,
+    vault_id: vaultId,
+    item_id: itemId,
+    revision_id: revisionId,
+    operation,
+    base_revision_seq: baseRevisionSeq,
+    base_head_seq: baseHeadSeq,
+    key_id: keyId,
+  });
+}
+
+function changeMacPayload({
+  operation,
+  vaultId,
+  itemId,
+  revisionId,
+  revisionSeq,
+  headSeq,
+  baseRevisionSeq,
+  baseHeadSeq,
+  baseHeadHash,
+  previousHeadHash,
+  envelopeHash,
+  keyId,
+}) {
+  return {
+    version: "password-vault/change-mac/v1",
+    operation,
+    vault_id: vaultId,
+    item_id: itemId,
+    revision_id: revisionId,
+    revision_seq: revisionSeq,
+    head_seq: headSeq,
+    base_revision_seq: baseRevisionSeq,
+    base_head_seq: baseHeadSeq,
+    base_head_hash: baseHeadHash,
+    previous_head_hash: previousHeadHash,
+    envelope_hash: envelopeHash,
+    key_id: keyId,
+    crypto_version: ITEM_ENVELOPE_CRYPTO_VERSION,
+  };
+}
+
+function headHashPayload({ vaultId, headSeq, previousHeadHash, changeMac }) {
+  return {
+    version: "password-vault/head-hash/v1",
+    vault_id: vaultId,
+    head_seq: headSeq,
+    previous_head_hash: previousHeadHash,
+    change_mac: changeMac,
+  };
+}
+
+async function computeChangeMac(vault, payload) {
+  return base64Url(await hmacSha256(vault.integrityKey, canonicalBytes(payload)));
+}
+
+async function computeHeadHash(vault, payload) {
+  return base64Url(await hmacSha256(vault.integrityKey, canonicalBytes(payload)));
+}
+
+async function unlockVaultWithKey(unlockKey) {
+  beginStep("vault-unlock");
+  setStatus("Unlocking vault...");
+  const vaultList = await jsonFetch("/v1/vaults");
+  const [serverVault] = vaultList.vaults || [];
+  if (!serverVault) {
+    throw new Error("No vault is available for this account.");
+  }
+  const { vaultKey, keyId } = await decryptVaultKey(unlockKey, serverVault);
+  const integrityKey = await deriveVaultIntegrityKey(vaultKey, serverVault.vault_id);
+  state.vault = {
+    vaultId: serverVault.vault_id,
+    keyId,
+    vaultKey,
+    integrityKey,
+    headSeq: 0,
+    headHash: serverVault.genesis_head_hash || serverVault.head_hash,
+    serverHeadSeq: Number(serverVault.head_seq),
+    serverHeadHash: serverVault.head_hash,
+    items: new Map(),
+  };
+  clearPendingUnlockKey();
+  finishStep("vault-unlock");
+  elements.vaultPanel.hidden = false;
+  setVaultBusy(false);
+  await syncVault();
+}
+
+async function unlockVaultFromPendingKey() {
+  if (!state.pendingUnlockKey) {
+    return;
+  }
+  const unlockKey = state.pendingUnlockKey;
+  state.pendingUnlockKey = null;
+  try {
+    await unlockVaultWithKey(unlockKey);
+  } finally {
+    wipe(unlockKey);
+  }
+}
+
+async function envelopeHash(envelope) {
+  return base64Url(await sha256(canonicalBytes(envelope)));
+}
+
+async function buildEncryptedItemChange({ operation, plaintext, itemId, baseRevisionSeq }) {
+  const vault = requireUnlockedVault();
+  const revisionId = crypto.randomUUID();
+  const revisionSeq = baseRevisionSeq + 1;
+  const headSeq = vault.headSeq + 1;
+  const baseHeadSeq = vault.headSeq;
+  const baseHeadHash = vault.headHash;
+  const keyId = `vault-item-key-${VAULT_CRYPTO_PROFILE_ID}`;
+  const contentKey = await deriveItemRevisionKey(vault.vaultKey, vault.vaultId, itemId, revisionId);
+  const aad = itemAad({
+    vaultId: vault.vaultId,
+    itemId,
+    revisionId,
+    operation,
+    baseRevisionSeq,
+    baseHeadSeq,
+    keyId,
+  });
+  const encrypted = await aesGcmEncrypt(contentKey, plaintext, aad);
+  wipe(contentKey);
+
+  const encryptedItemEnvelope = {
+    crypto_version: ITEM_ENVELOPE_CRYPTO_VERSION,
+    key_id: keyId,
+    aead: ITEM_ENVELOPE_AEAD,
+    nonce: encrypted.nonce,
+    ciphertext: encrypted.ciphertext,
+  };
+  const encryptedEnvelopeHash = await envelopeHash(encryptedItemEnvelope);
+  const changeMac = await computeChangeMac(
+    vault,
+    changeMacPayload({
+      operation,
+      vaultId: vault.vaultId,
+      itemId,
+      revisionId,
+      revisionSeq,
+      headSeq,
+      baseRevisionSeq,
+      baseHeadSeq,
+      baseHeadHash,
+      previousHeadHash: baseHeadHash,
+      envelopeHash: encryptedEnvelopeHash,
+      keyId,
+    }),
+  );
+  const newHeadHash = await computeHeadHash(
+    vault,
+    headHashPayload({
+      vaultId: vault.vaultId,
+      headSeq,
+      previousHeadHash: baseHeadHash,
+      changeMac,
+    }),
+  );
+
+  return {
+    itemId,
+    revisionId,
+    revisionSeq,
+    headSeq,
+    baseRevisionSeq,
+    baseHeadSeq,
+    baseHeadHash,
+    previousHeadHash: baseHeadHash,
+    newHeadHash,
+    changeMac,
+    envelopeHash: encryptedEnvelopeHash,
+    encryptedItemEnvelope,
+  };
+}
+
+async function verifyAndApplyChange(change) {
+  const vault = requireUnlockedVault();
+  const operation = String(change.operation);
+  const itemId = String(change.item_id);
+  const revisionId = String(change.revision_id);
+  const revisionSeq = Number(change.revision_seq);
+  const headSeq = Number(change.head_seq);
+  const baseRevisionSeq = Number(change.base_revision_seq);
+  const baseHeadSeq = Number(change.base_head_seq);
+  const baseHeadHash = String(change.base_head_hash);
+  const previousHeadHash = String(change.previous_head_hash);
+  const envelope = change.encrypted_item_envelope;
+  const keyId = String(envelope?.key_id || "");
+
+  if (
+    baseHeadSeq !== vault.headSeq ||
+    baseHeadHash !== vault.headHash ||
+    previousHeadHash !== vault.headHash
+  ) {
+    throw new Error("Sync chain does not extend the local vault checkpoint.");
+  }
+  if (envelope?.crypto_version !== ITEM_ENVELOPE_CRYPTO_VERSION || envelope?.aead !== ITEM_ENVELOPE_AEAD) {
+    throw new Error("Unsupported item envelope.");
+  }
+  const actualEnvelopeHash = await envelopeHash(envelope);
+  if (actualEnvelopeHash !== change.envelope_hash) {
+    throw new Error("Encrypted item envelope hash mismatch.");
+  }
+  const expectedChangeMac = await computeChangeMac(
+    vault,
+    changeMacPayload({
+      operation,
+      vaultId: vault.vaultId,
+      itemId,
+      revisionId,
+      revisionSeq,
+      headSeq,
+      baseRevisionSeq,
+      baseHeadSeq,
+      baseHeadHash,
+      previousHeadHash,
+      envelopeHash: actualEnvelopeHash,
+      keyId,
+    }),
+  );
+  if (expectedChangeMac !== change.change_mac) {
+    throw new Error("Vault change MAC mismatch.");
+  }
+  const expectedHeadHash = await computeHeadHash(
+    vault,
+    headHashPayload({
+      vaultId: vault.vaultId,
+      headSeq,
+      previousHeadHash,
+      changeMac: expectedChangeMac,
+    }),
+  );
+  if (expectedHeadHash !== change.head_hash) {
+    throw new Error("Vault head hash mismatch.");
+  }
+
+  const contentKey = await deriveItemRevisionKey(vault.vaultKey, vault.vaultId, itemId, revisionId);
+  const plaintext = await aesGcmDecrypt(
+    contentKey,
+    envelope,
+    itemAad({
+      vaultId: vault.vaultId,
+      itemId,
+      revisionId,
+      operation,
+      baseRevisionSeq,
+      baseHeadSeq,
+      keyId,
+    }),
+  );
+  wipe(contentKey);
+
+  if (operation === "delete") {
+    vault.items.delete(itemId);
+  } else {
+    vault.items.set(itemId, {
+      itemId,
+      revisionId,
+      revisionSeq,
+      headSeq,
+      fields: plaintext,
+    });
+  }
+  vault.headSeq = headSeq;
+  vault.headHash = change.head_hash;
+}
+
+async function syncVault() {
+  const vault = requireUnlockedVault();
+  beginStep("vault-sync");
+  setVaultBusy(true, "Save");
+  setVaultStatus("Syncing vault...");
+  try {
+    let hasMore = false;
+    do {
+      const query = new URLSearchParams({
+        from_head_seq: String(vault.headSeq),
+        from_head_hash: vault.headHash,
+      });
+      const response = await jsonFetch(`/v1/vaults/${vault.vaultId}/sync?${query.toString()}`);
+      for (const change of response.changes || []) {
+        await verifyAndApplyChange(change);
+      }
+      hasMore = Boolean(response.has_more);
+      if (!hasMore) {
+        const serverHeadSeq = Number(response.to_head?.seq);
+        const serverHeadHash = String(response.to_head?.hash || "");
+        if (serverHeadSeq !== vault.headSeq || serverHeadHash !== vault.headHash) {
+          throw new Error("Server sync head does not match the verified local chain.");
+        }
+      }
+    } while (hasMore);
+    renderVaultItems();
+    finishStep("vault-sync");
+    setVaultStatus(`Unlocked. ${vault.items.size} item(s).`, "success");
+  } catch (error) {
+    failActiveStep();
+    setVaultStatus(error.message, "error");
+    throw error;
+  } finally {
+    setVaultBusy(false, state.selectedItemId ? "Update" : "Save");
+  }
+}
+
+function currentItemPlaintext() {
+  const title = elements.itemTitle.value.trim();
+  if (!title) {
+    throw new Error("Enter an item title.");
+  }
+  return {
+    version: "item-plaintext-v1",
+    title,
+    url: elements.itemUrl.value.trim(),
+    username: elements.itemUsername.value.trim(),
+    password: elements.itemPassword.value,
+    notes: elements.itemNotes.value,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+async function saveVaultItem(event) {
+  event.preventDefault();
+  const vault = requireUnlockedVault();
+  const selected = state.selectedItemId ? vault.items.get(state.selectedItemId) : null;
+  const operation = selected ? "update" : "create";
+  const itemId = selected?.itemId || crypto.randomUUID();
+  const baseRevisionSeq = selected?.revisionSeq || 0;
+  const plaintext = currentItemPlaintext();
+  setVaultBusy(true, selected ? "Update" : "Save");
+  setVaultStatus(selected ? "Updating encrypted item..." : "Creating encrypted item...");
+
+  try {
+    beginStep("vault-write");
+    const change = await buildEncryptedItemChange({
+      operation,
+      plaintext,
+      itemId,
+      baseRevisionSeq,
+    });
+    const csrf = await jsonFetch("/v1/csrf");
+    const body = {
+      revision_id: change.revisionId,
+      base_head_seq: change.baseHeadSeq,
+      base_head_hash: change.baseHeadHash,
+      new_head_hash: change.newHeadHash,
+      change_mac: change.changeMac,
+      envelope_hash: change.envelopeHash,
+      encrypted_item_envelope: change.encryptedItemEnvelope,
+    };
+    const response =
+      operation === "create"
+        ? await jsonFetch(`/v1/vaults/${vault.vaultId}/items`, {
+            method: "POST",
+            csrfToken: csrf.csrf_token,
+            body: {
+              item_id: itemId,
+              ...body,
+            },
+          })
+        : await jsonFetch(`/v1/vaults/${vault.vaultId}/items/${itemId}/revisions`, {
+            method: "POST",
+            csrfToken: csrf.csrf_token,
+            body: {
+              operation,
+              base_revision_seq: baseRevisionSeq,
+              ...body,
+            },
+          });
+    if (response.head_hash !== change.newHeadHash || Number(response.head_seq) !== change.headSeq) {
+      throw new Error("Server returned an unexpected vault head.");
+    }
+    await verifyAndApplyChange({
+      item_id: itemId,
+      revision_id: change.revisionId,
+      operation,
+      revision_seq: change.revisionSeq,
+      head_seq: change.headSeq,
+      previous_head_hash: change.previousHeadHash,
+      head_hash: change.newHeadHash,
+      base_revision_seq: change.baseRevisionSeq,
+      base_head_seq: change.baseHeadSeq,
+      base_head_hash: change.baseHeadHash,
+      change_mac: change.changeMac,
+      envelope_hash: change.envelopeHash,
+      encrypted_item_envelope: change.encryptedItemEnvelope,
+    });
+    state.selectedItemId = itemId;
+    renderVaultItems();
+    selectVaultItem(itemId);
+    finishStep("vault-write");
+    setVaultStatus("Encrypted item saved.", "success");
+  } catch (error) {
+    failActiveStep();
+    setVaultStatus(error.message, "error");
+    setStatus(error.message, "error");
+  } finally {
+    setVaultBusy(false, state.selectedItemId ? "Update" : "Save");
+  }
+}
+
+async function deleteVaultItem() {
+  const vault = requireUnlockedVault();
+  const selected = state.selectedItemId ? vault.items.get(state.selectedItemId) : null;
+  if (!selected) {
+    setVaultStatus("Select an item first.", "error");
+    return;
+  }
+  setVaultBusy(true, "Delete");
+  setVaultStatus("Deleting encrypted item...");
+  try {
+    beginStep("vault-write");
+    const change = await buildEncryptedItemChange({
+      operation: "delete",
+      plaintext: {
+        version: "item-plaintext-v1",
+        deleted: true,
+        deleted_at: new Date().toISOString(),
+      },
+      itemId: selected.itemId,
+      baseRevisionSeq: selected.revisionSeq,
+    });
+    const csrf = await jsonFetch("/v1/csrf");
+    const response = await jsonFetch(`/v1/vaults/${vault.vaultId}/items/${selected.itemId}/revisions`, {
+      method: "POST",
+      csrfToken: csrf.csrf_token,
+      body: {
+        revision_id: change.revisionId,
+        operation: "delete",
+        base_revision_seq: selected.revisionSeq,
+        base_head_seq: change.baseHeadSeq,
+        base_head_hash: change.baseHeadHash,
+        new_head_hash: change.newHeadHash,
+        change_mac: change.changeMac,
+        envelope_hash: change.envelopeHash,
+        encrypted_item_envelope: change.encryptedItemEnvelope,
+      },
+    });
+    if (response.head_hash !== change.newHeadHash || Number(response.head_seq) !== change.headSeq) {
+      throw new Error("Server returned an unexpected vault head.");
+    }
+    await verifyAndApplyChange({
+      item_id: selected.itemId,
+      revision_id: change.revisionId,
+      operation: "delete",
+      revision_seq: change.revisionSeq,
+      head_seq: change.headSeq,
+      previous_head_hash: change.previousHeadHash,
+      head_hash: change.newHeadHash,
+      base_revision_seq: change.baseRevisionSeq,
+      base_head_seq: change.baseHeadSeq,
+      base_head_hash: change.baseHeadHash,
+      change_mac: change.changeMac,
+      envelope_hash: change.envelopeHash,
+      encrypted_item_envelope: change.encryptedItemEnvelope,
+    });
+    resetVaultForm();
+    finishStep("vault-write");
+    setVaultStatus("Encrypted item deleted.", "success");
+  } catch (error) {
+    failActiveStep();
+    setVaultStatus(error.message, "error");
+    setStatus(error.message, "error");
+  } finally {
+    setVaultBusy(false, state.selectedItemId ? "Update" : "Save");
+  }
+}
+
+function renderVaultItems() {
+  elements.vaultItemList.replaceChildren();
+  if (!state.vault) {
+    return;
+  }
+  const items = [...state.vault.items.values()].sort((left, right) =>
+    String(left.fields.title || "").localeCompare(String(right.fields.title || "")),
+  );
+  if (items.length === 0) {
+    const empty = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.disabled = true;
+    button.innerHTML = '<span class="vault-item-title">No items</span>';
+    empty.append(button);
+    elements.vaultItemList.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("li");
+    const button = document.createElement("button");
+    const title = document.createElement("span");
+    const subtitle = document.createElement("span");
+    button.type = "button";
+    button.setAttribute("aria-selected", String(item.itemId === state.selectedItemId));
+    title.className = "vault-item-title";
+    subtitle.className = "vault-item-subtitle";
+    title.textContent = item.fields.title || "Untitled";
+    subtitle.textContent = item.fields.username || item.fields.url || `revision ${item.revisionSeq}`;
+    button.append(title, subtitle);
+    button.addEventListener("click", () => selectVaultItem(item.itemId));
+    row.append(button);
+    elements.vaultItemList.append(row);
+  }
+}
+
+function selectVaultItem(itemId) {
+  const item = state.vault?.items.get(itemId);
+  if (!item) {
+    return;
+  }
+  state.selectedItemId = itemId;
+  elements.itemTitle.value = item.fields.title || "";
+  elements.itemUrl.value = item.fields.url || "";
+  elements.itemUsername.value = item.fields.username || "";
+  elements.itemPassword.value = item.fields.password || "";
+  elements.itemNotes.value = item.fields.notes || "";
+  elements.saveItemButton.textContent = "Update";
+  elements.deleteItemButton.disabled = false;
+  renderVaultItems();
+}
+
 async function startTotpEnrollment(sessionForDisplay) {
   beginStep("totp-start");
   setStatus("Starting TOTP enrollment...");
@@ -853,12 +1551,14 @@ async function submitRegistration(event) {
 
     beginStep("derive-keys");
     setStatus("Deriving browser keys...");
-    const { accountSecretDisplay, finishPayload } = await buildEncryptedRegistrationPayload(
+    const { accountSecretDisplay, unlockKey, finishPayload } = await buildEncryptedRegistrationPayload(
       startResponse,
       input.masterPassword,
       input.loginHandle,
     );
     renderAccountSecret(accountSecretDisplay);
+    clearPendingUnlockKey();
+    state.pendingUnlockKey = unlockKey;
     state.pendingFinishPayload = finishPayload;
     finishStep("derive-keys");
 
@@ -909,7 +1609,13 @@ async function submitLogin(event) {
 
     beginStep("login-proof");
     setStatus("Verifying account proof...");
-    const finishPayload = await buildLoginFinishPayload(startResponse, input, clientNonce);
+    const { payload: finishPayload, unlockKey } = await buildLoginFinishPayload(
+      startResponse,
+      input,
+      clientNonce,
+    );
+    clearPendingUnlockKey();
+    state.pendingUnlockKey = unlockKey;
     const finishResponse = await jsonFetch("/v1/auth/login/finish", {
       method: "POST",
       body: finishPayload,
@@ -935,6 +1641,7 @@ async function submitLogin(event) {
     throw new Error("Unexpected login response.");
   } catch (error) {
     failActiveStep();
+    clearPendingUnlockKey();
     elements.loginMasterPassword.value = "";
     elements.accountSecretInput.value = "";
     setStatus(error.message, "error");
@@ -1027,6 +1734,7 @@ async function submitLoginTotp(event) {
     const session = await jsonFetch("/v1/session").catch(() => null);
     renderSession(session, verification.session);
     finishStep("session");
+    await unlockVaultFromPendingKey();
 
     elements.loginTotpCode.value = "";
     elements.loginMfaPanel.hidden = true;
@@ -1076,6 +1784,7 @@ async function submitTotp(event) {
     const session = await jsonFetch("/v1/session").catch(() => null);
     renderSession(session, confirmation.session);
     finishStep("session");
+    await unlockVaultFromPendingKey();
 
     elements.totpCode.value = "";
     elements.totpCode.disabled = true;
@@ -1103,5 +1812,12 @@ elements.secretSavedCheckbox.addEventListener("change", updateSecretSavedState);
 elements.continueEnrollmentButton.addEventListener("click", continueEnrollment);
 elements.totpForm.addEventListener("submit", submitTotp);
 elements.loginMfaForm.addEventListener("submit", submitLoginTotp);
+elements.vaultItemForm.addEventListener("submit", saveVaultItem);
+elements.syncVaultButton.addEventListener("click", () => {
+  syncVault().catch((error) => setStatus(error.message, "error"));
+});
+elements.lockVaultButton.addEventListener("click", () => lockVault(true));
+elements.newItemButton.addEventListener("click", resetVaultForm);
+elements.deleteItemButton.addEventListener("click", deleteVaultItem);
 resetFlow();
 refreshStatus();

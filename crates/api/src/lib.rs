@@ -589,6 +589,8 @@ mod tests {
         let index_body = String::from_utf8(index_body.to_vec()).unwrap();
         assert!(index_body.contains("Password Vault"));
         assert!(index_body.contains("/assets/app.css"));
+        assert!(index_body.contains("id=\"vaultPanel\""));
+        assert!(index_body.contains("id=\"vaultItemForm\""));
 
         let css_response = app
             .clone()
@@ -626,6 +628,12 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("application/javascript; charset=utf-8")
         );
+        let js_body = to_bytes(js_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let js_body = String::from_utf8(js_body.to_vec()).unwrap();
+        assert!(js_body.contains("ITEM_ENVELOPE_CRYPTO_VERSION"));
+        assert!(js_body.contains("unlockVaultWithKey"));
     }
 
     #[tokio::test]
@@ -2137,6 +2145,10 @@ mod tests {
         let vault = &vaults_body["vaults"][0];
         assert_eq!(vault["vault_id"], vault_id);
         assert_eq!(vault["head_seq"], 0);
+        assert_eq!(
+            vault["genesis_head_hash"], vault["head_hash"],
+            "genesis and current head match for an empty vault"
+        );
         assert_eq!(
             vault["encrypted_vault_key"]["crypto_version"],
             "vault-key-wrap-v1"

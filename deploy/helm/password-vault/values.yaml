@@ -73,9 +73,10 @@ migrations:
     annotations: {}
     argocdHook:
       enabled: false
+      generateName: true
       phase: PreSync
       syncWave: "-1"
-      deletePolicy: BeforeHookCreation
+      deletePolicy: HookSucceeded
     resources:
       requests:
         cpu: 100m

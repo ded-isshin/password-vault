@@ -244,6 +244,44 @@ The first useful business metric is not revenue. It is protected activation: a r
 finishes with MFA enabled and at least one encrypted vault item saved. Until that journey works, the
 business dashboard should stay focused on product readiness rather than marketing-style growth.
 
+## Daily Operating View
+
+The main Grafana dashboard should be useful in the first minute of an incident review. Organize it
+by questions an operator or product owner actually asks, not by metric namespace.
+
+| Row | Question | Primary panels | Action when bad |
+| --- | --- | --- | --- |
+| User-visible availability | Can users reach the app and API from the client path? | Black-box edge probe, `up`, ready endpoints, 5xx ratio | Check edge NGINX, LoadBalancer, API readiness, Argo sync state. |
+| Unlock and access | Can a returning user authenticate, pass MFA, and unlock vault metadata? | Login start/proof/MFA rates, login journey synthetic result, auth latency | Check auth errors, TOTP seed key availability, DB latency, session/CSRF failures. |
+| Save and sync | Can users save an encrypted item and retrieve it later? | Vault item write success, sync request success, stale revision/conflict rate, synthetic write/read/sync result | Check revision-chain logic, DB write path, migration state, client conflict handling. |
+| Durability | Will acknowledged saves survive a node/database failure? | PostgreSQL primary/replica health, replication lag, backup age, WAL archive health, restore drill age | Stop accepting real secrets if backup/replication gates fail. |
+| Saturation | Are we near resource limits before users see errors? | p95/p99 latency, pending requests, DB pool wait, auth hash active work, CPU/memory, disk | Scale API, tune pool/hash cost, investigate DB/worker pressure. |
+| Abuse resistance | Are attackers or broken clients distorting the system? | Rate-limit hits, CSRF failures, invalid-origin rejects, MFA failure rate, unmatched 404 rate | Review rate-limit policy, block abusive paths, check security logs without exposing user data. |
+| Release context | What changed recently? | Build info, image digest, Argo revision, rollout generation, migration hook status | Compare with previous known-good digest and rollback/migration notes. |
+
+## Product Metrics That Matter Now
+
+Use these as MVP product-health metrics. They are intentionally aggregate-only and must not include
+user, account, vault, item, email, login handle, device, IP, path, or encrypted-payload labels.
+
+| Metric concept | Good interpretation | Bad interpretation |
+| --- | --- | --- |
+| Protected activation | Registration completed, MFA confirmed, first encrypted item saved. | Counting raw registrations as success before the user has any protected secret. |
+| Returning access | Login proof and MFA succeed, vault metadata decrypts in the browser. | Counting `login/start` as success even if users cannot pass MFA or unlock. |
+| Core write success | Encrypted item create/update/delete produces a valid revision and later sync returns it. | Counting server `200` only, without proving client can decrypt/sync the result. |
+| Sync conflict rate | Low stale-revision/conflict rate under normal synthetic and manual use. | Treating all conflicts as failures; some conflicts are expected protection against overwrite. |
+| Recovery readiness | Recovery-code verification flow exists and is monitored. | Treating recovery-code issuance as proof that account recovery is usable. |
+| Data survival | Backup/restore/failover drills are recent and successful. | Treating database pod readiness as proof that saved secrets are durable. |
+
+For the current MVP, the north-star synthetic journey is:
+
+```text
+register -> confirm TOTP -> lock/return -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt item
+```
+
+That journey should produce one low-cardinality success/failure metric and should be run from a
+client path equivalent to the browser/LAN route, not only from inside the Kubernetes namespace.
+
 ## Dashboard Maturity Levels
 
 Use these levels to avoid calling a dashboard "done" when it only proves that scraping works:
@@ -257,10 +295,11 @@ Use these levels to avoid calling a dashboard "done" when it only proves that sc
 | L4 durability | Data survival is measured. | DB replication, backup age, WAL archive health, restore drill age, and failover drill results are visible. |
 | L5 security/product | Aggregate abuse and activation signals are visible. | Low-cardinality auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented. |
 
-The live preview is currently between L1 and L2, with part of L3 now started: basic Golden Signal
+The live preview is currently L1 with part of L3 instrumentation started. Basic Golden Signal
 dashboard data exists, deployed product counters are visible, and registration/login-start journey
-signals have non-zero live data. Product-specific alerts and full browser vault journey metrics are
-not complete.
+signals have non-zero live data. It is not L2 yet because product alert rules are not deployed and
+tested. It is not L3 yet because the full browser vault journey synthetic is not implemented and
+verified.
 
 ## Current Dashboard Gaps
 

@@ -505,6 +505,96 @@ button:focus-visible {
   margin: 0;
 }
 
+.vault-heading,
+.vault-actions,
+.vault-form-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vault-actions,
+.vault-form-actions {
+  flex-wrap: wrap;
+}
+
+.vault-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.vault-form {
+  display: grid;
+  gap: 10px;
+}
+
+.vault-form-actions {
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
+.danger-action {
+  color: var(--danger);
+}
+
+.vault-list-panel {
+  min-height: 240px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.vault-item-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vault-item-list li {
+  border-bottom: 1px solid var(--line);
+}
+
+.vault-item-list li:last-child {
+  border-bottom: 0;
+}
+
+.vault-item-list button {
+  width: 100%;
+  min-height: 58px;
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vault-item-list button:hover,
+.vault-item-list button[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.vault-item-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.vault-item-subtitle {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -519,7 +609,8 @@ button:focus-visible {
 
   .topbar,
   .workspace,
-  .totp-grid {
+  .totp-grid,
+  .vault-layout {
     grid-template-columns: 1fr;
   }
 
@@ -557,6 +648,11 @@ button:focus-visible {
 
   .secondary-size {
     width: 100%;
+  }
+
+  .vault-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .recovery-list {

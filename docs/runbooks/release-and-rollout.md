@@ -65,12 +65,13 @@ later GitOps/Helm applies when its immutable pod template changes. Use a separat
 step for non-Argo migration execution.
 
 The Argo `PreSync` hook runs before the API Deployment rollout. If the migration job fails, Argo
-stops the sync and does not proceed with the deployment. The default hook delete policy is
-`BeforeHookCreation`, which leaves the completed job visible as evidence until the next sync
-recreates it.
+stops the sync and does not proceed with the deployment.
 
-Leave `ttlSecondsAfterFinished` unset for Argo-managed migration hooks unless there is a separate
-evidence-retention decision. Kubernetes TTL cleanup can remove completed Jobs before the next sync.
+The chart uses `metadata.generateName` for Argo migration hooks and deletes successful hook Jobs with
+`HookSucceeded`. This avoids fixed-name Job immutability failures when a later release changes the
+pod template or image digest. Failed hook Jobs are intentionally left for inspection. Leave
+`ttlSecondsAfterFinished` unset for Argo-managed migration hooks unless there is a separate
+evidence-retention decision.
 
 Stable PostgreSQL versions do not remove application schema migrations. PostgreSQL stability means
 the engine behavior is supported and predictable; it does not create password-vault tables,
