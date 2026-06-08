@@ -59,6 +59,13 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   product `Cluster`, `Backup`, or `ScheduledBackup`, and no CloudNativePG operator/controller was
   observed in the current cluster scan.
 - No `NetworkPolicy` exists in the `password-vault` namespace yet.
+- The current product branch adds low-cardinality product counters for registration, account
+  creation, login, MFA, session creation/upgrades, vault item changes, sync requests, and build
+  information. These metrics are implemented locally and covered by a low-cardinality `/metrics`
+  test, but they are not live until the branch is built, merged, published, and rolled out.
+- The infrastructure GitOps dashboard intent has been extended with panels for those product
+  counters. Grouped dashboard panels use `or on() vector(0)` for fallback, so they return `0`
+  only when no left-hand series exists and do not add a permanent empty zero series.
 
 Important label note:
 
@@ -139,11 +146,27 @@ Map the Google SRE Golden Signals to product-specific telemetry as follows:
 Current guardrail: unmatched routes collapse to `endpoint="/<unmatched>"`, avoiding unbounded path
 cardinality.
 
-### Planned Application Metrics To Add
+### Implemented Product Metrics In Current Branch
+
+These metrics are low-cardinality and intentionally do not use user, account, vault, item, device,
+login-handle, OTP, path, host, or secret labels.
 
 | Metric | Type | Labels | Why |
 | --- | --- | --- | --- |
-| `password_vault_build_info` | gauge | `version`, `revision` | Correlate deploys with incidents without exposing runtime hosts. |
+| `password_vault_build_info` | gauge | `version`, `revision` | Correlate deployed code with incidents and rollouts. |
+| `password_vault_registration_events_total` | counter | `event`, `outcome` | Track the first-run journey without user identifiers. |
+| `password_vault_accounts_created_total` | counter | `outcome` | Measure successful account creation. |
+| `password_vault_login_starts_total` | counter | `outcome` | Separate login metadata/challenge issuance from proof verification. |
+| `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | Track proof verification success and coarse failure classes. |
+| `password_vault_session_events_total` | counter | `event`, `outcome` | Track session creation and MFA upgrade outcomes. |
+| `password_vault_mfa_events_total` | counter | `event`, `outcome` | Track TOTP enrollment and login MFA outcomes. |
+| `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | Track encrypted item create/update/delete success and conflict rates. |
+| `password_vault_sync_requests_total` | counter | `outcome`, `page` | Track vault delta-sync success, conflict, and pagination. |
+
+### Planned Technical Metrics To Add
+
+| Metric | Type | Labels | Why |
+| --- | --- | --- | --- |
 | `password_vault_db_pool_connections` | gauge | `state="idle|used|max"` | Detect pool exhaustion before request failures. |
 | `password_vault_db_pool_wait_duration_seconds_bucket` | histogram | `operation` | Track saturation when requests wait for a DB connection. |
 | `password_vault_db_query_duration_seconds_bucket` | histogram | `operation`, `outcome` | Separate DB latency from application latency. |
@@ -162,17 +185,17 @@ not be used with user-identifying labels.
 
 | Metric | Type | Labels | Category | Status |
 | --- | --- | --- | --- | --- |
-| `password_vault_accounts_created_total` | counter | `outcome` | product | Planned |
-| `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | product/security | Planned |
+| `password_vault_accounts_created_total` | counter | `outcome` | product | Implemented locally |
+| `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | product/security | Implemented locally |
 | `password_vault_active_sessions` | gauge | none | product/security | Planned |
-| `password_vault_session_events_total` | counter | `event`, `outcome` | product/security | Planned |
-| `password_vault_mfa_events_total` | counter | `event`, `outcome` | security | Planned |
-| `password_vault_totp_verify_total` | counter | `outcome` | security | Planned |
+| `password_vault_session_events_total` | counter | `event`, `outcome` | product/security | Implemented locally |
+| `password_vault_mfa_events_total` | counter | `event`, `outcome` | security | Implemented locally |
+| `password_vault_totp_verify_total` | counter | `outcome` | security | Superseded by `password_vault_mfa_events_total` for MVP |
 | `password_vault_csrf_failures_total` | counter | `endpoint`, `reason` | security | Planned |
 | `password_vault_security_events_total` | counter | `event_class`, `severity` | security | Planned |
-| `password_vault_sync_requests_total` | counter | `operation`, `outcome` | product | Planned |
+| `password_vault_sync_requests_total` | counter | `outcome`, `page` | product | Implemented locally |
 | `password_vault_sync_conflicts_total` | counter | `resource` | product | Planned |
-| `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | product | Planned |
+| `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | product | Implemented locally |
 
 Security dashboards should show rates and ratios, not raw operational logs. Example: failed login
 rate, TOTP failure rate, rate-limit hit rate, CSRF failure rate, and session invalidation spikes.
@@ -244,8 +267,13 @@ product-specific alerts and journey metrics are not complete.
 - No SLO, error-budget, or burn-rate panels are implemented.
 - No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
-- No deploy/version annotation panel because `password_vault_build_info` is not implemented yet.
-- No auth funnel or security-event panels because product/security metrics are not implemented yet.
+- Build/version panel is present in GitOps dashboard intent, but live values need the new API image
+  rollout before verification.
+- Product auth/MFA/vault/sync panels are now present in GitOps dashboard intent, and matching
+  product counters are implemented locally. They need the new API image to be deployed before live
+  non-zero data can be verified.
+- CSRF, rate-limit, recovery, and protected-activation security-event panels are not implemented
+  yet.
 - Edge access to `/metrics` is blocked in the current preview, but internal application
   `LoadBalancer` access still reaches `/metrics`; restrictive NetworkPolicy or a separate
   internal-only metrics listener is still needed.
