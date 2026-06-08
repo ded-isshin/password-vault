@@ -34,3 +34,25 @@ jobs:
             --set observability.vmServiceScrape.enabled=true \
             >/tmp/password-vault-rendered.yaml
           test -s /tmp/password-vault-rendered.yaml
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set migrations.job.enabled=true \
+            --set migrations.job.argocdHook.enabled=true \
+            >/tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'kind: Job' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'argocd.argoproj.io/hook: "PreSync"' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'argocd.argoproj.io/hook-delete-policy: "BeforeHookCreation"' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'argocd.argoproj.io/sync-wave: "-1"' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'restartPolicy: Never' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'automountServiceAccountToken: false' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q -- '- migrate' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'name: PV_DATABASE_URL' /tmp/password-vault-migration-job-rendered.yaml
+          grep -q 'secretKeyRef:' /tmp/password-vault-migration-job-rendered.yaml
+          ! grep -q 'ttlSecondsAfterFinished' /tmp/password-vault-migration-job-rendered.yaml
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set migrations.job.enabled=true

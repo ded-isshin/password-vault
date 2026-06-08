@@ -20,6 +20,36 @@ The chart expects Kubernetes Secrets created outside this public repository:
 
 Do not commit real secret values.
 
+## Migration Policy
+
+Application pods do not run migrations by default. `config.runMigrationsOnStartup` should stay
+`false` for production-like environments.
+
+The chart can emit a controlled Argo CD migration hook when both `migrations.job.enabled=true` and
+`migrations.job.argocdHook.enabled=true`. A non-hook Kubernetes Job is intentionally rejected by the
+chart because repeated GitOps/Helm applies can fail when they try to patch an existing completed
+Job's immutable pod template. Use a separate reviewed operator step if a non-Argo migration path is
+needed.
+
+The job runs the same image with:
+
+```bash
+password-vault-api migrate
+```
+
+The command requires `PV_DATABASE_URL`, applies bundled SQLx migrations, and exits. It does not start
+the HTTP server and does not require the TOTP or synthetic metadata keys.
+
+The Argo `PreSync` hook fails closed: if migration execution fails, Argo CD stops the sync before
+rolling the API Deployment. The default hook delete policy is `BeforeHookCreation`, keeping the
+completed job available as evidence until the next sync recreates it.
+
+`ttlSecondsAfterFinished` is intentionally unset by default. Enable it only if the operating model
+accepts Kubernetes deleting completed migration jobs before the next Argo sync.
+
+Production schema-changing releases must still follow an expand/contract plan, with backup/restore
+evidence before destructive or contract migrations.
+
 ## Rollout Policy
 
 Defaults are set for live rolling updates:
@@ -33,8 +63,7 @@ Defaults are set for live rolling updates:
 - topology spread constraints across Kubernetes nodes.
 - writable `/tmp` `emptyDir` while keeping the container root filesystem read-only.
 
-Schema migrations are not run by app pods by default. Production migrations must use an
-expand/contract plan and a controlled migration job/runbook.
+Schema migrations are not run by app pods by default.
 
 ## Observability
 

@@ -42,8 +42,8 @@ registration finish backend slice.
 ## Commands Run
 
 ```bash
-KUBECONFIG=/home/roman/.kube/config-prod kubectl get app -n argocd prod-root password-vault observability-vm-stack
-KUBECONFIG=/home/roman/.kube/config-prod kubectl get pods,svc,pvc -n password-vault
+KUBECONFIG=<redacted-path> kubectl get app -n argocd prod-root password-vault observability-vm-stack
+KUBECONFIG=<redacted-path> kubectl get pods,svc,pvc -n password-vault
 curl -fsS http://<redacted-ip>:8080/healthz
 curl -fsS http://<redacted-ip>:8080/readyz
 curl -fsS -X POST http://<redacted-ip>:8080/v1/auth/register/start -H 'content-type: application/json' --data '{"login_handle":"voice-smoke@example.com","auth_protocol":"derived-auth-v1"}'

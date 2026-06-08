@@ -51,11 +51,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          docker run --rm --network host \
+            -e PV_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/password_vault_test \
+            password-vault-api:load-smoke migrate
           docker run -d --rm --name password-vault-api-load --network host \
             -e PV_BIND_ADDR=127.0.0.1:8080 \
             -e PV_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/password_vault_test \
             -e PV_REQUIRE_DATABASE=true \
-            -e PV_RUN_MIGRATIONS_ON_STARTUP=true \
+            -e PV_RUN_MIGRATIONS_ON_STARTUP=false \
             -e PV_SYNTHETIC_METADATA_KEY_B64="${TEST_SYNTHETIC_METADATA_KEY_B64}" \
             -e PV_TOTP_SEED_KEY_B64="${TEST_TOTP_SEED_KEY_B64}" \
             password-vault-api:load-smoke

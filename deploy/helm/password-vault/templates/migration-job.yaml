@@ -1,0 +1,77 @@
+{{- if and .Values.migrations.job.enabled (not .Values.migrations.job.argocdHook.enabled) }}
+{{- fail "migrations.job.enabled requires migrations.job.argocdHook.enabled=true; use an external reviewed operator step for non-Argo migrations" }}
+{{- end }}
+{{- if .Values.migrations.job.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "password-vault.fullname" . }}-migrate
+  namespace: {{ include "password-vault.namespace" . }}
+  labels:
+    {{- include "password-vault.labels" . | nindent 4 }}
+    component: migration
+  {{- if or .Values.migrations.job.argocdHook.enabled .Values.migrations.job.annotations }}
+  annotations:
+    {{- if .Values.migrations.job.argocdHook.enabled }}
+    argocd.argoproj.io/hook: {{ .Values.migrations.job.argocdHook.phase | quote }}
+    argocd.argoproj.io/hook-delete-policy: {{ .Values.migrations.job.argocdHook.deletePolicy | quote }}
+    argocd.argoproj.io/sync-wave: {{ .Values.migrations.job.argocdHook.syncWave | quote }}
+    {{- end }}
+    {{- with .Values.migrations.job.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.migrations.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrations.job.activeDeadlineSeconds }}
+  {{- with .Values.migrations.job.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "password-vault.labels" . | nindent 8 }}
+        component: migration
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "password-vault.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - migrate
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.config.rustLog | quote }}
+            {{- if .Values.tmp.enabled }}
+            - name: TMPDIR
+              value: {{ .Values.tmp.mountPath | quote }}
+            {{- end }}
+            - name: PV_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.urlSecret.name }}
+                  key: {{ .Values.database.urlSecret.key }}
+          resources:
+            {{- toYaml .Values.migrations.job.resources | nindent 12 }}
+          {{- if .Values.tmp.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: {{ .Values.tmp.mountPath | quote }}
+          {{- end }}
+      {{- if .Values.tmp.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmp.sizeLimit | quote }}
+      {{- end }}
+{{- end }}

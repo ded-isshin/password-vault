@@ -64,6 +64,26 @@ tmp:
   mountPath: /tmp
   sizeLimit: 64Mi
 
+migrations:
+  job:
+    enabled: false
+    backoffLimit: 1
+    activeDeadlineSeconds: 300
+    ttlSecondsAfterFinished: null
+    annotations: {}
+    argocdHook:
+      enabled: false
+      phase: PreSync
+      syncWave: "-1"
+      deletePolicy: BeforeHookCreation
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
+
 rollout:
   minReadySeconds: 10
   progressDeadlineSeconds: 120

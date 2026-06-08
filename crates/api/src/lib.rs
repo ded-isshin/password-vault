@@ -209,6 +209,13 @@ pub fn app(config: ApiConfig) -> Router {
     })
 }
 
+pub async fn run_database_migrations(database_url: &str) -> Result<(), ApiInitError> {
+    let pool = db::connect(database_url).await?;
+    db::run_migrations(&pool).await?;
+    pool.close().await;
+    Ok(())
+}
+
 pub async fn build_app(config: ApiConfig) -> Result<Router, ApiInitError> {
     let database = if let Some(database_url) = config.database_url() {
         let pool = if config.run_migrations_on_startup {

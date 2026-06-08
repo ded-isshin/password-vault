@@ -1,8 +1,24 @@
-use password_vault_api::{ApiConfig, build_app, init_tracing};
+use std::{
+    env,
+    io::{Error, ErrorKind},
+};
+
+use password_vault_api::{ApiConfig, build_app, init_tracing, run_database_migrations};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init_tracing();
+
+    if let Some(command) = env::args().nth(1) {
+        return match command.as_str() {
+            "migrate" => run_migrations_and_exit().await,
+            _ => Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("unknown command '{command}'; expected no argument or 'migrate'"),
+            )
+            .into()),
+        };
+    }
 
     let config = ApiConfig::from_env()?;
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
@@ -20,6 +36,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    Ok(())
+}
+
+async fn run_migrations_and_exit() -> Result<(), Box<dyn std::error::Error>> {
+    let database_url = env::var("PV_DATABASE_URL")
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "PV_DATABASE_URL is required"))?;
+    let database_url = database_url.trim();
+    if database_url.is_empty() {
+        return Err(Error::new(ErrorKind::InvalidInput, "PV_DATABASE_URL is required").into());
+    }
+
+    tracing::info!(
+        service = "password-vault-api",
+        "running database migrations"
+    );
+    run_database_migrations(database_url).await?;
+    tracing::info!(
+        service = "password-vault-api",
+        "database migrations completed"
+    );
 
     Ok(())
 }
