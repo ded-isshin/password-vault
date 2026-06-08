@@ -55,13 +55,13 @@ Current implementation status, 2026-06-08:
   MacBook/browser reachability still needs a client-side check; use the mini-PC LAN edge address
   with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs.
 - A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
-  network and that NGINX listens on `0.0.0.0` for the Password Vault, Grafana, and Argo CD edge
-  ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes service-routing
-  details. If a MacBook cannot open the services while mini-PC `curl -k` checks pass, start with
-  client LAN/VPN/firewall/certificate troubleshooting, not Kubernetes Service rewrites.
-- The edge publishing layer currently uses a self-signed certificate and broad host listeners. Before
-  real user secrets, edge exposure must be locked down to intended LAN/VPN paths and verified from a
-  client-equivalent route.
+  network and that NGINX listens on the reviewed mini-PC LAN address for the Password Vault, Grafana,
+  and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
+  service-routing details. If a MacBook cannot open the services while mini-PC `curl -k` checks pass,
+  start with client LAN/VPN/firewall/certificate troubleshooting, not Kubernetes Service rewrites.
+- The edge publishing layer currently uses a self-signed certificate and LAN-bound host listeners.
+  Before real user secrets, edge exposure must be locked down to intended LAN/VPN paths and verified
+  from a client-equivalent route.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item

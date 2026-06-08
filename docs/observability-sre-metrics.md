@@ -294,8 +294,8 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   - Password Vault edge `GET /` and `/readyz` over HTTPS returned HTTP 200 from the mini-PC;
   - Grafana edge `/` and `/api/health` over HTTPS returned HTTP 200 from the mini-PC;
   - Argo CD edge `/` and `/healthz` over HTTPS returned HTTP 200 from the mini-PC;
-  - the mini-PC edge listeners for the Password Vault, Grafana, and Argo CD ports were bound on
-    `0.0.0.0`;
+  - that earlier check saw wildcard edge sockets before the edge-bind correction landed; the later
+    2026-06-08T22:20Z check below supersedes this listener-binding evidence;
   - `max by (probe) (probe_success{job="password-vault-blackbox",service="password-vault",
     probe=~"internal-readyz|edge-readyz"})` returned `1` for both paths;
   - `max by (probe) (probe_duration_seconds{job="password-vault-blackbox",
@@ -317,6 +317,26 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
 - The mini-PC edge route for Grafana was reachable from the mini-PC with `https` and the local
   self-signed certificate path. MacBook/browser reachability must still be verified from the client
   side before this becomes full external-access evidence.
+- A later 2026-06-08T22:20Z check returned current edge and Grafana/VictoriaMetrics evidence:
+  - Password Vault `GET /`, Grafana `/api/health`, and Argo CD `/healthz` returned HTTP 200 through
+    the mini-PC LAN edge paths from the mini-PC.
+  - The browser-facing Password Vault, Grafana, and Argo CD sockets were bound to the reviewed
+    mini-PC LAN address, not wildcard sockets.
+  - Dashboard UID `password-vault-overview` existed with 31 provisioned panels.
+  - `sum(up{job="password-vault-api"}) or vector(0)` returned `3`.
+  - `sum(up{job="password-vault-cnpg"}) or vector(0)` returned `3`.
+  - `max by (probe) (probe_success{job="password-vault-blackbox",service="password-vault"})`
+    returned `1` for both `internal-readyz` and `edge-readyz`.
+  - The non-health API 5xx rate was `0`, and p95 request latency was about `0.005` seconds during
+    the low-traffic check window.
+  - `max(cnpg_pg_replication_streaming_replicas{job="password-vault-cnpg"}) or vector(0)` returned
+    `2`, and `max(cnpg_pg_replication_lag{job="password-vault-cnpg"}) or vector(0)` returned `0`.
+  - `max(cnpg_collector_last_available_backup_timestamp{job="password-vault-cnpg"}) or vector(0)`
+    returned `0`.
+  - `ALERTS{alertname=~"PasswordVault.*",alertstate="firing"}` returned only
+    `PasswordVaultCnpgBackupMissing`.
+  - Six-hour product counters showed successful synthetic registration, MFA, recovery-code login,
+    encrypted item creation, and sync events.
 
 ## Current Dashboard And Alert Gaps
 
