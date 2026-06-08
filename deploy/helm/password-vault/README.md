@@ -91,6 +91,11 @@ Kubernetes CronJob defaults:
 - job history limits avoid unbounded completed Job objects;
 - `automountServiceAccountToken: false` keeps the pod from receiving a Kubernetes API token.
 
+When `networkPolicy.enabled=true`, the chart also emits an egress-only `NetworkPolicy` for the
+cleanup pod. It permits only PostgreSQL and DNS egress from `component=synthetic-cleanup`. The
+database-side ingress policy still belongs to the infrastructure repository and must explicitly
+allow that component.
+
 Do not point cleanup at real user domains. Do not treat cleanup logs as synthetic monitoring proof:
 scheduled synthetic pass/fail metrics are a separate acceptance gate.
 

@@ -101,9 +101,11 @@ jobs:
             template password-vault deploy/helm/password-vault \
             --namespace password-vault \
             --set image.tag=ci \
+            --set networkPolicy.enabled=true \
             --set syntheticCleanup.cronJob.enabled=true \
             >/tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q 'kind: CronJob' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'kind: NetworkPolicy' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q 'name: password-vault-synthetic-cleanup' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -Fq 'schedule: "17 3 * * *"' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q 'timeZone: "Etc/UTC"' /tmp/password-vault-synthetic-cleanup-rendered.yaml
@@ -113,6 +115,11 @@ jobs:
           grep -q 'automountServiceAccountToken: false' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q -- '- cleanup-synthetic' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q -- '- --dry-run' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'component: synthetic-cleanup' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'policyTypes:' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q -- '- Egress' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'port: 5432' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'port: 53' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q 'name: PV_DATABASE_URL' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q 'name: PV_SYNTHETIC_CLEANUP_DOMAIN' /tmp/password-vault-synthetic-cleanup-rendered.yaml
           grep -q 'value: "loadtest.invalid"' /tmp/password-vault-synthetic-cleanup-rendered.yaml
