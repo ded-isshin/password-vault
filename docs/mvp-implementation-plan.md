@@ -38,6 +38,9 @@ Current implementation status, 2026-06-08:
   that recovery sessions cannot access vault APIs, and re-enrolls TOTP. It is wired into PR
   container smoke and the manual `load-smoke` workflow, but it still needs a live edge run after
   each deployed change before the deployed browser path can be treated as proven end-to-end.
+- The current branch adds a dry-run-first `cleanup-synthetic` maintenance command for old
+  reserved-domain synthetic accounts. This enables bounded cleanup of live-test data, but a
+  scheduled external synthetic probe and cleanup job are still future work.
 - Recovery-code verification is implemented for the MVP preview. It can only be used after primary
   login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
@@ -70,19 +73,21 @@ MVP dependable:
    warning.
 2. Run the full synthetic browser/API journey in CI and against the live edge route:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
-3. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
+3. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
+   not schedule production cleanup until HA/backup posture is understood.
+4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
-4. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
-5. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
+5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
+6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
-6. Deploy and test SLO/alert rules for target-down and fast 5xx burn-rate before adding broader
+7. Deploy and test SLO/alert rules for target-down and fast 5xx burn-rate before adding broader
    alert volume.
-7. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
+8. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability
    further to database health, backup freshness, and security aggregate metrics.
-8. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
+9. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
    from inside the Kubernetes/LXD network.
-9. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
+10. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
    stale bootstrap claims do not become false work items.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.

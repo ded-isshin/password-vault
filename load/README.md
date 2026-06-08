@@ -19,7 +19,58 @@ decryption.
 - The synthetic journey does not print account secret keys, TOTP seeds, TOTP codes, recovery codes,
   cookies, plaintext item passwords, account IDs, vault IDs, item IDs, or device IDs.
 - Do not run the synthetic journey automatically against a public or production endpoint. Live-edge
-  runs must be explicit because account deletion is not implemented yet.
+  runs must be explicit and paired with the cleanup lifecycle below.
+- Synthetic browser journey accounts must use login handles shaped as
+  `<prefix>-<run-id>-<random>@<reserved-domain>`, with the default
+  `synthetic-...@loadtest.invalid`. The runner rejects non-`.invalid` domains.
+
+## Synthetic Account Cleanup
+
+Synthetic cleanup is intentionally a maintenance command, not a public API route. It is dry-run by
+default and can only target reserved `.invalid` login handles.
+
+```bash
+docker run --rm --network host \
+  -e PV_DATABASE_URL=postgres://<redacted-username>:<redacted-secret>@<redacted-host>:5432/<redacted-db> \
+  ghcr.io/ded-isshin/password-vault-api:<tag> \
+  cleanup-synthetic --dry-run
+```
+
+Real deletion requires `--confirm`:
+
+```bash
+docker run --rm --network host \
+  -e PV_DATABASE_URL=postgres://<redacted-username>:<redacted-secret>@<redacted-host>:5432/<redacted-db> \
+  ghcr.io/ded-isshin/password-vault-api:<tag> \
+  cleanup-synthetic --confirm
+```
+
+Supported cleanup environment variables:
+
+- `PV_SYNTHETIC_CLEANUP_PREFIX`: login prefix, default `synthetic`; lowercase letters, digits,
+  dots, and hyphens only.
+- `PV_SYNTHETIC_CLEANUP_DOMAIN`: reserved domain, default `loadtest.invalid`; must end in
+  `.invalid`.
+- `PV_SYNTHETIC_CLEANUP_MIN_AGE_HOURS`: retention floor, default `24`; must be at least `1`.
+- `PV_SYNTHETIC_CLEANUP_MAX_DELETE`: maximum accounts deleted per run, default `100`.
+
+If the synthetic runner uses non-default `SYNTHETIC_LOGIN_PREFIX` or `SYNTHETIC_EMAIL_DOMAIN`,
+configure the matching `PV_SYNTHETIC_CLEANUP_PREFIX` and `PV_SYNTHETIC_CLEANUP_DOMAIN` before
+cleanup. Otherwise the cleanup command will safely match nothing and old synthetic accounts will
+remain.
+
+The command prints only aggregate counts:
+
+```text
+synthetic_cleanup dry_run=true matched=0 deleted=0 max_delete=100
+```
+
+Run `--dry-run` first and compare `matched` with the expected synthetic account count before using
+`--confirm`. Do not lower the age floor or raise `max_delete` for a shared database unless the target
+database has been identified as a preview/test database and backup posture is understood.
+
+When `matched` is greater than `max_delete`, re-run the command in bounded batches until the dry-run
+count reaches the expected value.
 
 ## Local Commands
 

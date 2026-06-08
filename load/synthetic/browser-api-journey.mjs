@@ -35,6 +35,25 @@ function sanitizeRunId(value) {
   return sanitized || `run-${Date.now()}`;
 }
 
+function validateSyntheticPrefix(value) {
+  if (!/^[a-z0-9.-]{1,32}$/.test(value)) {
+    throw new Error("SYNTHETIC_LOGIN_PREFIX must be a lowercase safe label up to 32 characters.");
+  }
+}
+
+function validateSyntheticDomain(value) {
+  if (
+    value.length < ".invalid".length + 1 ||
+    value.length > 80 ||
+    !value.endsWith(".invalid") ||
+    value.startsWith(".") ||
+    value.includes("..") ||
+    !/^[a-z0-9.-]+$/.test(value)
+  ) {
+    throw new Error("SYNTHETIC_EMAIL_DOMAIN must be a safe reserved .invalid domain.");
+  }
+}
+
 function loadConfig() {
   if (boolEnv("SYNTHETIC_TLS_INSECURE", false)) {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -63,6 +82,8 @@ function loadConfig() {
   const domain = String(process.env.SYNTHETIC_EMAIL_DOMAIN || "loadtest.invalid")
     .trim()
     .toLowerCase();
+  validateSyntheticPrefix(prefix);
+  validateSyntheticDomain(domain);
   const timeoutMs = Number(process.env.SYNTHETIC_TIMEOUT_MS || "120000");
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1000) {
     throw new Error("SYNTHETIC_TIMEOUT_MS must be at least 1000.");
