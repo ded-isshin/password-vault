@@ -106,6 +106,35 @@ MVP dependable:
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.
 
+## Execution Hygiene
+
+The project already has enough evidence logs for the current MVP stage. New work should update the
+canonical document that owns the topic before creating another agent report:
+
+- access and rollout behavior: `docs/runbooks/release-and-rollout.md`;
+- current MVP state and queue: this document;
+- PostgreSQL HA, backups, and migrations:
+  `docs/decision-briefs/2026-06-08-postgresql-ha-migrations-stability.md`;
+- observability/SRE metrics: `docs/observability-sre-metrics.md`;
+- historical command evidence: `docs/agent-reports/`.
+
+Do not create a new issue, report, metric, dashboard panel, migration, or architectural spike unless
+it has one of these outcomes:
+
+- removes a blocker before real password data;
+- proves an existing claim with runtime evidence;
+- adds or validates core MVP behavior;
+- reduces an operational/security risk;
+- replaces stale or duplicated documentation with a clearer canonical source.
+
+Defer or delete work that only restates existing analysis, adds speculative future features, creates
+unverified dashboard panels, or introduces schema changes for ideas that are not part of the
+stabilization queue.
+
+Temporary worktrees and side copies are allowed only as short-lived implementation tools. They must
+be merged, reconciled, or deleted after their PR/task completes. Do not keep parallel documentation
+copies as alternate sources of truth; they cause stale conclusions and agent collisions.
+
 ## Active Context
 
 Task: deliver a working browser-first MVP and prepare deployment through GitHub, GHCR, Helm, and
