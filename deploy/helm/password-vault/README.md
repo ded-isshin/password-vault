@@ -5,6 +5,9 @@ Status: MVP chart.
 The chart deploys the API service only. PostgreSQL, backup, and production secret creation remain
 infrastructure responsibilities.
 
+The chart targets Kubernetes `>=1.26`, because it renders topology spread node inclusion policies
+used to make rollout scheduling explicit.
+
 Schema migrations are also an infrastructure/operator responsibility. Application pods do not run
 migrations by default.
 
@@ -64,6 +67,8 @@ Defaults are set for live rolling updates:
 - short pre-stop drain before container termination.
 - `PodDisruptionBudget` with `maxUnavailable: 1`.
 - topology spread constraints across Kubernetes nodes.
+- topology spread policies set `nodeAffinityPolicy: Honor` and `nodeTaintsPolicy: Honor` so
+  tainted control-plane nodes and node affinity exclusions do not distort skew calculations.
 - writable `/tmp` `emptyDir` while keeping the container root filesystem read-only.
 
 Schema migrations are not run by app pods by default.

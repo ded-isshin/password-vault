@@ -30,9 +30,14 @@ The chart defaults are designed for live updates:
 - PodDisruptionBudget with `maxUnavailable: 1`.
 - graceful SIGTERM in the Rust service.
 - short pre-stop drain before termination to give endpoint updates time to propagate.
+- topology spread constraints with `nodeAffinityPolicy: Honor` and `nodeTaintsPolicy: Honor`.
 
-If the cluster cannot schedule at least one surge pod, a rollout may stall instead of taking the app
-down. Treat that as safer than making unavailable pods serve traffic.
+On the current three-worker cluster, hard topology spreading with `DoNotSchedule` is compatible with
+`maxSurge: 1` only when tainted control-plane nodes are excluded from skew calculations. Without
+`nodeTaintsPolicy: Honor`, the scheduler can count tainted control-plane nodes as empty topology
+domains and leave the surge pod pending. If the cluster still cannot schedule at least one surge pod,
+a rollout may stall instead of taking the app down. Treat that as safer than making unavailable pods
+serve traffic.
 
 ## Migration Policy
 
