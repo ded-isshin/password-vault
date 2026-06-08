@@ -17,6 +17,17 @@ Inputs inspected:
 - `migrations/*.sql`
 - `deploy/helm/password-vault`
 
+Official sources checked on 2026-06-08:
+
+- CloudNativePG 1.29 backup documentation: <https://cloudnative-pg.io/docs/1.29/backup/>
+- CloudNativePG 1.29 recovery documentation: <https://cloudnative-pg.io/docs/1.29/recovery/>
+- CloudNativePG 1.29 replication documentation: <https://cloudnative-pg.io/docs/1.29/replication/>
+- CloudNativePG Barman Cloud Plugin introduction:
+  <https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/>
+- PostgreSQL 18 table modification documentation: <https://www.postgresql.org/docs/18/ddl-alter.html>
+- PostgreSQL 18 `ALTER TABLE` reference:
+  <https://www.postgresql.org/docs/18/sql-altertable.html>
+
 Runtime state verified after the 2026-06-08 cutover:
 
 - CloudNativePG CRDs and the shared CloudNativePG operator are present in the Kubernetes cluster.
@@ -110,7 +121,10 @@ operator-managed failover. With three instances spread across workers, a single 
 leave a promoted or existing primary plus at least one remaining replica, assuming scheduling and
 storage placement are healthy.
 
-This does not replace backups. HA handles common instance or node failures. Backups and PITR handle
+This does not replace backups. On the current `local-path` storage class, PostgreSQL volumes are
+node-local. CloudNativePG replication is necessary because it gives PostgreSQL a promotable data
+copy on another worker, but it is still not a complete durability story. HA handles common database
+instance, pod, and some worker-failure scenarios. Backups and PITR handle node-local storage loss,
 data corruption, accidental deletes, bad migrations, credential mistakes, operator mistakes, and
 disaster recovery.
 
@@ -250,6 +264,12 @@ Backup/restore is a release gate, not documentation only. Real user secrets rema
 - the restored database can run the application schema and a controlled application connection;
 - the restore result records observed RTO, observed RPO, and any missing Secrets or manual steps.
 
+The current blocker is not a conflict with another product. The blockers are missing backup target,
+missing backup credentials, missing scheduled base backups, missing restore drill, missing failover
+drill, and node-local storage. Sharing the CloudNativePG operator is acceptable platform reuse;
+sharing product databases, credentials, PVCs, backup prefixes, or migrations is not. Treat "three
+CNPG instances are healthy" as an HA signal, not as proof that real password data is recoverable.
+
 ## Why Schema Migrations Are Still Required
 
 Stable PostgreSQL versions and schema migrations solve different problems.
@@ -300,6 +320,11 @@ For MVP stabilization, the practical posture is a schema freeze by default: do n
 migrations unless they directly support a required security invariant, recovery/durability gate,
 MVP user journey, or live-rollout safety fix. PostgreSQL minor-version maintenance remains a
 platform/database patching concern and should not be confused with product schema churn.
+
+This means "rare migrations", not "no migrations". No-migration policy would force manual schema
+drift or oversized up-front schema guesses. Frequent speculative migrations would create review and
+rollback noise. The stable target is a short, immutable, reviewed migration chain with CI proof and
+explicit GitOps execution for production-like environments.
 
 ## How To Minimize Migration Churn
 

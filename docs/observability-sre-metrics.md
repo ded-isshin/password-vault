@@ -30,6 +30,19 @@ Google SRE guidance used for this plan:
 - Multi-window, multi-burn-rate alerting is the preferred shape for defending SLOs once traffic and
   error-budget data are meaningful.
 
+Official sources checked on 2026-06-08:
+
+- Google SRE Book, "Monitoring Distributed Systems":
+  <https://sre.google/sre-book/monitoring-distributed-systems/>
+- Google SRE Workbook, "Alerting on SLOs":
+  <https://sre.google/workbook/alerting-on-slos/>
+- Google SRE resources for Service Level Objectives:
+  <https://sre.google/resources/book-update/slos/>
+
+The practical consequence for this repository is simplicity. A metric that is not used in a
+dashboard, alert, SLO, synthetic check, capacity review, security review, or product-health review is
+a candidate for removal or deferral. Instrumentation volume is not the goal.
+
 ## Ownership Boundaries
 
 | Area | Product repository owns | Infrastructure repository owns |
@@ -203,6 +216,11 @@ The main dashboard should be organized by questions, not metric names.
 | Security posture | Is abuse visible? | Rate-limit hits, MFA failures, CSRF/origin rejects, recovery failures, unmatched 404s. | Low-cardinality counters exist and are scraped. |
 | Release context | What changed? | Build info, image digest, Argo revision, migration/maintenance job outcome. | Current deployment revision matches expected release. |
 
+Keep the first dashboard small enough to use during an incident. Add drill-down dashboards only when
+the primary dashboard cannot answer the current question without becoming noisy. Dashboard panels
+that always render zero because the feature is not implemented should stay out of the live dashboard
+and remain documented as planned metrics instead.
+
 ## Dashboard Maturity Levels
 
 | Level | Meaning | Required evidence |
@@ -300,6 +318,17 @@ Do not mark these complete without runtime evidence:
   black-box/security check.
 - Grafana image rendering may be unavailable in the environment; if so, dashboard evidence must use
   browser automation or datasource query checks instead of screenshots.
+
+Prioritized next observability work:
+
+1. Make alert delivery real: target-down, fast burn-rate, and durability-gate alerts must reach a
+   human or ticket path in a controlled smoke test.
+2. Add SLO burn-rate rules for user-visible non-health API availability before adding broader alert
+   volume.
+3. Schedule an external synthetic journey through the same edge route that a browser client uses.
+4. Promote existing product counters into derived SLIs for protected activation, returning access,
+   vault write+sync success, and recovery success.
+5. Add DB pool wait and DB error metrics before deeper per-query latency instrumentation.
 
 ## Alerting Policy
 
