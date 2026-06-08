@@ -88,6 +88,11 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - The infrastructure GitOps state now includes a first `NetworkPolicy` that restricts PostgreSQL
   ingress on TCP/5432 to Password Vault API pods and Argo CD migration hook pods. This is a useful
   first isolation step, but it is not a namespace-wide default deny.
+- The product chart now supports an API `NetworkPolicy` that keeps browser/API HTTP ingress
+  compatible with the current edge `LoadBalancer` route, restricts metrics ingress to the
+  observability scraper selector, and restricts API egress to PostgreSQL plus DNS. This is not a
+  full edge redesign; it is the safe isolation step available before moving traffic behind a
+  selector-based in-cluster ingress path.
 - The infrastructure GitOps state now includes `VMRule` alert rules named `password-vault-alerts`.
   Runtime validation showed the `password-vault.rules` group loaded in `vmalert`, with rules for
   API target loss, replica loss, 5xx ratio, p95 latency, pending requests, missing build info,
@@ -355,9 +360,11 @@ on the dashboard.
   yet.
 - The chart is expected to expose `/metrics` only on the internal metrics service, while the API
   service returns 404 for `/metrics`. After rollout, verify both paths explicitly.
-- PostgreSQL ingress now has a first NetworkPolicy. API ingress/egress and full namespace
-  default-deny are intentionally not enabled yet because the current edge/LoadBalancer path needs
-  a tested allow-list design.
+- PostgreSQL ingress now has a first NetworkPolicy. The product chart also supports API pod
+  ingress/egress isolation: HTTP ingress remains source-open for the current edge/LoadBalancer
+  browser path, metrics ingress is scraper-restricted, and API egress is limited to PostgreSQL plus
+  DNS. A full namespace default-deny and selector-based API ingress allow-list require an edge
+  routing redesign.
 - No dashboard panel proves `/metrics` is inaccessible from the wrong network path. This should be a
   synthetic/security check, not only a dashboard assumption.
 - No live synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
@@ -428,6 +435,7 @@ Before calling the MVP observable:
 - Metrics labels are low-cardinality and public safe; random 404 paths, login handles, account IDs,
   device IDs, item IDs, OTP values, and secrets do not appear in `/metrics`.
 - Ingress or network policy blocks public access to internal metrics when public ingress is enabled.
+- API egress policy has no catch-all rule and still allows PostgreSQL plus kube-dns/NodeLocalDNS.
 - k6 smoke covers `/healthz`, `/readyz`, public API `/metrics` denial, internal `/metrics`, and at
   least one auth journey once the journey is implemented.
 - Candidate SLO queries return data from real traffic or synthetic traffic.
@@ -466,9 +474,13 @@ helm template password-vault deploy/helm/password-vault \
   <https://kubernetes.io/docs/concepts/services-networking/network-policies/>
 - Kubernetes API reference, NetworkPolicy:
   <https://kubernetes.io/docs/reference/kubernetes-api/networking/network-policy-v1/>
+- CloudNativePG documentation, Architecture:
+  <https://cloudnative-pg.io/docs/1.29/architecture/>
 - CloudNativePG documentation, Replication:
-  <https://cloudnative-pg.io/docs/1.27/replication/>
-- CloudNativePG Barman Cloud Plugin, Main Concepts:
-  <https://cloudnative-pg.io/plugin-barman-cloud/docs/concepts/>
+  <https://cloudnative-pg.io/docs/1.29/replication/>
+- CloudNativePG documentation, Backup:
+  <https://cloudnative-pg.io/docs/1.29/backup/>
+- CloudNativePG documentation, Recovery:
+  <https://cloudnative-pg.io/docs/1.29/recovery/>
 - PostgreSQL documentation, Versioning Policy:
   <https://www.postgresql.org/support/versioning/>

@@ -89,3 +89,32 @@ The application exposes `/metrics` on a separate metrics listener configured by
 `config.metricsBindAddr` and published through the internal-only `password-vault-api-metrics`
 ClusterIP Service. The public API service should not expose `/metrics`; smoke checks should expect
 HTTP 404 on the API port and HTTP 200 on the metrics port.
+
+## Network Policy
+
+When `networkPolicy.enabled=true`, the chart isolates API pod ingress and egress.
+
+Ingress policy:
+
+- HTTP ingress to the API port remains source-open by default. This is intentional for the current
+  deployment shape because the edge NGINX host reaches the API through the Kubernetes
+  `LoadBalancer` path rather than an in-cluster ingress controller with stable pod/namespace
+  selectors.
+- Metrics ingress is restricted to the configured observability namespace and `vmagent` pod
+  selector. Metrics should stay on the internal ClusterIP metrics service and should not be exposed
+  through the browser/API edge route.
+
+Egress policy:
+
+- API pods can connect to the configured PostgreSQL pod selector on TCP/5432.
+- API pods can resolve DNS through kube-dns and, when enabled, NodeLocalDNS.
+- There is no catch-all egress rule.
+
+This is a hardening step, not a complete edge redesign. Moving API ingress from source-open
+LoadBalancer traffic to selector-based in-cluster ingress requires a separate reviewed change to the
+edge routing model.
+
+The database selector is part of the deployment contract. The current preview PostgreSQL
+`StatefulSet` and any future CloudNativePG `Cluster` must expose pod labels that match
+`networkPolicy.database.podSelector`, or API-to-database traffic will be denied when the policy is
+enabled.

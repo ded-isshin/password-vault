@@ -14,9 +14,46 @@ spec:
     - Ingress
     - Egress
   ingress:
+    {{- if .Values.networkPolicy.http.allowAllIngress }}
     - ports:
-        - port: http
-        - port: metrics
+        - protocol: TCP
+          port: http
+    {{- end }}
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.metrics.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.metrics.podSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: metrics
   egress:
-    - {}
+    - to:
+        - podSelector:
+            {{- toYaml .Values.networkPolicy.database.podSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.database.port }}
+    {{- if .Values.networkPolicy.dns.enabled }}
+    - to:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.dns.kubeDns.namespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.dns.kubeDns.podSelector | nindent 12 }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    {{- if .Values.networkPolicy.dns.nodeLocal.enabled }}
+    - to:
+        - ipBlock:
+            cidr: {{ .Values.networkPolicy.dns.nodeLocal.cidr | quote }}
+      ports:
+        - protocol: UDP
+          port: {{ .Values.networkPolicy.dns.port }}
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.dns.port }}
+    {{- end }}
+    {{- end }}
 {{- end }}

@@ -118,6 +118,39 @@ ingress:
 
 networkPolicy:
   enabled: false
+  http:
+    # The current edge NGINX path reaches the API through the Kubernetes
+    # LoadBalancer, so HTTP ingress remains source-open at the pod policy layer.
+    # Metrics ingress is restricted separately below.
+    # Setting this to false also blocks kubelet HTTP probes unless a replacement
+    # in-cluster ingress/probe allow-list is designed and tested.
+    allowAllIngress: true
+  metrics:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: observability
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: vmagent
+  database:
+    port: 5432
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: password-vault-postgres
+        app.kubernetes.io/part-of: password-vault
+  dns:
+    enabled: true
+    port: 53
+    kubeDns:
+      namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    nodeLocal:
+      enabled: true
+      cidr: 169.254.25.10/32
 
 observability:
   vmServiceScrape:
