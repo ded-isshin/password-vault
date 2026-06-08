@@ -28,8 +28,12 @@ Current implementation status, 2026-06-08:
 - The browser preview supports registration, TOTP enrollment, return login, in-memory vault unlock,
   encrypted item create/update/delete, and sync on top of the deployed vault API.
 - The browser vault workflow is merged, published, rolled out, and visible through the mini-PC edge
-  route. It still needs a full automated synthetic journey and a manual MacBook/browser-path check
-  before it can be treated as proven end-to-end.
+  route.
+- A dependency-free Node browser API synthetic journey exists in
+  `load/synthetic/browser-api-journey.mjs`. It exercises registration, TOTP enrollment, logout,
+  return login, login-time TOTP, vault unlock, encrypted item create, sync, MAC/head validation, and
+  item decryption. It is wired into PR container smoke and the manual `load-smoke` workflow, but it
+  still needs a live edge run before the deployed browser path can be treated as proven end-to-end.
 - Recovery-code verification remains unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
@@ -39,8 +43,9 @@ Current implementation status, 2026-06-08:
   changes, sync requests, and build information are merged, published, deployed, and covered by a
   low-cardinality metrics test. Live checks verified `password_vault_build_info`,
   `password_vault_registration_events_total`, and `password_vault_login_starts_total` in
-  VictoriaMetrics after a synthetic smoke run. MFA, vault item, and sync counters still need a
-  fuller synthetic journey before non-zero live values can be verified.
+  VictoriaMetrics after a synthetic smoke run. MFA, vault item, and sync counters are now covered by
+  the full CI/local synthetic journey, but still need a live edge verification run and dashboard
+  query check.
 - CloudNativePG CRDs exist in the cluster, but no active product PostgreSQL `Cluster`,
   `Backup`, or `ScheduledBackup` resources are present yet. A live scan also found no running
   CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
@@ -57,9 +62,8 @@ MVP dependable:
 1. Prove browser access from the client side, not only from the mini-PC: Password Vault, Grafana,
    and Argo CD should be checked from the MacBook/browser path with the expected self-signed TLS
    warning.
-2. Add a full synthetic browser/API journey for
-   `register -> confirm TOTP -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`
-   and run it in CI and against the live edge route.
+2. Run the full synthetic browser/API journey in CI and against the live edge route:
+   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
 3. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
 4. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.

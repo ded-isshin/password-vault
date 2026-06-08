@@ -28,4 +28,7 @@ jobs:
           test -f docs/threat-model.md
 
       - name: Check browser JavaScript syntax
-        run: node --check crates/api/static/app.js
+        run: |
+          set -euo pipefail
+          node --check crates/api/static/app.js
+          node --check load/synthetic/browser-api-journey.mjs
