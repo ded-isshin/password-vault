@@ -218,6 +218,12 @@ struct AppState {
     database: Option<PgPool>,
 }
 
+#[derive(Clone)]
+struct MetricsState {
+    metrics_handle: PrometheusHandle,
+    database: Option<PgPool>,
+}
+
 pub fn app(config: ApiConfig) -> Router {
     router(AppState {
         config,
@@ -226,8 +232,17 @@ pub fn app(config: ApiConfig) -> Router {
 }
 
 pub fn metrics_app() -> Router {
+    metrics_app_for_database(None)
+}
+
+fn metrics_app_for_database(database: Option<PgPool>) -> Router {
     let (_, metrics_handle) = metrics_layer_and_handle();
-    Router::new().route("/metrics", get(move || metrics(metrics_handle.clone())))
+    Router::new()
+        .route("/metrics", get(metrics))
+        .with_state(MetricsState {
+            metrics_handle,
+            database,
+        })
 }
 
 pub async fn run_database_migrations(database_url: &str) -> Result<(), ApiInitError> {
@@ -238,6 +253,16 @@ pub async fn run_database_migrations(database_url: &str) -> Result<(), ApiInitEr
 }
 
 pub async fn build_app(config: ApiConfig) -> Result<Router, ApiInitError> {
+    Ok(router(build_state(config).await?))
+}
+
+pub async fn build_api_and_metrics(config: ApiConfig) -> Result<(Router, Router), ApiInitError> {
+    let state = build_state(config).await?;
+    let metrics = metrics_app_for_database(state.database.clone());
+    Ok((router(state), metrics))
+}
+
+async fn build_state(config: ApiConfig) -> Result<AppState, ApiInitError> {
     let database = if let Some(database_url) = config.database_url() {
         let pool = if config.run_migrations_on_startup {
             let pool = db::connect(database_url).await?;
@@ -251,7 +276,7 @@ pub async fn build_app(config: ApiConfig) -> Result<Router, ApiInitError> {
         None
     };
 
-    Ok(router(AppState { config, database }))
+    Ok(AppState { config, database })
 }
 
 fn router(state: AppState) -> Router {
@@ -305,14 +330,21 @@ async fn healthz() -> Json<HealthResponse> {
     })
 }
 
-async fn metrics(metrics_handle: PrometheusHandle) -> impl IntoResponse {
+async fn metrics(State(state): State<MetricsState>) -> impl IntoResponse {
     telemetry::record_build_info();
+    if let Some(database) = &state.database {
+        telemetry::db_pool_connections(
+            db::DATABASE_MAX_CONNECTIONS,
+            database.size(),
+            database.num_idle(),
+        );
+    }
     (
         [(
             header::CONTENT_TYPE,
             "text/plain; version=0.0.4; charset=utf-8",
         )],
-        metrics_handle.render(),
+        state.metrics_handle.render(),
     )
 }
 
@@ -568,10 +600,12 @@ mod tests {
         crate::telemetry::account_created("success");
         crate::telemetry::login_start("issued");
         crate::telemetry::login_attempt("success", "none");
+        crate::telemetry::rate_limited_request("auth_challenge", "login");
         crate::telemetry::session_event("created", "mfa_verified");
         crate::telemetry::mfa_event("totp_login", "verified");
         crate::telemetry::sync_request("success", "complete");
         crate::telemetry::vault_item_change("create", "success");
+        crate::telemetry::db_pool_connections(5, 3, 1);
 
         let metrics_response = metrics_app
             .oneshot(
@@ -593,10 +627,14 @@ mod tests {
         assert!(body.contains("password_vault_accounts_created_total"));
         assert!(body.contains("password_vault_login_starts_total"));
         assert!(body.contains("password_vault_login_attempts_total"));
+        assert!(body.contains("password_vault_rate_limited_requests_total"));
+        assert!(body.contains("flow=\"login\""));
         assert!(body.contains("password_vault_session_events_total"));
         assert!(body.contains("password_vault_mfa_events_total"));
         assert!(body.contains("password_vault_sync_requests_total"));
         assert!(body.contains("password_vault_vault_item_changes_total"));
+        assert!(body.contains("password_vault_db_pool_connections"));
+        assert!(body.contains("state=\"used\""));
         assert!(!body.contains("user@example.com"));
         assert!(!body.contains("account_id"));
         assert!(!body.contains("vault_id"));

@@ -198,22 +198,26 @@ login-handle, OTP, path, host, or secret labels.
 | `password_vault_accounts_created_total` | counter | `outcome` | Measure successful account creation. |
 | `password_vault_login_starts_total` | counter | `outcome` | Separate login metadata/challenge issuance from proof verification. |
 | `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | Track proof verification success and coarse failure classes. |
+| `password_vault_rate_limited_requests_total` | counter | `policy`, `flow` | Confirm rate limits are absorbing abusive traffic. |
 | `password_vault_session_events_total` | counter | `event`, `outcome` | Track session creation and MFA upgrade outcomes. |
 | `password_vault_mfa_events_total` | counter | `event`, `outcome` | Track TOTP enrollment, login MFA, and recovery-code login outcomes. |
 | `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | Track encrypted item create/update/delete success and conflict rates. |
 | `password_vault_sync_requests_total` | counter | `outcome`, `page` | Track vault delta-sync success, conflict, and pagination. |
+| `password_vault_db_pool_connections` | gauge | `state="idle|used|max"` | Detect pool exhaustion before request failures. |
+
+`password_vault_db_pool_connections` is sampled when the metrics endpoint is scraped. It is useful
+for visible pool pressure and dashboard context, but short spikes between scrapes require the planned
+DB pool wait-duration histogram.
 
 ### Planned Technical Metrics To Add
 
 | Metric | Type | Labels | Why |
 | --- | --- | --- | --- |
-| `password_vault_db_pool_connections` | gauge | `state="idle|used|max"` | Detect pool exhaustion before request failures. |
 | `password_vault_db_pool_wait_duration_seconds_bucket` | histogram | `operation` | Track saturation when requests wait for a DB connection. |
 | `password_vault_db_query_duration_seconds_bucket` | histogram | `operation`, `outcome` | Separate DB latency from application latency. |
 | `password_vault_db_errors_total` | counter | `operation`, `error_class` | Alert on DB failures without leaking SQL or values. |
 | `password_vault_auth_hash_duration_seconds_bucket` | histogram | `flow`, `outcome` | Watch slow server-side auth hashing cost and DoS risk. |
 | `password_vault_auth_hash_active` | gauge | none | Track concurrent expensive hash work. |
-| `password_vault_rate_limited_requests_total` | counter | `policy`, `endpoint` | Confirm rate limits are absorbing abusive traffic. |
 | `password_vault_request_rejections_total` | counter | `reason`, `endpoint` | Track body-size, content-type, CSRF, and validation rejections. |
 | `password_vault_background_job_runs_total` | counter | `job`, `outcome` | Track migrations, cleanup, or future maintenance jobs. |
 | `password_vault_background_job_duration_seconds_bucket` | histogram | `job`, `outcome` | Detect slow operational jobs. |
@@ -227,6 +231,8 @@ not be used with user-identifying labels.
 | --- | --- | --- | --- | --- |
 | `password_vault_accounts_created_total` | counter | `outcome` | product | Implemented locally |
 | `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | product/security | Implemented locally |
+| `password_vault_rate_limited_requests_total` | counter | `policy`, `flow` | security | Implemented locally |
+| `password_vault_db_pool_connections` | gauge | `state` | technical/saturation | Implemented locally |
 | `password_vault_active_sessions` | gauge | none | product/security | Planned |
 | `password_vault_session_events_total` | counter | `event`, `outcome` | product/security | Implemented locally |
 | `password_vault_mfa_events_total` | counter | `event`, `outcome` | security | Implemented locally |
@@ -353,7 +359,8 @@ on the dashboard.
 - Alert delivery is not tested yet. Alertmanager notification routing still needs a real receiver
   and a controlled smoke alert.
 - No multi-window SLO burn-rate rules or panels are implemented yet.
-- No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
+- DB pool connection gauges are implemented locally. Query latency and DB error panels remain planned
+  because per-operation DB metrics are not instrumented yet.
 - Build/version panel is deployed and returns live `password_vault_build_info` data with the product
   commit SHA for published images. Local images may report `unknown` when built without the build
   revision environment.
@@ -414,9 +421,9 @@ Implement in this order:
 11. Page or urgent ticket: sustained p99 latency above the auth or product endpoint SLO with enough
    request volume.
 12. Page: all replicas not ready or readiness failures causing zero serving endpoints.
-13. Urgent ticket: DB pool saturation, DB wait latency, or DB error spike once DB metrics exist.
-14. Security ticket/page by severity: rate-limit bypass signal, CSRF spike, repeated TOTP failures,
-   or session/token anomaly spike once security metrics exist.
+13. Urgent ticket: DB pool saturation once the DB pool dashboard and rule are deployed.
+14. Security ticket/page by severity: auth rate-limit spike or repeated MFA/recovery-code failures
+   once the security rules are deployed. CSRF and session/token anomaly counters remain planned.
 15. Ticket: dashboard data missing, scrape stale, or release/version metric absent after deployment.
 
 Use multi-window burn-rate alerts rather than single-threshold paging. For the 99.5% availability

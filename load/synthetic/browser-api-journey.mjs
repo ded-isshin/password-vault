@@ -1055,6 +1055,7 @@ async function assertMetrics(config) {
     ["password_vault_session_events_total", { event: "created", outcome: "mfa_recovery" }],
     ["password_vault_vault_item_changes_total", { operation: "create", outcome: "success" }],
     ["password_vault_sync_requests_total", { outcome: "success", page: "complete" }],
+    ["password_vault_db_pool_connections", { state: "max" }],
   ];
   for (const [name, labels] of requiredSeries) {
     const value = metricValue(text, name, labels);

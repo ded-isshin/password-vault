@@ -2804,7 +2804,7 @@ fn is_unique_violation(error: &sqlx::Error) -> bool {
 async fn enforce_challenge_rate_limit(
     pool: &PgPool,
     login_handle_normalized: &str,
-    challenge_type: &str,
+    challenge_type: &'static str,
 ) -> Result<(), ApiError> {
     let window_start = now_utc_second()? - AUTH_CHALLENGE_RATE_LIMIT_WINDOW;
     let count = sqlx::query_scalar::<_, i64>(
@@ -2824,6 +2824,7 @@ async fn enforce_challenge_rate_limit(
     .map_err(|_| ApiError::service_unavailable())?;
 
     if count >= AUTH_CHALLENGE_RATE_LIMIT {
+        telemetry::rate_limited_request("auth_challenge", challenge_type);
         Err(ApiError::rate_limited())
     } else {
         Ok(())
