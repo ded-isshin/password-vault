@@ -63,6 +63,10 @@ Current implementation status, 2026-06-08:
 - A controlled migration runner is merged, published, and deployed: the API image supports a
   `password-vault-api migrate` command, startup migrations remain disabled in production values, and
   generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
+- GitHub `main` is protected by an active ruleset requiring PRs, squash merges, resolved
+  conversations, linear history, non-fast-forward protection, branch deletion protection, and the
+  always-running `docs` and `public-safety` checks. Repository security features for vulnerability
+  alerts, Dependabot security updates, secret scanning, and push protection are enabled.
 
 ## Stabilization-First Queue
 
@@ -150,8 +154,13 @@ Existing blockers:
 - #3 Browser KDF and crypto v1 format ADR.
 - #4 TOTP seed custody and MFA hardening.
 - #5 PostgreSQL HA, backup, and restore ADR.
-- #7 Branch ruleset and public repository safety gates.
 - #9 Multi-device client and browser extension roadmap.
+
+Recently resolved control-plane gate:
+
+- #7 Branch ruleset and public repository safety gates. GitHub `main` protection and repository
+  security features are enabled. CODEOWNERS review remains a later tightening step once reviewer
+  ownership is stable.
 
 Delivery issues:
 

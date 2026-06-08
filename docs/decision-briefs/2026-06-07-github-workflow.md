@@ -106,15 +106,28 @@ PR descriptions should link the issue with `Closes #...` only when the PR fully 
 
 ## Main Branch Ruleset Direction
 
-Recommended `main` protection:
+Current `main` protection, applied on 2026-06-08:
 
 - require PR before merge;
-- require status checks;
+- allow squash merges only;
+- require status checks `docs` and `public-safety`;
 - require conversations resolved;
 - block force pushes;
 - block branch deletion;
 - require linear history;
-- require CODEOWNERS review for sensitive paths after CODEOWNERS is stable.
+- enable repository auto-merge, update-branch, and delete-branch-on-merge;
+- enable vulnerability alerts, Dependabot security updates, secret scanning, and push protection.
+
+The ruleset intentionally requires zero approving reviews for now. This preserves the current
+single-operator workflow while still preventing direct protected-branch updates. CODEOWNERS review
+should become required after reviewer ownership is stable enough not to block solo operational
+work.
+
+Only always-running checks should be globally required. `rust`, `container`, and `helm` are
+path-filtered workflows; GitHub documents that workflows skipped by path, branch, or commit-message
+filters can leave required checks pending. Requiring those checks globally would block docs-only
+changes. Keep them as PR review expectations for matching code/chart paths until workflow shape is
+changed to provide always-present aggregate checks.
 
 Sensitive paths:
 
@@ -158,6 +171,8 @@ truth for architecture.
 - https://docs.github.com/en/repositories/creating-and-managing-repositories/best-practices-for-repositories
 - https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
 - https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
+- https://docs.github.com/en/rest/repos/rules
+- https://docs.github.com/actions/using-workflows/triggering-a-workflow
 - https://docs.github.com/en/actions/reference/security/secure-use
 - https://git-scm.com/book/en/v2/Distributed-Git-Distributed-Workflows
 - https://git-scm.com/book/en/v2/Git-Branching-Branching-Workflows

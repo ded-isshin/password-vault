@@ -37,8 +37,11 @@ Answer the current runtime and stabilization questions for the deployed Password
   explicit justified zero with representative `5m` rate and `6h` range windows.
 - `PasswordVaultCnpgBackupMissing` is firing as an expected warning because no available base backup
   exists.
-- GitHub `main` branch protection is not enabled for `ded-isshin/password-vault`; repository
-  rulesets are empty; vulnerability alerts are disabled or unavailable through the GitHub API.
+- GitHub `main` is protected by an active repository ruleset requiring pull requests, squash merges,
+  resolved conversations, linear history, non-fast-forward protection, branch deletion protection,
+  and the always-running `docs` and `public-safety` checks.
+- Repository settings enable squash-only merging, auto-merge, update-branch, delete-branch-on-merge,
+  vulnerability alerts, Dependabot security updates, secret scanning, and push protection.
 
 ## Browser Access
 
@@ -158,8 +161,8 @@ P0:
 4. Restore into a non-live namespace or separate cluster and prove the app can connect.
 5. Run a controlled failover or switchover drill and record observed RTO/RPO.
 6. Smoke-test Alertmanager delivery, not only VMRule evaluation.
-7. Enable GitHub branch/ruleset protection, required checks, force-push/delete protection, and
-   repository security features where available.
+7. Keep GitHub branch/ruleset protection under review as workflow ownership matures; CODEOWNERS
+   reviews are intentionally not required yet to avoid blocking the current solo operator flow.
 
 P1:
 
