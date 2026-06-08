@@ -219,7 +219,7 @@ Current runtime state as of 2026-06-08 supports L0 scraping, parts of L1 Golden 
 counter instrumentation, and an active CloudNativePG scrape for the API database. The live
 deployment level must be re-evaluated after each GitOps rollout.
 
-Verified runtime evidence from the 2026-06-08 GitOps rollout:
+Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up checks:
 
 - Grafana dashboard UID `password-vault-overview` is provisioned.
 - The API uses the `password-vault-cnpg` CloudNativePG application Secret, and the API Deployment has
@@ -236,9 +236,16 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout:
   vector(0)` returned `0`, so backup availability remains an intentional red gate.
 - `sum by (pod) (increase(cnpg_pg_stat_archiver_failed_count{job="password-vault-cnpg"}[30m]))`
   returned `0` for the current primary.
+- `max(probe_success{job="password-vault-blackbox",service="password-vault",probe="internal-readyz"})
+  or vector(0)` returned `1`.
+- `max(probe_duration_seconds{job="password-vault-blackbox",service="password-vault",probe="internal-readyz"})
+  or on() vector(0)` returned a single-digit millisecond value during the follow-up check.
+- All dashboard PromQL expressions parsed and returned live data or an explicit justified zero when
+  evaluated with representative `5m` rate and `6h` range windows.
 - A recent live edge synthetic journey generated visible registration, MFA, encrypted item, and sync
   product counters. Scheduled synthetic pass/fail metrics are still planned.
-- No `PasswordVaultCnpg.*` alerts were firing immediately after the rollout.
+- `PasswordVaultCnpgBackupMissing` is expected to be pending or firing while no available base
+  backup exists. This is not noise; it is the visible real-secret-use blocker.
 - Grafana image rendering is not installed in the current environment, so dashboard evidence uses
   Grafana API checks and live datasource queries rather than rendered PNG screenshots.
 
@@ -255,6 +262,12 @@ Do not mark these complete without runtime evidence:
 - External synthetic browser/API probes are not documented as scheduled, scraped, and dashboarded.
 - Synthetic pass/fail, step duration, and cleanup metrics are planned.
 - DB query latency, DB errors, DB pool wait, and auth hash pressure metrics are planned.
+- Business/product panels currently use aggregate counters. Next maturity should add derived
+  product SLIs for protected activation, returning access, vault write+sync success, and recovery
+  success.
+- Use `or vector(0)` only where an explicit zero is the intended dashboard fallback. For gate
+  panels, alerts, and telemetry-existence checks, missing data must remain distinguishable from a
+  healthy zero.
 - PostgreSQL HA scrape data exists for the active CloudNativePG cluster, and dashboard panels for
   targets, streaming replicas, version, backup availability, replication lag, and WAL archive
   failures are deployed. Backup availability still returns `0`; restore drill and failover drill
