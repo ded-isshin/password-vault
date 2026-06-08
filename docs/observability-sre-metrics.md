@@ -34,6 +34,12 @@ Official sources checked on 2026-06-08:
 
 - Google SRE Book, "Monitoring Distributed Systems":
   <https://sre.google/sre-book/monitoring-distributed-systems/>
+- Google SRE Book, "Service Level Objectives":
+  <https://sre.google/sre-book/service-level-objectives/>
+- Google SRE Workbook, "Implementing SLOs":
+  <https://sre.google/workbook/implementing-slos/>
+- Google SRE Workbook, "Monitoring":
+  <https://sre.google/workbook/monitoring/>
 - Google SRE Workbook, "Alerting on SLOs":
   <https://sre.google/workbook/alerting-on-slos/>
 - Google SRE resources for Service Level Objectives:
