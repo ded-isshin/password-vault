@@ -137,27 +137,32 @@ Implemented in this slice:
 - the infrastructure Grafana dashboard intent now includes product panels for registration, login,
   MFA, vault item changes, sync requests, and build info.
 
-Current live limitation:
+Deployment update:
 
-- these new product metrics are not live until the branch is built, published, deployed through
-  GitOps, and scraped by VictoriaMetrics;
-- until then, the new dashboard panels should show zero vectors rather than breaking.
+- product PR #63 was merged and published as API image digest
+  `sha256:d86238f09b6034512bb4629ec39bd20536aa84732194f421ebeddcadd2fc349a`;
+- infrastructure PR #107 was merged and rolled out through Argo CD;
+- `password-vault` and `prod-root` reached `Synced` / `Healthy`;
+- the API deployment reached 3/3 ready replicas on the new digest;
+- `password_vault_build_info`, `password_vault_registration_events_total`, and
+  `password_vault_login_starts_total` were verified in VictoriaMetrics after a synthetic smoke run;
+- MFA, vault item, and sync panels still show zero fallback until a fuller synthetic/browser journey
+  exercises those paths.
 
 ## Minimum Stability Backlog
 
 Do next, before broad features:
 
-1. Deploy the new product metrics and verify every new dashboard query against live data.
-2. Add browser-side vault unlock and encrypted item create/read/update/delete/sync workflow.
-3. Add external synthetic journey checks from the LAN/browser path: register, MFA, login, unlock,
+1. Add browser-side vault unlock and encrypted item create/read/update/delete/sync workflow.
+2. Add external synthetic journey checks from the LAN/browser path: register, MFA, login, unlock,
    create item, sync item.
-4. Add target-down and fast 5xx burn-rate alerts.
-5. Add product auth/MFA/vault alert thresholds only after live data establishes a baseline.
-6. Replace the preview database with product-specific CloudNativePG.
-7. Add WAL archiving, scheduled backup, restore drill, and failover drill gates.
-8. Add NetworkPolicy or internal-only metrics listener before real-user data.
-9. Add DB pool/query/replication/backup metrics and panels.
-10. Keep browser extension, mobile, orgs, sharing, import, plugins, billing, and advanced analytics
+3. Add target-down and fast 5xx burn-rate alerts.
+4. Add product auth/MFA/vault alert thresholds only after live data establishes a baseline.
+5. Replace the preview database with product-specific CloudNativePG.
+6. Add WAL archiving, scheduled backup, restore drill, and failover drill gates.
+7. Add NetworkPolicy or internal-only metrics listener before real-user data.
+8. Add DB pool/query/replication/backup metrics and panels.
+9. Keep browser extension, mobile, orgs, sharing, import, plugins, billing, and advanced analytics
     out of the MVP stabilization path.
 
 ## Workflow Waste Reduction

@@ -59,13 +59,15 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   product `Cluster`, `Backup`, or `ScheduledBackup`, and no CloudNativePG operator/controller was
   observed in the current cluster scan.
 - No `NetworkPolicy` exists in the `password-vault` namespace yet.
-- The current product branch adds low-cardinality product counters for registration, account
-  creation, login, MFA, session creation/upgrades, vault item changes, sync requests, and build
-  information. These metrics are implemented locally and covered by a low-cardinality `/metrics`
-  test, but they are not live until the branch is built, merged, published, and rolled out.
-- The infrastructure GitOps dashboard intent has been extended with panels for those product
-  counters. Grouped dashboard panels use `or on() vector(0)` for fallback, so they return `0`
-  only when no left-hand series exists and do not add a permanent empty zero series.
+- Low-cardinality product counters for registration, account creation, login, MFA, session
+  creation/upgrades, vault item changes, sync requests, and build information are merged,
+  published, deployed, and covered by a low-cardinality `/metrics` test.
+- The infrastructure GitOps dashboard is deployed with panels for those product counters. Grouped
+  dashboard panels use `or on() vector(0)` for fallback, so they return `0` only when no left-hand
+  series exists and do not add a permanent empty zero series.
+- Live verification after deployment found non-zero registration and login-start series in
+  VictoriaMetrics. MFA, vault item, and sync panels still need a fuller synthetic journey before
+  non-zero live values can be verified.
 
 Important label note:
 
@@ -255,8 +257,10 @@ Use these levels to avoid calling a dashboard "done" when it only proves that sc
 | L4 durability | Data survival is measured. | DB replication, backup age, WAL archive health, restore drill age, and failover drill results are visible. |
 | L5 security/product | Aggregate abuse and activation signals are visible. | Low-cardinality auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented. |
 
-The live preview is currently between L1 and L2: basic Golden Signal dashboard data exists, but
-product-specific alerts and journey metrics are not complete.
+The live preview is currently between L1 and L2, with part of L3 now started: basic Golden Signal
+dashboard data exists, deployed product counters are visible, and registration/login-start journey
+signals have non-zero live data. Product-specific alerts and full browser vault journey metrics are
+not complete.
 
 ## Current Dashboard Gaps
 
@@ -267,11 +271,10 @@ product-specific alerts and journey metrics are not complete.
 - No SLO, error-budget, or burn-rate panels are implemented.
 - No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
-- Build/version panel is present in GitOps dashboard intent, but live values need the new API image
-  rollout before verification.
-- Product auth/MFA/vault/sync panels are now present in GitOps dashboard intent, and matching
-  product counters are implemented locally. They need the new API image to be deployed before live
-  non-zero data can be verified.
+- Build/version panel is deployed and returns live `password_vault_build_info` data.
+- Product auth/MFA/vault/sync panels are deployed. Registration and login-start values have live
+  non-zero data; login proof, MFA, vault item, and sync panels are still zero until a fuller
+  synthetic or browser journey exercises those paths.
 - CSRF, rate-limit, recovery, and protected-activation security-event panels are not implemented
   yet.
 - Edge access to `/metrics` is blocked in the current preview, but internal application
