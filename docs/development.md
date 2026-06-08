@@ -148,5 +148,6 @@ Do not run Argo CD sync or direct cluster mutation commands without explicit hum
   registry writes; pushes to `main` publish to GHCR with SBOM/provenance and GitHub attestation.
 - #21 adds the product Helm chart. Validation uses pinned `alpine/helm:3.19.0` in GitHub Actions.
 - Load smoke tests use pinned `grafana/k6:2.0.0`. PR smoke stays intentionally small; heavier tests
-  use the manual `load-smoke` workflow.
+  use the manual `load-smoke` workflow. The full browser API synthetic journey uses a
+  digest-pinned `node:22-bookworm-slim` Docker Hub image and no npm dependencies.
 - #24 must run its OPAQUE proof-of-concept in this selected build environment.

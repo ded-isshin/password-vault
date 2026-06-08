@@ -268,26 +268,39 @@ function base64UrlToBytes(value) {
 function displayAccountSecretKey(secretKey) {
   const encoded = base64Url(secretKey);
   const groups = encoded.match(/.{1,6}/g) || [encoded];
-  return `PVSK1-${groups.join("-")}`;
+  return `PVSK1-${groups.join(" ")}`;
 }
 
 function parseAccountSecretKey(value) {
   const trimmed = value.trim();
   const withoutPrefix = trimmed.startsWith("PVSK1-") ? trimmed.slice("PVSK1-".length) : trimmed;
-  const compact = withoutPrefix.replace(/[\s-]/g, "");
+  const compact = withoutPrefix.replace(/\s/g, "");
   if (!/^[A-Za-z0-9_-]+$/.test(compact)) {
     throw new Error("Account secret key format is invalid.");
   }
-  let decoded;
+  const decoded = decodeAccountSecretKeyCandidate(compact);
+  if (decoded) {
+    return decoded;
+  }
+
+  const legacyCompact = withoutPrefix.replace(/[\s-]/g, "");
+  if (legacyCompact !== compact) {
+    const legacyDecoded = decodeAccountSecretKeyCandidate(legacyCompact);
+    if (legacyDecoded) {
+      return legacyDecoded;
+    }
+  }
+
+  throw new Error("Account secret key must decode to 32 bytes.");
+}
+
+function decodeAccountSecretKeyCandidate(value) {
   try {
-    decoded = base64UrlToBytes(compact);
+    const decoded = base64UrlToBytes(value);
+    return decoded.length === 32 ? decoded : null;
   } catch {
-    throw new Error("Account secret key format is invalid.");
+    return null;
   }
-  if (decoded.length !== 32) {
-    throw new Error("Account secret key must decode to 32 bytes.");
-  }
-  return decoded;
 }
 
 function jsonBytes(value) {

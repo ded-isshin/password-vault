@@ -15,11 +15,16 @@ on:
         description: Test duration
         default: 30s
         required: true
+      run_journey:
+        description: Run one full browser API journey before k6 load
+        default: "true"
+        required: true
 
 permissions:
   contents: read
 
 env:
+  NODE_SYNTHETIC_IMAGE: node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
   TEST_SYNTHETIC_METADATA_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
   TEST_TOTP_SEED_KEY_B64: YmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWE
 
@@ -70,6 +75,26 @@ jobs:
           done
           docker logs password-vault-api-load
           exit 1
+
+      - name: Run full browser API journey
+        if: inputs.run_journey == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -v "$PWD:/workspace:ro" \
+            -w /workspace \
+            -e BASE_URL=http://127.0.0.1:8080 \
+            -e RUN_ID=manual-${{ github.run_id }}-${{ github.run_attempt }} \
+            -e SYNTHETIC_TIMEOUT_MS=120000 \
+            "$NODE_SYNTHETIC_IMAGE" node --check load/synthetic/browser-api-journey.mjs
+          docker run --rm --network host \
+            -v "$PWD:/workspace:ro" \
+            -w /workspace \
+            -e BASE_URL=http://127.0.0.1:8080 \
+            -e RUN_ID=manual-${{ github.run_id }}-${{ github.run_attempt }} \
+            -e SYNTHETIC_TIMEOUT_MS=120000 \
+            "$NODE_SYNTHETIC_IMAGE" node load/synthetic/browser-api-journey.mjs
 
       - name: Run k6 scenario
         shell: bash

@@ -67,8 +67,12 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   series exists and do not add a permanent empty zero series.
 - Live verification after deployment found the dashboard and product metric series. Fresh 5-minute
   checks can legitimately return zero for registration, MFA, vault item, and sync panels when no
-  synthetic or manual traffic is exercising those paths. The full browser vault journey remains the
-  next required proof before those panels can be accepted as useful.
+  synthetic or manual traffic is exercising those paths.
+- The current branch adds `load/synthetic/browser-api-journey.mjs`, a dependency-free Node
+  browser-API synthetic journey for
+  `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
+  It is a CI/local proof until merged and intentionally does not run automatically against the live
+  edge route.
 - The build info panel returns `password_vault_build_info`, but the current runtime reports
   `revision="unknown"`. The image digest is still pinned in GitOps, but the application metric
   should be fixed to expose a useful source revision.
@@ -87,6 +91,7 @@ Planned:
 - Business, product, and security panels.
 - Database HA, backup, restore, and PostgreSQL health panels.
 - External synthetic browser/API probes from outside the Kubernetes/LXD network.
+- Live dashboard panels for synthetic pass/fail once an external probe is approved.
 
 ## SLO And Error Budget Principles
 
@@ -301,8 +306,9 @@ Use these levels to avoid calling a dashboard "done" when it only proves that sc
 
 The live preview is currently L1 with part of L3 instrumentation started. Basic Golden Signal
 dashboard data exists and deployed product counters are visible. It is not L2 yet because product
-alert rules are not deployed and tested. It is not L3 yet because the full browser vault journey
-synthetic is not implemented and verified.
+alert rules are not deployed and tested. The repository now has a CI/local full browser API journey,
+but the live system is not L3 until that journey or an equivalent external probe is deployed,
+scraped, and shown on the dashboard.
 
 ## Current Dashboard Gaps
 
@@ -324,7 +330,7 @@ synthetic is not implemented and verified.
   `LoadBalancer` access still reaches `/metrics`; restrictive NetworkPolicy or a separate
   internal-only metrics listener is still needed.
 - No dashboard check proving `/metrics` is inaccessible from the wrong network path.
-- No synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
+- No live synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
 
 ## Waste-Control Rules For Observability Work
 
