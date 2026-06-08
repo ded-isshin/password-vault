@@ -5,9 +5,7 @@ use std::{
 
 use tokio::sync::watch;
 
-use password_vault_api::{
-    ApiConfig, build_app, init_tracing, metrics_app, run_database_migrations,
-};
+use password_vault_api::{ApiConfig, build_api_and_metrics, init_tracing, run_database_migrations};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,8 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind_addr = config.bind_addr;
     let metrics_bind_addr = config.metrics_bind_addr;
     let database_configured = config.database_url_present();
-    let app = build_app(config).await?;
-    let metrics_app = metrics_app();
+    let (app, metrics_app) = build_api_and_metrics(config).await?;
 
     tracing::info!(
         bind_addr = %bind_addr,

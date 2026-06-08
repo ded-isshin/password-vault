@@ -41,6 +41,15 @@ pub(crate) fn login_attempt(outcome: &'static str, failure_class: &'static str) 
     .increment(1);
 }
 
+pub(crate) fn rate_limited_request(policy: &'static str, flow: &'static str) {
+    metrics::counter!(
+        "password_vault_rate_limited_requests_total",
+        "policy" => policy,
+        "flow" => flow,
+    )
+    .increment(1);
+}
+
 pub(crate) fn session_event(event: &'static str, outcome: &'static str) {
     metrics::counter!(
         "password_vault_session_events_total",
@@ -48,6 +57,14 @@ pub(crate) fn session_event(event: &'static str, outcome: &'static str) {
         "outcome" => outcome,
     )
     .increment(1);
+}
+
+pub(crate) fn db_pool_connections(max: u32, size: u32, idle: usize) {
+    let idle = u32::try_from(idle).unwrap_or(u32::MAX).min(size);
+    let used = size.saturating_sub(idle);
+    metrics::gauge!("password_vault_db_pool_connections", "state" => "max").set(f64::from(max));
+    metrics::gauge!("password_vault_db_pool_connections", "state" => "idle").set(f64::from(idle));
+    metrics::gauge!("password_vault_db_pool_connections", "state" => "used").set(f64::from(used));
 }
 
 pub(crate) fn mfa_event(event: &'static str, outcome: &'static str) {

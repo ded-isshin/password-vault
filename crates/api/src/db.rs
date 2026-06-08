@@ -3,6 +3,7 @@ use std::time::Duration;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+pub const DATABASE_MAX_CONNECTIONS: u32 = 5;
 const DATABASE_ACQUIRE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
@@ -23,6 +24,6 @@ pub async fn ping(pool: &PgPool) -> Result<(), sqlx::Error> {
 
 fn pool_options() -> PgPoolOptions {
     PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(DATABASE_MAX_CONNECTIONS)
         .acquire_timeout(DATABASE_ACQUIRE_TIMEOUT)
 }
