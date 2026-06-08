@@ -73,9 +73,11 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
   It is a CI/local proof until merged and intentionally does not run automatically against the live
   edge route.
-- The build info panel returns `password_vault_build_info`, but the current runtime reports
-  `revision="unknown"`. The image digest is still pinned in GitOps, but the application metric
-  should be fixed to expose a useful source revision.
+- The build info panel returns `password_vault_build_info`. The current live digest may still report
+  `revision="unknown"` until a fixed image is published and rolled out. CI and published images
+  should set the `revision` label from the GitHub commit SHA through the Docker build arg
+  `BUILD_REVISION`; local ad-hoc builds that do not pass the build arg still report
+  `revision="unknown"`.
 
 Important label note:
 
@@ -319,8 +321,10 @@ scraped, and shown on the dashboard.
 - No SLO, error-budget, or burn-rate panels are implemented.
 - No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
-- Build/version panel is deployed and returns live `password_vault_build_info` data, but the source
-  revision label is currently `unknown`.
+- Build/version panel is deployed and returns live `password_vault_build_info` data. The current
+  live digest may still report `revision="unknown"` until the fixed image digest is rolled out.
+  Published images should report the GitHub commit SHA in the `revision` label; local images may
+  report `unknown` if built without `BUILD_REVISION`.
 - Product auth/MFA/vault/sync panels are deployed. Registration and login-start values have live
   series; current 5-minute rates can be zero until a fuller synthetic or browser journey exercises
   those paths.

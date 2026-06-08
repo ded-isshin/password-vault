@@ -50,7 +50,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build local image
-        run: docker build -t password-vault-api:load-smoke .
+        run: |
+          docker build \
+            --build-arg BUILD_REVISION="${GITHUB_SHA}" \
+            -t password-vault-api:load-smoke .
 
       - name: Run API
         shell: bash
