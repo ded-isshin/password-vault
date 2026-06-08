@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 pub(crate) fn record_build_info() {
     metrics::gauge!(
         "password_vault_build_info",
@@ -65,6 +67,41 @@ pub(crate) fn db_pool_connections(max: u32, size: u32, idle: usize) {
     metrics::gauge!("password_vault_db_pool_connections", "state" => "max").set(f64::from(max));
     metrics::gauge!("password_vault_db_pool_connections", "state" => "idle").set(f64::from(idle));
     metrics::gauge!("password_vault_db_pool_connections", "state" => "used").set(f64::from(used));
+}
+
+pub(crate) fn db_pool_wait_duration(
+    operation: &'static str,
+    outcome: &'static str,
+    duration: Duration,
+) {
+    metrics::histogram!(
+        "password_vault_db_pool_wait_duration_seconds",
+        "operation" => operation,
+        "outcome" => outcome,
+    )
+    .record(duration.as_secs_f64());
+}
+
+pub(crate) fn db_query_duration(
+    operation: &'static str,
+    outcome: &'static str,
+    duration: Duration,
+) {
+    metrics::histogram!(
+        "password_vault_db_query_duration_seconds",
+        "operation" => operation,
+        "outcome" => outcome,
+    )
+    .record(duration.as_secs_f64());
+}
+
+pub(crate) fn db_error(operation: &'static str, error_class: &'static str) {
+    metrics::counter!(
+        "password_vault_db_errors_total",
+        "operation" => operation,
+        "error_class" => error_class,
+    )
+    .increment(1);
 }
 
 pub(crate) fn mfa_event(event: &'static str, outcome: &'static str) {

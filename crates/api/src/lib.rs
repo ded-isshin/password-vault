@@ -7,8 +7,11 @@ use axum::{
     response::{Html, IntoResponse},
     routing::get,
 };
-use axum_prometheus::{EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder};
-use metrics_exporter_prometheus::PrometheusHandle;
+use axum_prometheus::{
+    AXUM_HTTP_REQUESTS_DURATION_SECONDS, EndpointLabel, PrometheusMetricLayer,
+    PrometheusMetricLayerBuilder, utils::SECONDS_DURATION_BUCKETS,
+};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -470,10 +473,35 @@ fn metrics_layer_and_handle() -> (PrometheusMetricLayer<'static>, PrometheusHand
             .with_endpoint_label_type(EndpointLabel::MatchedPathWithFallbackFn(
                 unmatched_endpoint_label,
             ))
-            .with_default_metrics()
+            .with_metrics_from_fn(prometheus_handle)
             .build_pair()
     });
     (layer.clone(), handle.clone())
+}
+
+const DB_DURATION_BUCKETS: &[f64] = &[
+    0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0,
+];
+
+fn prometheus_handle() -> PrometheusHandle {
+    PrometheusBuilder::new()
+        .set_buckets_for_metric(
+            Matcher::Full(AXUM_HTTP_REQUESTS_DURATION_SECONDS.to_string()),
+            SECONDS_DURATION_BUCKETS,
+        )
+        .expect("HTTP duration buckets must be valid")
+        .set_buckets_for_metric(
+            Matcher::Full("password_vault_db_pool_wait_duration_seconds".to_string()),
+            DB_DURATION_BUCKETS,
+        )
+        .expect("DB pool wait duration buckets must be valid")
+        .set_buckets_for_metric(
+            Matcher::Full("password_vault_db_query_duration_seconds".to_string()),
+            DB_DURATION_BUCKETS,
+        )
+        .expect("DB query duration buckets must be valid")
+        .install_recorder()
+        .expect("Prometheus recorder must install once")
 }
 
 fn unmatched_endpoint_label(_: &str) -> String {
@@ -482,7 +510,7 @@ fn unmatched_endpoint_label(_: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::OnceLock;
+    use std::{sync::OnceLock, time::Duration as StdDuration};
 
     use axum::{body::Body, body::to_bytes, http::Request};
     use serde_json::Value;
@@ -609,6 +637,13 @@ mod tests {
         crate::telemetry::sync_request("success", "complete");
         crate::telemetry::vault_item_change("create", "success");
         crate::telemetry::db_pool_connections(5, 3, 1);
+        crate::telemetry::db_pool_wait_duration(
+            "readyz_ping",
+            "success",
+            StdDuration::from_millis(2),
+        );
+        crate::telemetry::db_query_duration("readyz_ping", "error", StdDuration::from_millis(3));
+        crate::telemetry::db_error("readyz_ping", "pool_timeout");
 
         let metrics_response = metrics_app
             .oneshot(
@@ -637,6 +672,12 @@ mod tests {
         assert!(body.contains("password_vault_sync_requests_total"));
         assert!(body.contains("password_vault_vault_item_changes_total"));
         assert!(body.contains("password_vault_db_pool_connections"));
+        assert!(body.contains("password_vault_db_pool_wait_duration_seconds_bucket"));
+        assert!(body.contains("password_vault_db_query_duration_seconds_bucket"));
+        assert!(body.contains("password_vault_db_errors_total"));
+        assert!(body.contains("operation=\"readyz_ping\""));
+        assert!(body.contains("outcome=\"success\""));
+        assert!(body.contains("error_class=\"pool_timeout\""));
         assert!(body.contains("state=\"used\""));
         assert!(!body.contains("user@example.com"));
         assert!(!body.contains("account_id"));
