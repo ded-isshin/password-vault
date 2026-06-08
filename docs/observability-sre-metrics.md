@@ -215,23 +215,43 @@ The main dashboard should be organized by questions, not metric names.
 | L4 durability | Data survival is measured. | Replication, backup age, WAL archive, restore drill, and failover drill are visible. |
 | L5 security/product | Aggregate abuse and activation health are visible. | Auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented and verified. |
 
-Current repository state supports parts of L0/L1, product counter instrumentation, and a
-pre-cutover CloudNativePG scrape for `password-vault-cnpg`. The live deployment level must be
-re-evaluated after each GitOps rollout.
+Current runtime state as of 2026-06-08 supports parts of L0/L1, product counter instrumentation,
+and a deployed pre-cutover CloudNativePG scrape for `password-vault-cnpg`. The live deployment level
+must be re-evaluated after each GitOps rollout.
+
+Verified runtime evidence from the 2026-06-08 GitOps rollout:
+
+- Grafana dashboard UID `password-vault-overview` is provisioned.
+- CNPG dashboard panels are deployed for targets, streaming replicas, PostgreSQL version, backup
+  availability, replication lag, and WAL archive failures.
+- `sum(up{job="password-vault-cnpg"}) or vector(0)` returned `3`.
+- `max(cnpg_pg_replication_streaming_replicas{job="password-vault-cnpg"}) or vector(0)` returned
+  `2`.
+- `max by (pod) (cnpg_pg_replication_lag{job="password-vault-cnpg"})` returned `0` for all three
+  CNPG pods.
+- `max(cnpg_collector_last_available_backup_timestamp{job="password-vault-cnpg"}) > bool 0 or
+  vector(0)` returned `0`, so backup availability remains an intentional red gate.
+- No `PasswordVaultCnpg.*` alerts were firing immediately after the rollout.
+- Grafana image rendering is not installed in the current environment, so dashboard evidence uses
+  Grafana API checks and live datasource queries rather than rendered PNG screenshots.
 
 ## Current Dashboard And Alert Gaps
 
 Do not mark these complete without runtime evidence:
 
-- No current verification in this document proves Grafana panels render correctly.
+- Grafana API and live PromQL verification proved the deployed CNPG dashboard queries exist and
+  return data; PNG rendering is not available because the Grafana Image Renderer plugin is not
+  installed.
 - No current verification in this document proves Alertmanager delivers notifications.
 - No SLO or error-budget dashboard is documented as verified.
 - Multi-window, multi-burn-rate rules remain a next step.
 - External synthetic browser/API probes are not documented as scheduled, scraped, and dashboarded.
 - Synthetic pass/fail, step duration, and cleanup metrics are planned.
 - DB query latency, DB errors, DB pool wait, and auth hash pressure metrics are planned.
-- PostgreSQL HA scrape data exists for the pre-cutover CloudNativePG cluster, but backup age, WAL
-  archive health, restore drill, and failover drill panels are still required before real secrets.
+- PostgreSQL HA scrape data exists for the pre-cutover CloudNativePG cluster, and dashboard panels
+  for targets, streaming replicas, version, backup availability, replication lag, and WAL archive
+  failures are deployed. Backup/WAL configuration, restore drill, and failover drill evidence are
+  still required before real secrets.
 - Security panels for CSRF/origin rejection, recovery failures, and session/token anomalies are
   planned.
 - A panel cannot prove `/metrics` is blocked from the wrong network path. That needs an explicit
