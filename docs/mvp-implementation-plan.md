@@ -20,9 +20,8 @@ Current implementation status, 2026-06-08:
   `PV_TOTP_SEED_KEY_B64` key, and confirmation upgrades the setup session to `mfa_verified` while
   returning one-time recovery codes.
 - Login finish and login-time TOTP verification are merged and deployed in the current preview.
-- Vault list, encrypted item create/update/delete revision writes, and delta sync are implemented
-  locally on the current feature branch with database-backed tests. They are not merged or deployed
-  yet.
+- Vault list, encrypted item create/update/delete revision writes, and delta sync are merged and
+  deployed in the current GitOps preview with database-backed tests.
 - The browser preview supports registration and TOTP enrollment, and the current implementation
   adds the browser return-login path that uses deployed `login/start`, `login/finish`, and
   login-time `totp/verify`.
