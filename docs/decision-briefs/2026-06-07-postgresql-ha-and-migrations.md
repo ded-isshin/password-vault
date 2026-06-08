@@ -50,9 +50,8 @@ Implemented:
 - Root SQL migrations exist under `migrations/`.
 - CI and local database-backed tests can validate migrations against disposable PostgreSQL when
   `PV_TEST_DATABASE_URL` is configured.
-- Current CI uses a disposable `postgres:18-alpine` service for database-backed tests. Some older
-  development text may still mention earlier PostgreSQL 17 test images and should be cleaned up in a
-  documentation consistency pass.
+- Current CI uses a disposable `postgres:17-bookworm` service for database-backed tests, matching
+  the current preview PostgreSQL major version.
 - Infrastructure read-only review found an existing single PostgreSQL `StatefulSet` pattern for
   `hiringtrace`, scoped to that product's namespace and secret contract.
 - Infrastructure read-only review found no shared data operator currently enabled from the platform

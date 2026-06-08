@@ -24,10 +24,11 @@ documentation, logs, and CI output as public.
   user-vault core.
 - Public routing direction: edge reverse proxy to Kubernetes ingress/service; exact host, port,
   TLS, and network details belong in the infrastructure repository.
-- Current blocker: vault unlock, encrypted vault item CRUD/sync, PostgreSQL HA/backup/restore, and
-  stricter internal metrics/network controls remain unfinished. Registration, setup-session,
-  TOTP enrollment, login finish, login-time TOTP verification, GHCR image publishing, Helm/GitOps,
-  and a basic Grafana dashboard are implemented for the current preview.
+- Current blockers: a full synthetic browser/API journey, PostgreSQL HA/backup/restore, SLO alerts,
+  and stricter internal metrics/network controls remain unfinished. Registration, setup-session,
+  TOTP enrollment, login finish, login-time TOTP verification, browser vault unlock, encrypted item
+  CRUD/sync, GHCR image publishing, Helm/GitOps, and a basic Grafana dashboard are implemented for
+  the current preview.
 
 ## MVP Scope
 

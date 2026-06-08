@@ -4,8 +4,11 @@ Status: MVP architecture draft.
 
 ## Current State
 
-The repository now contains the first Rust API scaffold with health and readiness endpoints. Auth,
-crypto, database, frontend, Helm, and GitOps deployment implementation are not present yet.
+The repository contains a deployed browser/API MVP preview with registration, TOTP enrollment,
+login, browser-side vault unlock, encrypted item create/update/delete, delta sync, health,
+readiness, metrics, Helm, GHCR image publishing, GitOps deployment, and a basic Grafana dashboard.
+It is not approved for real user secrets yet because PostgreSQL HA, backup/restore/failover drills,
+SLO alerts, full synthetic journey checks, and stricter network/metrics controls are still missing.
 
 ## High-Level Architecture
 

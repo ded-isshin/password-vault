@@ -6,13 +6,12 @@ Current implementation status, 2026-06-08:
 
 - Deployed browser preview, health/readiness/metrics, preview PostgreSQL, Helm/GitOps, and Grafana
   dashboard exist.
-- The current GitOps preview is `Synced/Healthy` in Argo CD. API pods are three ready replicas,
-  spread one per worker after the production rollout strategy was changed to
+- The current GitOps preview is `Synced/Healthy/Succeeded` in Argo CD. API pods are three ready
+  replicas, spread one per worker after the production rollout strategy was changed to
   `maxUnavailable: 1` and `maxSurge: 0` for strict topology spreading.
-- The latest Argo CD operation state is `Failed` even though the application is currently
-  `Synced/Healthy`: a fixed-name `password-vault-migrate` hook Job from an older digest blocked a
-  later dry-run apply because Kubernetes Jobs have immutable pod templates. The current branch fixes
-  the product chart to render migration hooks with `metadata.generateName` and `HookSucceeded`.
+- The generated-name Argo CD migration hook fix is merged, published, and rolled out. The previous
+  fixed-name `password-vault-migrate` Job from an older digest remains visible as historical
+  pruning debt, but it no longer blocks the current application sync.
 - `/v1/auth/register/start`, `/v1/auth/login/start`, `/v1/auth/register/finish`,
   `/v1/session`, `/v1/csrf`, `/v1/auth/logout`, `/v1/mfa/totp/enroll/start`, and
   `/v1/mfa/totp/enroll/confirm` are implemented.
@@ -26,12 +25,11 @@ Current implementation status, 2026-06-08:
 - Login finish and login-time TOTP verification are merged and deployed in the current preview.
 - Vault list, encrypted item create/update/delete revision writes, and delta sync are merged and
   deployed in the current GitOps preview with database-backed tests.
-- The browser preview supports registration and TOTP enrollment, and the current implementation
-  adds the browser return-login path that uses deployed `login/start`, `login/finish`, and
-  login-time `totp/verify`.
-- The current branch adds browser-side in-memory vault unlock, encrypted item create/update/delete,
-  and sync on top of the deployed vault API. This browser vault workflow is implemented locally and
-  still needs CI, image publication, GitOps rollout, and live browser verification.
+- The browser preview supports registration, TOTP enrollment, return login, in-memory vault unlock,
+  encrypted item create/update/delete, and sync on top of the deployed vault API.
+- The browser vault workflow is merged, published, rolled out, and visible through the mini-PC edge
+  route. It still needs a full automated synthetic journey and a manual MacBook/browser-path check
+  before it can be treated as proven end-to-end.
 - Recovery-code verification remains unimplemented.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
   The in-cluster app service remains plain HTTP behind the edge proxy.
@@ -48,10 +46,8 @@ Current implementation status, 2026-06-08:
   CloudNativePG operator/controller. The current preview database is still a single PostgreSQL
   `StatefulSet`, so it remains a blocker before real password data.
 - A controlled migration runner is merged, published, and deployed: the API image supports a
-  `password-vault-api migrate` command and one live migration Job completed successfully. The
-  fixed-name hook behavior is not accepted as stable after the later immutable Job failure; the
-  current branch changes the chart to generated-name migration hooks and must be rolled out before
-  relying on the mechanism for schema-changing releases.
+  `password-vault-api migrate` command, startup migrations remain disabled in production values, and
+  generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
 
 ## Stabilization-First Queue
 
@@ -61,20 +57,23 @@ MVP dependable:
 1. Prove browser access from the client side, not only from the mini-PC: Password Vault, Grafana,
    and Argo CD should be checked from the MacBook/browser path with the expected self-signed TLS
    warning.
-2. Validate, merge, and deploy the browser vault unlock plus encrypted item
-   create/read/update/delete/sync workflow.
-3. Roll out the generated-name Argo CD migration hook fix, then verify a second digest rollout does
-   not leave the application with a failed operation state.
-4. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
+2. Add a full synthetic browser/API journey for
+   `register -> confirm TOTP -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`
+   and run it in CI and against the live edge route.
+3. Replace the preview single PostgreSQL StatefulSet with a product-specific CloudNativePG cluster
    before accepting real secrets.
-5. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
-6. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
+4. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
+5. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
-7. Deploy and verify the new auth/MFA/session/vault/sync product metrics, then expand observability
+6. Deploy and test SLO/alert rules for target-down and fast 5xx burn-rate before adding broader
+   alert volume.
+7. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
+   expand observability
    further to database health, backup freshness, and security aggregate metrics.
-8. Add SLO and burn-rate alerts after the relevant metrics return live data.
-9. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
+8. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
    from inside the Kubernetes/LXD network.
+9. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
+   stale bootstrap claims do not become false work items.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.
 
