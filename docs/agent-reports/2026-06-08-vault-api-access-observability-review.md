@@ -19,7 +19,7 @@ Repositories out of scope:
 
 ## Work Completed
 
-- Added local backend routes for:
+- Added and deployed backend routes for:
   - `GET /v1/vaults`
   - `GET /v1/vaults/{vault_id}/sync`
   - `POST /v1/vaults/{vault_id}/items`
@@ -42,6 +42,10 @@ Verified:
 - Grafana datasource queries for target health, request rate, 5xx ratio, p95 latency, pending
   requests, and unmatched 404 rate return live data.
 - Argo CD reports `password-vault` and the observability applications as `Synced` and `Healthy`.
+- After the GitOps image digest rollout, the API Deployment reached `3/3` ready replicas on the
+  new immutable image digest.
+- Live unauthenticated requests to the new vault routes returned `401 session_required` with
+  `Cache-Control: no-store`, proving the deployed routes are present and closed by default.
 
 Important access note:
 
@@ -135,10 +139,18 @@ Tested:
 - Live Grafana datasource queries for dashboard panels.
 - Read-only Kubernetes checks through the control-plane container.
 
+Tested after deployment:
+
+- Product image publication from GitHub Actions on `main`.
+- Infrastructure GitOps digest PR and Argo CD rollout to the new image digest.
+- Live edge `/`, `/healthz`, `/readyz`, `/v1/vaults`, and vault sync unauthenticated negative path.
+- Grafana datasource queries after rollout: target health returned the expected three API scrape
+  targets, 5xx ratio returned `0`, and latency/request-rate panels returned data.
+
 Not tested:
 
 - Browser UI unlock/write/sync flow. The browser unlock UI is not implemented yet.
-- Deployment of the local vault API branch. The branch is implemented locally, not deployed.
+- Authenticated browser vault write/sync flow against the deployed preview.
 - Product-specific auth/vault/business metrics. They remain planned.
 - CloudNativePG failover, backup, WAL archive, or restore drills. The product cluster does not
   exist yet.
@@ -147,17 +159,15 @@ Not tested:
 
 - The deployed preview database is still single-instance and preview-only.
 - The current product does not yet have NetworkPolicy.
-- The vault API is not deployed yet, so live product validation is still limited to existing
-  deployed auth/preview paths.
+- Live vault API validation currently proves deployed route availability and fail-closed
+  unauthenticated behavior. It does not yet prove the browser unlock/write journey.
 - Observability does not yet include vault write/sync counters or synthetic journeys.
 
 ## Next Steps
 
-1. Open/merge the vault API PR after CI and review.
-2. Build and deploy the new API image through GitHub/GitOps.
-3. Implement browser vault unlock and encrypted item UI using the API-first contract.
-4. Add product-specific application metrics and update the Grafana dashboard/alerts.
-5. Replace preview PostgreSQL with a product-specific CloudNativePG cluster plus backup and restore
+1. Implement browser vault unlock and encrypted item UI using the API-first contract.
+2. Add product-specific application metrics and update the Grafana dashboard/alerts.
+3. Replace preview PostgreSQL with a product-specific CloudNativePG cluster plus backup and restore
    gates before real secrets.
 
 ## Sources

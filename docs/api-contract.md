@@ -900,7 +900,7 @@ or decrypting sync responses.
 
 Implementation status:
 
-- Implemented locally, not merged/deployed as of the current feature branch.
+- Merged and deployed in the current GitOps preview.
 - Vault endpoints require an `mfa_verified` session.
 - State-changing vault requests require the same JSON, session, CSRF, Fetch Metadata, and Origin
   protections as logout.
