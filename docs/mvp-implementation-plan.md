@@ -53,6 +53,14 @@ Current implementation status, 2026-06-08:
 - Grafana and Argo CD are also reachable through the mini-PC HTTPS edge route from the mini-PC.
   MacBook/browser reachability still needs a client-side check; use the mini-PC LAN edge address
   with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs.
+- A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
+  network and that NGINX listens on `0.0.0.0` for the Password Vault, Grafana, and Argo CD edge
+  ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes service-routing
+  details. If a MacBook cannot open the services while mini-PC `curl -k` checks pass, start with
+  client LAN/VPN/firewall/certificate troubleshooting, not Kubernetes Service rewrites.
+- The edge publishing layer currently uses a self-signed certificate and broad host listeners. Before
+  real user secrets, edge exposure must be locked down to intended LAN/VPN paths and verified from a
+  client-equivalent route.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
@@ -81,28 +89,33 @@ MVP dependable:
 
 1. Prove browser access from the client side, not only from the mini-PC: Password Vault, Grafana,
    and Argo CD should be checked from the MacBook/browser path with the expected self-signed TLS
-   warning.
-2. Run the full synthetic browser/API journey in CI and against the live edge route:
-   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
-3. Keep browser crypto tests non-negotiable: keep the local tamper self-test and add future test
-   vectors only when they directly protect the accepted crypto format.
-4. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
-   not schedule production cleanup until HA/backup posture is understood.
-5. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
-   backup/WAL/restore/failover gates, and remove the legacy preview PostgreSQL rollback artifact only
-   after recorded restore evidence exists. Do not accept real secrets before this is complete.
-6. Add backup, WAL archiving, restore drill, and failover drill gates before real-user use.
-7. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
-   listener before real-user use.
-8. Finish alert delivery before adding broader alert volume: the current rules include candidate
+   warning. The correct browser route is the mini-PC LAN edge address plus the documented edge port,
+   not the internal Kubernetes/LXD `LoadBalancer` address.
+2. Lock down edge exposure before real secrets: document and enforce the intended LAN/VPN-only access
+   path for Password Vault, Grafana, and Argo CD; replace or trust the self-signed certificate model;
+   and keep Argo CD/Grafana off unintended public paths.
+3. Finish alert delivery before adding broader alert volume: the current rules include candidate
    availability burn-rate and durability alerts, but Alertmanager delivery still needs a controlled
    smoke test.
-9. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
-   expand observability
-   further to database health, backup freshness, and security aggregate metrics.
-10. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
+4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
+   object-store backed base backups, WAL/PITR, restore drills, and failover gates. Do not accept real
+   secrets before this is complete.
+5. Run the full synthetic browser/API journey in CI and against the live edge route:
+   `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
+6. Keep browser crypto tests non-negotiable: keep the local tamper self-test and add future test
+   vectors only when they directly protect the accepted crypto format.
+7. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
+   not schedule production cleanup until HA/backup posture is understood.
+8. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
+   migration Job only after the rollback window and backup/restore evidence are recorded.
+9. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
+   listener before real-user use.
+10. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
+   expand observability further to database health, backup freshness, and security aggregate
+   metrics.
+11. Add external synthetic checks from a client path equivalent to a MacBook/browser path, not only
    from inside the Kubernetes/LXD network.
-11. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
+12. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
    stale bootstrap claims do not become false work items.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.
