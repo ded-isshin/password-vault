@@ -99,10 +99,10 @@ regressions should usually create tickets unless they imply data loss, lockout, 
 
 | Golden signal | Password Vault interpretation | Current repository-visible state | Gaps |
 | --- | --- | --- | --- |
-| Latency | HTTP route latency, successful vs failed latency, auth/MFA proof latency, DB query latency, synthetic journey duration. | HTTP duration histogram exists through the Axum metrics layer. | Auth/MFA step duration, DB query latency, DB pool wait latency, and journey duration metrics are planned. |
+| Latency | HTTP route latency, successful vs failed latency, auth/MFA proof latency, DB query latency, synthetic journey duration. | HTTP duration histogram exists through the Axum metrics layer. Readiness DB pool wait and `SELECT 1` query duration metrics are implemented in code. | Auth/MFA step duration, broad per-operation DB query latency, and journey duration metrics are planned. |
 | Traffic | Request rate and meaningful product operation rates: registration, login, MFA, session, vault item, sync. | HTTP counters and product counters are implemented in code. | Active session gauge and scheduled external synthetic traffic are planned. |
-| Errors | 5xx ratio, policy failures, rate-limit hits, MFA failures, CSRF/security rejections, synthetic failures, DB errors. | HTTP status counters, login/MFA outcome counters, rate-limit counter, and vault/sync outcome counters are implemented in code. | CSRF/security rejection counters, DB error counters, and synthetic pass/fail metrics are planned. |
-| Saturation | Pending requests, DB pool pressure, DB wait, auth challenge pressure, pod CPU/memory, PostgreSQL lag/disk, backup/WAL backlog. | HTTP pending requests and DB pool connection gauges are implemented in code. | DB wait histogram, auth/MFA step duration, PostgreSQL HA/backup/failover panels, and capacity alerts are planned. |
+| Errors | 5xx ratio, policy failures, rate-limit hits, MFA failures, CSRF/security rejections, synthetic failures, DB errors. | HTTP status counters, login/MFA outcome counters, rate-limit counter, vault/sync outcome counters, and readiness DB error counters are implemented in code. | CSRF/security rejection counters and synthetic pass/fail metrics are planned. |
+| Saturation | Pending requests, DB pool pressure, DB wait, auth challenge pressure, pod CPU/memory, PostgreSQL lag/disk, backup/WAL backlog. | HTTP pending requests, DB pool connection gauges, and readiness DB pool wait histograms are implemented in code. | Auth/MFA step duration, PostgreSQL HA/backup/failover panels, and capacity alerts are planned. |
 
 ## Implemented Application Metrics
 
@@ -125,6 +125,9 @@ still needs to be verified per deployment.
 | `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | product errors/traffic | Encrypted item create/update/delete behavior. |
 | `password_vault_sync_requests_total` | counter | `outcome`, `page` | product errors/traffic | Vault delta-sync success, conflict, and pagination. |
 | `password_vault_db_pool_connections` | gauge | `state="idle|used|max"` | saturation | Pool pressure visible at scrape time. |
+| `password_vault_db_pool_wait_duration_seconds` | histogram | `operation`, `outcome` | saturation/latency | Connection-pool wait latency for readiness DB checks. |
+| `password_vault_db_query_duration_seconds` | histogram | `operation`, `outcome` | latency | Database `SELECT 1` latency for readiness DB checks. |
+| `password_vault_db_errors_total` | counter | `operation`, `error_class` | errors | Low-cardinality DB readiness failures without SQL, connection strings, or values. |
 
 Guardrails:
 
@@ -139,9 +142,9 @@ Guardrails:
 
 | Metric | Type | Labels | Why it matters |
 | --- | --- | --- | --- |
-| `password_vault_db_pool_wait_duration_seconds_bucket` | histogram | `operation` | Early warning before pool starvation causes user-visible failures. |
-| `password_vault_db_query_duration_seconds_bucket` | histogram | `operation`, `outcome` | Separates database latency from application latency. |
-| `password_vault_db_errors_total` | counter | `operation`, `error_class` | Detects DB failures without leaking SQL or values. |
+| Broader `password_vault_db_pool_wait_duration_seconds` coverage | histogram | `operation`, `outcome` | Expand beyond readiness checks to user-critical DB-backed operations after we define stable operation names. |
+| Broader `password_vault_db_query_duration_seconds` coverage | histogram | `operation`, `outcome` | Separates database latency from application latency for product flows, not only readiness. |
+| Broader `password_vault_db_errors_total` coverage | counter | `operation`, `error_class` | Detects DB failures in product flows without leaking SQL or values. |
 | `password_vault_auth_step_duration_seconds_bucket` | histogram | `step`, `outcome` | Tracks server-side auth/MFA proof verification and challenge handling latency. The expensive password KDF is browser-side in the MVP. |
 | `password_vault_request_rejections_total` | counter | `reason`, `endpoint` | Tracks body-size, content-type, CSRF, origin, and validation rejections. |
 | `password_vault_security_events_total` | counter | `event_class`, `severity` | Aggregated security posture without user-identifying labels. |
