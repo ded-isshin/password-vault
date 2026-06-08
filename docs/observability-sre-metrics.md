@@ -43,7 +43,7 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - The Grafana browser route is reachable through the mini-PC LAN-facing edge port. The Kubernetes
   `LoadBalancer` address is not the default client URL for a MacBook or other LAN-only browser.
 - Argo CD is reachable through the mini-PC LAN-facing edge stream port and reports the product
-  application as `Synced` and `Healthy`.
+  application as `Synced`, `Healthy`, and with the latest operation `Succeeded`.
 - A live browser-equivalent edge check from the mini-PC confirmed HTTP 200 for Password Vault,
   Grafana health, the `Password Vault Overview` dashboard URL, and Argo CD `/healthz`. A MacBook
   should use the mini-PC LAN-facing address and these edge ports, not Kubernetes/LXD service IPs.
@@ -65,9 +65,13 @@ Implemented and verified in the current GitOps preview as of 2026-06-08:
 - The infrastructure GitOps dashboard is deployed with panels for those product counters. Grouped
   dashboard panels use `or on() vector(0)` for fallback, so they return `0` only when no left-hand
   series exists and do not add a permanent empty zero series.
-- Live verification after deployment found non-zero registration and login-start series in
-  VictoriaMetrics. MFA, vault item, and sync panels still need a fuller synthetic journey before
-  non-zero live values can be verified.
+- Live verification after deployment found the dashboard and product metric series. Fresh 5-minute
+  checks can legitimately return zero for registration, MFA, vault item, and sync panels when no
+  synthetic or manual traffic is exercising those paths. The full browser vault journey remains the
+  next required proof before those panels can be accepted as useful.
+- The build info panel returns `password_vault_build_info`, but the current runtime reports
+  `revision="unknown"`. The image digest is still pinned in GitOps, but the application metric
+  should be fixed to expose a useful source revision.
 
 Important label note:
 
@@ -296,10 +300,9 @@ Use these levels to avoid calling a dashboard "done" when it only proves that sc
 | L5 security/product | Aggregate abuse and activation signals are visible. | Low-cardinality auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented. |
 
 The live preview is currently L1 with part of L3 instrumentation started. Basic Golden Signal
-dashboard data exists, deployed product counters are visible, and registration/login-start journey
-signals have non-zero live data. It is not L2 yet because product alert rules are not deployed and
-tested. It is not L3 yet because the full browser vault journey synthetic is not implemented and
-verified.
+dashboard data exists and deployed product counters are visible. It is not L2 yet because product
+alert rules are not deployed and tested. It is not L3 yet because the full browser vault journey
+synthetic is not implemented and verified.
 
 ## Current Dashboard Gaps
 
@@ -310,10 +313,11 @@ verified.
 - No SLO, error-budget, or burn-rate panels are implemented.
 - No alert rules for target down, 5xx budget burn, latency regression, or in-flight request pressure.
 - No DB pool, query latency, or DB error panels because DB metrics are not instrumented yet.
-- Build/version panel is deployed and returns live `password_vault_build_info` data.
+- Build/version panel is deployed and returns live `password_vault_build_info` data, but the source
+  revision label is currently `unknown`.
 - Product auth/MFA/vault/sync panels are deployed. Registration and login-start values have live
-  non-zero data; login proof, MFA, vault item, and sync panels are still zero until a fuller
-  synthetic or browser journey exercises those paths.
+  series; current 5-minute rates can be zero until a fuller synthetic or browser journey exercises
+  those paths.
 - CSRF, rate-limit, recovery, and protected-activation security-event panels are not implemented
   yet.
 - Edge access to `/metrics` is blocked in the current preview, but internal application
@@ -321,6 +325,19 @@ verified.
   internal-only metrics listener is still needed.
 - No dashboard check proving `/metrics` is inaccessible from the wrong network path.
 - No synthetic end-to-end journey panel for register, login, MFA, unlock, and sync flows.
+
+## Waste-Control Rules For Observability Work
+
+Observability work should not create panels or reports merely because a metric name exists. A new
+dashboard panel, alert, or agent report should meet at least one of these tests:
+
+- it proves or disproves an MVP acceptance gate;
+- it catches a user-visible access, save, sync, durability, security, or rollout failure;
+- it reduces the chance of data loss, secret exposure, or silent broken deployment;
+- it creates regression evidence that CI or live checks can repeat.
+
+Agent reports are historical evidence. The current truth should be updated in this plan, the API
+contract, ADRs, and runbooks instead of spawning parallel "current state" documents.
 
 Minimum MVP dashboard rows:
 

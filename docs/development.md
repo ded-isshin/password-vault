@@ -92,7 +92,8 @@ environment variables.
 
 ### PostgreSQL Version
 
-The MVP CI migration job currently uses `postgres:18-alpine`.
+The MVP CI migration job currently uses `postgres:17-bookworm`, matching the current preview
+PostgreSQL major version.
 
 The current migration uses PostgreSQL column-specific `ON DELETE SET NULL (device_id)` on a composite
 foreign key, so supported PostgreSQL versions must be PostgreSQL 15 or newer. Keep CI on a supported
