@@ -11,6 +11,10 @@ The chart targets Kubernetes `>=1.27`, because it renders topology spread node i
 Schema migrations are also an infrastructure/operator responsibility. Application pods do not run
 migrations by default.
 
+The chart can also emit a disabled-by-default synthetic cleanup `CronJob` for bounded live synthetic
+test data. It is operational hygiene only; it does not replace scheduled end-to-end synthetic
+monitoring.
+
 ## Runtime Secrets
 
 The chart expects Kubernetes Secrets created outside this public repository:
@@ -55,6 +59,40 @@ accepts Kubernetes deleting completed migration jobs before the next Argo sync.
 
 Production schema-changing releases must still follow an expand/contract plan, with backup/restore
 evidence before destructive or contract migrations.
+
+## Synthetic Cleanup
+
+The API image includes a maintenance command:
+
+```bash
+password-vault-api cleanup-synthetic --dry-run
+password-vault-api cleanup-synthetic --confirm
+```
+
+The chart can schedule it with `syntheticCleanup.cronJob.enabled=true`. The default mode is dry-run:
+`syntheticCleanup.cronJob.confirm=false` renders `--dry-run` and deletes nothing.
+
+The cleanup job requires only `PV_DATABASE_URL`. It does not require TOTP seed or synthetic metadata
+keys. It passes the cleanup bounds through environment variables:
+
+- `PV_SYNTHETIC_CLEANUP_PREFIX`
+- `PV_SYNTHETIC_CLEANUP_DOMAIN`
+- `PV_SYNTHETIC_CLEANUP_MIN_AGE_HOURS`
+- `PV_SYNTHETIC_CLEANUP_MAX_DELETE`
+
+The application enforces a reserved `.invalid` domain, a minimum age floor, and a bounded maximum
+delete count. Production-like values should still run dry-run first and inspect aggregate logs before
+setting `confirm=true`.
+
+Kubernetes CronJob defaults:
+
+- `concurrencyPolicy: Forbid` prevents overlapping cleanup jobs;
+- `startingDeadlineSeconds` limits stale missed starts;
+- job history limits avoid unbounded completed Job objects;
+- `automountServiceAccountToken: false` keeps the pod from receiving a Kubernetes API token.
+
+Do not point cleanup at real user domains. Do not treat cleanup logs as synthetic monitoring proof:
+scheduled synthetic pass/fail metrics are a separate acceptance gate.
 
 ## Rollout Policy
 

@@ -97,6 +97,46 @@ jobs:
           grep -q 'name: PV_DATABASE_URL' /tmp/password-vault-migration-job-rendered.yaml
           grep -q 'secretKeyRef:' /tmp/password-vault-migration-job-rendered.yaml
           ! grep -q 'ttlSecondsAfterFinished' /tmp/password-vault-migration-job-rendered.yaml
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticCleanup.cronJob.enabled=true \
+            >/tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'kind: CronJob' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'name: password-vault-synthetic-cleanup' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'schedule: "17 3 \\* \\* \\*"' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'timeZone: "Etc/UTC"' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'concurrencyPolicy: Forbid' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'successfulJobsHistoryLimit: 1' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'failedJobsHistoryLimit: 3' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'automountServiceAccountToken: false' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q -- '- cleanup-synthetic' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q -- '- --dry-run' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'name: PV_DATABASE_URL' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'name: PV_SYNTHETIC_CLEANUP_DOMAIN' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          grep -q 'value: "loadtest.invalid"' /tmp/password-vault-synthetic-cleanup-rendered.yaml
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticCleanup.cronJob.enabled=true \
+            --set syntheticCleanup.cronJob.confirm=true \
+            >/tmp/password-vault-synthetic-cleanup-confirm-rendered.yaml
+          grep -q -- '- --confirm' /tmp/password-vault-synthetic-cleanup-confirm-rendered.yaml
+          ! grep -q -- '- --dry-run' /tmp/password-vault-synthetic-cleanup-confirm-rendered.yaml
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticCleanup.cronJob.enabled=true \
+            --set syntheticCleanup.cronJob.domain=example.com
+          ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set syntheticCleanup.cronJob.enabled=true \
+            --set syntheticCleanup.cronJob.domain='bad..invalid'
           ! docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
             template password-vault deploy/helm/password-vault \
             --namespace password-vault \

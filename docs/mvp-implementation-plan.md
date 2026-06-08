@@ -43,8 +43,9 @@ Current implementation status, 2026-06-08:
   AES-GCM rejection for tampered ciphertext, nonce, and authenticated metadata before any API
   account is created.
 - A dry-run-first `cleanup-synthetic` maintenance command exists for old reserved-domain synthetic
-  accounts. This enables bounded cleanup of live-test data, but a scheduled external synthetic probe
-  and cleanup job are still future work.
+  accounts. The Helm chart can render a disabled-by-default Kubernetes CronJob for this command, so
+  production values can enable dry-run scheduling before allowing confirmed deletion. Scheduled
+  external synthetic pass/fail metrics are still future work.
 - Recovery-code verification is implemented for the MVP preview. It can only be used after primary
   login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
@@ -104,8 +105,8 @@ MVP dependable:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
 6. Keep browser crypto tests non-negotiable: keep the local tamper self-test and add future test
    vectors only when they directly protect the accepted crypto format.
-7. Keep live synthetic data bounded: use reserved `.invalid` handles, dry-run cleanup first, and do
-   not schedule production cleanup until HA/backup posture is understood.
+7. Keep live synthetic data bounded: use reserved `.invalid` handles, schedule cleanup in dry-run
+   mode first, and only enable confirmed deletion after the aggregate match count is understood.
 8. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
    migration Job only after the rollback window and backup/restore evidence are recorded.
 9. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics

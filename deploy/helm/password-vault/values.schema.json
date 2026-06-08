@@ -133,6 +133,96 @@
           ]
         }
       }
+    },
+    "syntheticCleanup": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "cronJob": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 1
+            },
+            "timeZone": {
+              "type": "string",
+              "minLength": 1
+            },
+            "suspend": {
+              "type": "boolean"
+            },
+            "concurrencyPolicy": {
+              "type": "string",
+              "enum": [
+                "Allow",
+                "Forbid",
+                "Replace"
+              ]
+            },
+            "startingDeadlineSeconds": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "successfulJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failedJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "backoffLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ttlSecondsAfterFinished": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "confirm": {
+              "type": "boolean"
+            },
+            "prefix": {
+              "type": "string",
+              "pattern": "^[a-z0-9.-]{1,32}$"
+            },
+            "domain": {
+              "type": "string",
+              "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\\.invalid$",
+              "maxLength": 80
+            },
+            "minAgeHours": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxDelete": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "annotations": {
+              "type": "object"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
+        }
+      }
     }
   }
 }

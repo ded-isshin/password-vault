@@ -29,6 +29,12 @@ decryption.
 Synthetic cleanup is intentionally a maintenance command, not a public API route. It is dry-run by
 default and can only target reserved `.invalid` login handles.
 
+The Helm chart can schedule this command as a Kubernetes CronJob through
+`syntheticCleanup.cronJob.enabled=true`. Chart defaults keep it disabled and dry-run-first; production
+values must explicitly set `syntheticCleanup.cronJob.confirm=true` before accounts are deleted. The
+CronJob uses `concurrencyPolicy: Forbid`, limited Job history, and the same `.invalid` domain guard
+as the command.
+
 ```bash
 docker run --rm --network host \
   -e PV_DATABASE_URL=postgres://<redacted-username>:<redacted-secret>@<redacted-host>:5432/<redacted-db> \
