@@ -2,9 +2,27 @@ name: container
 
 on:
   pull_request:
+    paths:
+      - .dockerignore
+      - .github/workflows/container.yml
+      - Cargo.lock
+      - Cargo.toml
+      - Dockerfile
+      - crates/**
+      - load/**
+      - migrations/**
   push:
     branches:
       - main
+    paths:
+      - .dockerignore
+      - .github/workflows/container.yml
+      - Cargo.lock
+      - Cargo.toml
+      - Dockerfile
+      - crates/**
+      - load/**
+      - migrations/**
 
 permissions:
   contents: read
