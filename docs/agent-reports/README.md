@@ -36,3 +36,11 @@ Keep reports that contain one of these:
 - important rejected options or known blockers.
 
 Do not add new reports for routine edits when the PR description and canonical docs are enough.
+
+## Anti-Sprawl Rule
+
+Agent and Claude Code sidecar reviews should normally feed the canonical docs listed above. Keep a
+new report only when it contains unique command evidence, runtime evidence, or reviewer findings
+that would be hard to reconstruct from the PR description. If a report only restates current
+PostgreSQL, access, observability, or workflow policy, consolidate the useful finding into the
+canonical document and discard the duplicate draft before opening a PR.

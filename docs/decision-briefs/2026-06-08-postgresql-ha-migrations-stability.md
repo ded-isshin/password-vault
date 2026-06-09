@@ -170,6 +170,13 @@ operator-managed failover. With three instances spread across workers, a single 
 leave a promoted or existing primary plus at least one remaining replica, assuming scheduling and
 storage placement are healthy.
 
+In the current home-lab deployment, this is not physical-site HA. The Kubernetes workers, API pods,
+CloudNativePG instances, Argo CD, Grafana, and node-local storage all ultimately depend on one
+mini-PC host. The three-instance cluster is still valuable because it protects against PostgreSQL
+process, pod, LXD/container, and single worker-node failures, and it lets us practice GitOps,
+failover, and restore procedures. It does not protect against full mini-PC loss. That gap must be
+closed by off-node/off-host backups and restore evidence before real secrets are accepted.
+
 This does not replace backups. On the current `local-path` storage class, PostgreSQL volumes are
 node-local. CloudNativePG replication is necessary because it gives PostgreSQL a promotable data
 copy on another worker, but it is still not a complete durability story. HA handles common database
