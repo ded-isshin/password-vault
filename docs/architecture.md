@@ -6,10 +6,11 @@ Status: MVP architecture draft.
 
 The repository contains a deployed browser/API MVP preview with registration, TOTP enrollment,
 login, browser-side vault unlock, encrypted item create/update/delete, delta sync, health,
-readiness, metrics, Helm, GHCR image publishing, GitOps deployment, and a basic Grafana dashboard.
+readiness, metrics, Helm, GHCR image publishing, GitOps deployment, scheduled live-edge synthetic
+journey checks, and a Grafana dashboard.
 It is not approved for real user secrets yet because PostgreSQL backup/WAL/restore/failover drills,
-SLO alert delivery, scheduled synthetic journey checks, and stricter network/metrics controls are
-still missing.
+Alertmanager delivery, trusted edge TLS/client-side LAN verification, and final rollback-debt cleanup
+are still missing.
 
 ## High-Level Architecture
 

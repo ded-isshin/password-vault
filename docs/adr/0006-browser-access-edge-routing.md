@@ -48,13 +48,13 @@ Service addresses as internal routing details.
   port.
 - Runtime diagnostics should check both layers when access fails:
   - edge listener on the mini-PC;
-  - NGINX upstream to the Kubernetes/LXD Service;
+  - NGINX upstream to the Kubernetes ingress or service;
   - Argo CD application health;
   - client-side LAN/VPN/firewall/certificate behavior.
 - The internal black-box `/readyz` probe proves Kubernetes service reachability from observability,
   not MacBook browser reachability.
-- A scheduled external synthetic check should eventually exercise the edge route, not only the
-  in-cluster Service.
+- A scheduled synthetic check should exercise the same edge route intended for browser access, not
+  only the in-cluster Service. MacBook-side reachability still needs direct client evidence.
 - If the platform later moves to Ingress, Gateway API, VPN-only access, or public DNS/TLS, this ADR
   must be replaced or amended.
 
