@@ -524,6 +524,7 @@ async function requestRaw(config, path, options = {}) {
   const url = new URL(path, options.baseUrl || config.baseUrl);
   const headers = {
     Accept: options.accept || "application/json",
+    "X-Password-Vault-Traffic-Class": "synthetic",
     ...(options.headers || {}),
   };
   const method = options.method || "GET";
@@ -1298,22 +1299,64 @@ async function assertMetrics(config) {
     label: "metrics",
   });
   const requiredSeries = [
-    ["password_vault_registration_events_total", { event: "start", outcome: "issued" }],
-    ["password_vault_registration_events_total", { event: "finish", outcome: "success" }],
-    ["password_vault_accounts_created_total", { outcome: "success" }],
-    ["password_vault_login_starts_total", { outcome: "issued" }],
-    ["password_vault_login_attempts_total", { outcome: "success", failure_class: "none" }],
-    ["password_vault_mfa_events_total", { event: "totp_enrollment", outcome: "started" }],
-    ["password_vault_mfa_events_total", { event: "totp_enrollment", outcome: "confirmed" }],
-    ["password_vault_mfa_events_total", { event: "totp_login", outcome: "challenge_issued" }],
-    ["password_vault_mfa_events_total", { event: "totp_login", outcome: "verified" }],
-    ["password_vault_mfa_events_total", { event: "recovery_code_login", outcome: "verified" }],
-    ["password_vault_session_events_total", { event: "created", outcome: "mfa_enrollment_required" }],
-    ["password_vault_session_events_total", { event: "upgraded", outcome: "mfa_verified" }],
-    ["password_vault_session_events_total", { event: "created", outcome: "mfa_verified" }],
-    ["password_vault_session_events_total", { event: "created", outcome: "mfa_recovery" }],
-    ["password_vault_vault_item_changes_total", { operation: "create", outcome: "success" }],
-    ["password_vault_sync_requests_total", { outcome: "success", page: "complete" }],
+    [
+      "password_vault_registration_events_total",
+      { event: "start", outcome: "issued", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_registration_events_total",
+      { event: "finish", outcome: "success", traffic_class: "synthetic" },
+    ],
+    ["password_vault_accounts_created_total", { outcome: "success", traffic_class: "synthetic" }],
+    ["password_vault_login_starts_total", { outcome: "issued", traffic_class: "synthetic" }],
+    [
+      "password_vault_login_attempts_total",
+      { outcome: "success", failure_class: "none", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_mfa_events_total",
+      { event: "totp_enrollment", outcome: "started", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_mfa_events_total",
+      { event: "totp_enrollment", outcome: "confirmed", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_mfa_events_total",
+      { event: "totp_login", outcome: "challenge_issued", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_mfa_events_total",
+      { event: "totp_login", outcome: "verified", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_mfa_events_total",
+      { event: "recovery_code_login", outcome: "verified", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_session_events_total",
+      { event: "created", outcome: "mfa_enrollment_required", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_session_events_total",
+      { event: "upgraded", outcome: "mfa_verified", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_session_events_total",
+      { event: "created", outcome: "mfa_verified", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_session_events_total",
+      { event: "created", outcome: "mfa_recovery", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_vault_item_changes_total",
+      { operation: "create", outcome: "success", traffic_class: "synthetic" },
+    ],
+    [
+      "password_vault_sync_requests_total",
+      { outcome: "success", page: "complete", traffic_class: "synthetic" },
+    ],
     ["password_vault_db_pool_connections", { state: "max" }],
   ];
   for (const [name, labels] of requiredSeries) {

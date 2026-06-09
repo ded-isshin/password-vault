@@ -2,9 +2,10 @@ use std::{env, net::SocketAddr, sync::OnceLock};
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Request, State},
     http::{StatusCode, header},
-    response::{Html, IntoResponse},
+    middleware::{self, Next},
+    response::{Html, IntoResponse, Response},
     routing::get,
 };
 use axum_prometheus::{
@@ -295,7 +296,13 @@ fn router(state: AppState) -> Router {
         .merge(auth::routes::router())
         .merge(vault::router())
         .with_state(state)
+        .layer(middleware::from_fn(scope_request_traffic_class))
         .layer(metrics_layer)
+}
+
+async fn scope_request_traffic_class(request: Request, next: Next) -> Response {
+    let traffic_class = telemetry::traffic_class_from_headers(request.headers());
+    telemetry::scope_request_traffic_class(traffic_class, next.run(request)).await
 }
 
 async fn index() -> Html<&'static str> {
@@ -679,10 +686,78 @@ mod tests {
         assert!(body.contains("outcome=\"success\""));
         assert!(body.contains("error_class=\"pool_timeout\""));
         assert!(body.contains("state=\"used\""));
+        assert!(body.contains("traffic_class=\"unknown\""));
         assert!(!body.contains("user@example.com"));
         assert!(!body.contains("account_id"));
         assert!(!body.contains("vault_id"));
         assert!(!body.contains("item_id"));
+    }
+
+    #[tokio::test]
+    async fn product_metrics_can_separate_synthetic_traffic() {
+        let metrics_app = metrics_app();
+
+        crate::telemetry::scope_request_traffic_class("synthetic", async {
+            crate::telemetry::registration_event("start", "issued");
+            crate::telemetry::login_attempt("success", "none");
+            crate::telemetry::mfa_event("totp_login", "verified");
+            crate::telemetry::vault_item_change("create", "success");
+            crate::telemetry::sync_request("success", "complete");
+        })
+        .await;
+
+        let metrics_response = metrics_app
+            .oneshot(
+                Request::builder()
+                    .uri("/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(metrics_response.status(), 200);
+
+        let body = to_bytes(metrics_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("traffic_class=\"synthetic\""));
+        assert!(body.contains("password_vault_registration_events_total"));
+        assert!(body.contains("password_vault_login_attempts_total"));
+        assert!(body.contains("password_vault_mfa_events_total"));
+        assert!(body.contains("password_vault_vault_item_changes_total"));
+        assert!(body.contains("password_vault_sync_requests_total"));
+        assert!(!body.contains("login_handle"));
+        assert!(!body.contains("account_id"));
+        assert!(!body.contains("vault_id"));
+        assert!(!body.contains("item_id"));
+    }
+
+    #[test]
+    fn traffic_class_header_is_low_cardinality() {
+        let mut headers = axum::http::HeaderMap::new();
+        assert_eq!(
+            crate::telemetry::traffic_class_from_headers(&headers),
+            "user"
+        );
+
+        headers.insert(
+            crate::telemetry::TRAFFIC_CLASS_HEADER,
+            axum::http::HeaderValue::from_static("synthetic"),
+        );
+        assert_eq!(
+            crate::telemetry::traffic_class_from_headers(&headers),
+            "synthetic"
+        );
+
+        headers.insert(
+            crate::telemetry::TRAFFIC_CLASS_HEADER,
+            axum::http::HeaderValue::from_static("user@example.com"),
+        );
+        assert_eq!(
+            crate::telemetry::traffic_class_from_headers(&headers),
+            "user"
+        );
     }
 
     #[tokio::test]

@@ -18,6 +18,10 @@ decryption.
 - PR smoke load is intentionally small. Use manual runs for heavier tests.
 - The synthetic journey does not print account secret keys, TOTP seeds, TOTP codes, recovery codes,
   cookies, plaintext item passwords, account IDs, vault IDs, item IDs, or device IDs.
+- Synthetic requests send `X-Password-Vault-Traffic-Class: synthetic` so product/business counters
+  can be separated from future real-user traffic. This is an observability classifier, not an auth
+  control; production edge routing must still prevent normal browser traffic from spoofing or
+  preserving that header before real users are onboarded.
 - Do not run the synthetic journey automatically against a public or production endpoint. Live-edge
   runs must be explicit and paired with the cleanup lifecycle below.
 - Synthetic browser journey accounts must use login handles shaped as
