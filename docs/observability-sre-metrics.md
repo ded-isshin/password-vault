@@ -444,6 +444,19 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   - The real-secret readiness preflight still failed because backup ObjectStore/ScheduledBackup/
     credentials/Backup resources and a real Alertmanager Telegram runtime Secret/receiver are not
     complete.
+- A follow-up 2026-06-09 GitOps rollout removed the legacy dedicated application `LoadBalancer` and
+  old direct API HTTP CIDR allow-list. Runtime evidence after Argo sync:
+  - `Service/password-vault-api` was `ClusterIP` with no `loadBalancerIP` or live LoadBalancer
+    ingress status.
+  - The chart-owned API NetworkPolicy had no direct HTTP ingress rule; dedicated selector policies
+    allowed ingress-nginx and the observability blackbox exporter to reach the API HTTP port.
+  - Password Vault `/readyz`, Grafana `/api/health`, and Argo CD `/healthz` returned HTTP 200 through
+    the mini-PC LAN edge paths from the mini-PC.
+  - The full live-edge synthetic Job `password-vault-synthetic-journey-clusterip-031330` completed
+    successfully through registration, TOTP enrollment, return login, vault unlock, encrypted item
+    create/sync, recovery-code login, and forced TOTP re-enrollment.
+  - Live PromQL checks returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, synthetic
+    registration traffic in the current 30-minute window, and backup availability `0`.
 
 ## Current Dashboard And Alert Gaps
 

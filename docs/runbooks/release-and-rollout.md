@@ -158,10 +158,11 @@ been changed. Do not use Kubernetes/LXD `LoadBalancer` addresses as the default 
 clients. Those addresses are internal service-routing details unless the client machine has explicit
 routing into that network.
 
-Current topology note: the Kubernetes `LoadBalancer` services may show internal addresses for
-Grafana, Argo CD, and Password Vault. Those are backend targets for the mini-PC edge proxy, not the
-normal MacBook/browser entrypoints. The edge NGINX path listens on the mini-PC LAN address and
-proxies to the internal service addresses.
+Current topology note: some Kubernetes `LoadBalancer` services may show internal addresses for
+Grafana or Argo CD. Those are backend targets for the mini-PC edge proxy, not normal
+MacBook/browser entrypoints. Password Vault browser traffic should use the mini-PC edge listener,
+shared ingress-nginx, and the internal app `ClusterIP` Service rather than a dedicated app
+`LoadBalancer`.
 
 Do not use the internal Kubernetes/LXD `LoadBalancer` addresses as browser URLs unless the client
 has an explicit route into that network. A normal MacBook on the home LAN should use the mini-PC LAN

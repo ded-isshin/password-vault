@@ -70,10 +70,10 @@ Current implementation status, 2026-06-09:
   TLS/local CA path is implemented.
 - A 2026-06-09 follow-up check confirmed that Argo CD, Grafana, and Password Vault return HTTP 200
   through the mini-PC LAN edge routes from the mini-PC. The Kubernetes/LXD `LoadBalancer` addresses
-  remain internal service-routing details and should not be used as MacBook browser URLs. Direct
-  access to the old dedicated Password Vault `LoadBalancer` route can time out after API
-  NetworkPolicy hardening; the supported browser path is the edge HTTPS listener through
-  ingress-nginx.
+  remain internal service-routing details for services that still use them and should not be used as
+  MacBook browser URLs. Password Vault no longer keeps a dedicated app `LoadBalancer`; the supported
+  browser path is the edge HTTPS listener through ingress-nginx to the internal app `ClusterIP`
+  Service.
 - A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
   network and that NGINX listens on the reviewed mini-PC LAN address for the Password Vault, Grafana,
   and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
@@ -96,6 +96,13 @@ Current implementation status, 2026-06-09:
   API targets `3`, edge and internal black-box readiness success `1`, request rate data, p95 request
   latency data, CNPG targets `3`, streaming replicas `2`, replication lag `0`, scheduled synthetic
   journey success evidence, and backup availability `0`.
+- A 2026-06-09 GitOps rollout removed the legacy dedicated Password Vault app `LoadBalancer` and
+  old direct API HTTP CIDR allow-list. Post-rollout checks confirmed `Service/password-vault-api` is
+  internal `ClusterIP`, Argo CD `prod-root`, `password-vault`, and `observability-vm-stack` are
+  `Synced/Healthy`, the edge `/readyz` path returns HTTP 200, the full synthetic journey
+  `password-vault-synthetic-journey-clusterip-031330` succeeded through the edge route, and
+  VictoriaMetrics returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, synthetic
+  registration traffic, and backup availability `0`.
 - Observability is usable after the stable Grafana admin Secret GitOps correction. Current remaining
   observability blockers are not dashboard rendering: Alertmanager delivery is not smoke-tested, the
   CNPG backup gate is red, and trusted edge TLS/client-side LAN reachability still need proof.
@@ -152,8 +159,9 @@ MVP dependable:
    mode first, and only enable confirmed deletion after the aggregate match count is understood.
 9. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
    migration Job only after the rollback window and backup/restore evidence are recorded.
-10. After a short observation window, remove the legacy dedicated Password Vault `LoadBalancer`
-   rollback path and any now-unneeded broad API HTTP ingress allowances.
+10. Keep the selector-based ingress boundary in place: Password Vault browser traffic should enter
+   through the mini-PC edge listener, shared ingress-nginx, and the internal app `ClusterIP` Service;
+   do not reintroduce a direct app `LoadBalancer` without a reviewed rollback decision.
 11. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability further to database health, backup freshness, and security aggregate
    metrics.
