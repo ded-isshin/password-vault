@@ -115,6 +115,9 @@ jobs:
             -e RUN_ID=ci-${{ github.run_id }}-${{ github.run_attempt }} \
             -e SYNTHETIC_TIMEOUT_MS=120000 \
             "$NODE_SYNTHETIC_IMAGE" node --check load/synthetic/browser-api-journey.mjs
+          grep -Fq \
+            "X-Password-Vault-Traffic-Class': 'synthetic'" \
+            load/k6/lib/data.js
           docker run --rm --network host \
             -v "$PWD:/workspace:ro" \
             -w /workspace \

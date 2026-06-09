@@ -90,6 +90,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          grep -Fq \
+            "X-Password-Vault-Traffic-Class': 'synthetic'" \
+            load/k6/lib/data.js
           docker run --rm --network host \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
