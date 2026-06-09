@@ -380,6 +380,9 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
     successes `2` over six hours, synthetic journey failures `0`, and backup availability `0`;
   - `max(cnpg_collector_last_available_backup_timestamp{job="password-vault-cnpg"}) > bool 0 or
     vector(0)` still returned `0`, so backup availability remains the active durability red gate.
+  - a dashboard expression validation through the Grafana datasource proxy evaluated all 38 PromQL
+    targets from the 36-panel `password-vault-overview` dashboard with representative `5m` rate and
+    `1h` range substitutions; the result was `failures=0`, `empty=0`.
 
 ## Current Dashboard And Alert Gaps
 

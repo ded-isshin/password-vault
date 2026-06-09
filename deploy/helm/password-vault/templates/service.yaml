@@ -8,6 +8,9 @@ metadata:
     component: api
 spec:
   type: {{ .Values.service.type }}
+  {{- with .Values.service.loadBalancerIP }}
+  loadBalancerIP: {{ . | quote }}
+  {{- end }}
   selector:
     {{- include "password-vault.selectorLabels" . | nindent 4 }}
   ports:

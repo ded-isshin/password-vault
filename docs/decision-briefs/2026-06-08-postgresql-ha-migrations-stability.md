@@ -126,6 +126,20 @@ does not remove the need to version application-owned tables, constraints, index
 fields, sync metadata, and crypto/key-wrapping metadata. The goal is not "no migrations"; the goal
 is fewer, deliberate, backward-compatible migrations that support live rollout.
 
+For the current stabilization phase, treat the existing three SQL migrations as the bootstrap schema
+history for the browser MVP and freeze the schema by default. Do not add another migration just
+because an idea is plausible. A new migration must be tied to one of these reasons:
+
+- a P0 security or data-integrity fix;
+- a missing field or constraint required by already accepted browser-MVP behavior;
+- a migration needed to complete backup/restore/failover validation safely;
+- a backward-compatible prerequisite for a reviewed release that cannot be represented in the
+  current schema.
+
+The stable-software requirement applies to PostgreSQL and operators too: use supported PostgreSQL
+major/minor releases and supported CloudNativePG/Barman plugin versions, but do not confuse engine
+patching with application schema churn.
+
 PostgreSQL version policy and application schema policy are separate:
 
 - use a supported PostgreSQL major version and keep it on current minor releases;
