@@ -1,6 +1,7 @@
 # Observability And SRE Metrics Plan
 
-Status: draft observability contract for the Password Vault MVP.
+Status: draft observability contract for the Password Vault MVP. Current runtime evidence was last
+refreshed on 2026-06-09.
 
 This document defines what Password Vault should measure, alert on, and show in dashboards before
 the MVP is treated as operationally stable. It is not runtime evidence. Any claim that a Grafana
@@ -30,7 +31,7 @@ Google SRE guidance used for this plan:
 - Multi-window, multi-burn-rate alerting is the preferred shape for defending SLOs once traffic and
   error-budget data are meaningful.
 
-Official sources checked on 2026-06-08:
+Official sources checked on 2026-06-08 and refreshed on 2026-06-09:
 
 - Google SRE Book, "Monitoring Distributed Systems":
   <https://sre.google/sre-book/monitoring-distributed-systems/>
@@ -246,16 +247,18 @@ and remain documented as planned metrics instead.
 | L4 durability | Data survival is measured. | Replication, backup age, WAL archive, restore drill, and failover drill are visible. |
 | L5 security/product | Aggregate abuse and activation health are visible. | Auth, MFA, CSRF, rate-limit, recovery, and protected-activation metrics are implemented and verified. |
 
-Current runtime state as of 2026-06-08 supports L0 scraping, L1 Golden Signals, candidate
+Current runtime state as of 2026-06-09 supports L0 scraping, L1 Golden Signals, candidate
 multi-window availability burn alerts, product counter instrumentation, black-box internal and edge
-readiness probes, and an active CloudNativePG scrape for the API database. It is not yet SRE-ready:
-alert delivery, scheduled synthetic pass/fail metrics, trusted edge TLS, and backup/restore/failover
-evidence remain open. The live deployment level must be re-evaluated after each GitOps rollout.
+readiness probes, scheduled browser/API synthetic journey evidence through Kubernetes Job status,
+scheduled synthetic cleanup evidence through Kubernetes Job status, and an active CloudNativePG
+scrape for the API database. It is not yet SRE-ready: alert delivery, trusted edge TLS,
+object-store base backups, PITR restore, and failover evidence remain open. The live deployment
+level must be re-evaluated after each GitOps rollout.
 
 Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up checks:
 
 - Grafana dashboard UID `password-vault-overview` is provisioned.
-- The dashboard has 31 panels and was visible through the Grafana API. Grafana Image Renderer is not
+- The dashboard has 36 panels and was visible through the Grafana API. Grafana Image Renderer is not
   installed, so evidence is based on dashboard metadata and live datasource queries rather than PNG
   rendering.
 - The API uses the `password-vault-cnpg` CloudNativePG application Secret, and the API Deployment has
@@ -357,6 +360,25 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   - Grafana datasource checks returned API targets `3`, CNPG targets `3`, build revision data,
     black-box `internal-readyz` and `edge-readyz` success `1`, cleanup CronJob present `1`, and
     backup availability `0`.
+- A 2026-06-09 live re-check confirmed:
+  - the browser-facing listeners for Password Vault, Grafana, and Argo CD are bound on the mini-PC
+    LAN address, while the Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
+    addresses;
+  - Password Vault `GET /`, `/healthz`, and `/readyz` returned HTTP 200 through the mini-PC LAN edge
+    path from the mini-PC; `/health` and `/ready` are not valid Password Vault routes;
+  - Grafana `/api/health` and Argo CD `/healthz` returned HTTP 200 through the mini-PC LAN edge
+    paths from the mini-PC;
+  - the correct MacBook/browser routes are the mini-PC LAN edge URLs:
+    `https://192.168.0.10:11443/` for Password Vault, `https://192.168.0.10:3000/` for Grafana, and
+    `https://192.168.0.10:9443/` for Argo CD; the `192.168.10.x` addresses are not expected to be
+    directly reachable from the MacBook;
+  - dashboard UID `password-vault-overview` existed with 36 provisioned panels;
+  - live datasource queries returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, request
+    rate about `0.47` requests/second during the check window, p95 request latency about `0.005`
+    seconds, CNPG targets `3`, streaming replicas `2`, replication lag `0`, synthetic journey
+    successes `2` over six hours, synthetic journey failures `0`, and backup availability `0`;
+  - `max(cnpg_collector_last_available_backup_timestamp{job="password-vault-cnpg"}) > bool 0 or
+    vector(0)` still returned `0`, so backup availability remains the active durability red gate.
 
 ## Current Dashboard And Alert Gaps
 
@@ -369,8 +391,9 @@ Do not mark these complete without runtime evidence:
 - No SLO or error-budget dashboard is documented as verified.
 - Multi-window, multi-burn-rate rules exist for the candidate API availability SLO, but alert
   delivery and low-traffic behavior still need operational proof.
-- External synthetic browser/API probes are not documented as scheduled, scraped, and dashboarded.
-- Synthetic pass/fail, step duration, and cleanup metrics are planned.
+- Scheduled external browser/API probes are enabled and visible through Kubernetes CronJob/Job
+  status. Custom application-level synthetic pass/fail, step duration, and cleanup metrics are still
+  planned.
 - DB query latency, DB errors, DB pool wait, and auth/MFA step duration metrics are planned.
 - Business/product panels currently use aggregate counters. Next maturity should add derived
   product SLIs for protected activation, returning access, vault write+sync success, recovery
@@ -397,15 +420,20 @@ Prioritized next observability work:
 
 1. Make alert delivery real: target-down, fast burn-rate, and durability-gate alerts must reach a
    human or ticket path in a controlled smoke test.
-2. Schedule an external synthetic journey through the same edge route that a browser client uses and
-   expose one low-cardinality pass/fail metric before adding many per-step panels.
-3. Promote existing product counters into derived SLIs for protected activation, returning access,
+2. Prove MacBook/browser reachability from the client side, not only from the mini-PC edge host, and
+   replace or trust the self-signed certificate model before real secrets.
+3. Complete the database durability track: object-store base backups, WAL/PITR, restore drill, and
+   failover drill must be observable before real secrets.
+4. Expose one low-cardinality synthetic pass/fail metric only if Kubernetes Job status is not enough
+   for dashboard and alerting needs; avoid per-step metric volume until it answers a real triage
+   question.
+5. Promote existing product counters into derived SLIs for protected activation, returning access,
    vault write+sync success, and recovery success.
-4. Keep the current multi-window burn-rate alerts, but verify their low-traffic behavior with
+6. Keep the current multi-window burn-rate alerts, but verify their low-traffic behavior with
    synthetic traffic and Alertmanager delivery.
-5. Add broader DB pool wait and DB error metrics only for user-critical DB-backed operations with
+7. Add broader DB pool wait and DB error metrics only for user-critical DB-backed operations with
    stable low-cardinality operation names.
-6. Add edge exposure monitoring after the access model is decided: LAN/VPN-only reachability should
+8. Add edge exposure monitoring after the access model is decided: LAN/VPN-only reachability should
    be verified separately from service readiness.
 
 ## Alerting Policy
@@ -445,8 +473,9 @@ Before calling the MVP observable:
   or an explicit justified zero.
 - Alertmanager has a real route and a controlled notification smoke test has passed.
 - Multi-window burn-rate rules exist for product endpoint SLOs.
-- External synthetic journey is scheduled from a client-equivalent route, emits pass/fail metrics,
-  and has a documented cleanup lifecycle.
+- External synthetic journey is scheduled from a client-equivalent route, has a documented cleanup
+  lifecycle, and has either reliable Kubernetes Job status panels or one low-cardinality pass/fail
+  metric.
 - Load tests are bounded, use fake `.invalid` accounts, and record latency/failure thresholds.
 - Labels are low-cardinality and public-safe.
 - PostgreSQL HA, backup, WAL archive, restore drill, and failover drill metrics are present before
@@ -495,6 +524,8 @@ dashboard URLs or screenshots when available, alert route evidence, and syntheti
   <https://sre.google/workbook/alerting-on-slos/>
 - Google SRE Workbook, Implementing SLOs:
   <https://sre.google/workbook/implementing-slos/>
+- CloudNativePG 1.29 Backup:
+  <https://cloudnative-pg.io/docs/1.29/backup/>
 - Repository source inspected:
   `crates/api/src/telemetry.rs`, `load/README.md`,
   `load/synthetic/browser-api-journey.mjs`.
