@@ -392,6 +392,25 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   - a dashboard expression validation through the Grafana datasource proxy evaluated all 38 PromQL
     targets from the 36-panel `password-vault-overview` dashboard with representative `5m` rate and
     `1h` range substitutions; the result was `failures=0`, `empty=0`.
+- A follow-up 2026-06-09T01:15Z deployment check confirmed the synthetic telemetry split in the
+  live cluster:
+  - the product image digest
+    `sha256:728ffd8164f9dc0e0a7ebe06f4f48ed4544a985e8d114e49d3e022dba99ede38` was promoted
+    through the infrastructure GitOps repo and Argo CD reported `prod-root` and `password-vault`
+    as `Synced` and `Healthy`;
+  - the API deployment used the new image digest and reported `3/3` ready replicas throughout the
+    rolling update;
+  - a one-off `password-vault-synthetic-journey-trafficclass-011524` Job completed successfully
+    through registration, TOTP enrollment, return login, vault unlock, encrypted item create/sync,
+    recovery-code login, and forced TOTP re-enrollment;
+  - VictoriaMetrics returned `traffic_class="synthetic"` product counters over a 30-minute window:
+    registration events `2`, login successes `2`, encrypted item changes `1`, TOTP enrollment
+    events `4`, TOTP login events `3`, and recovery-code login verification `1`;
+  - the same check returned `sum(up{job="password-vault-api"}) = 3`;
+  - older no-`traffic_class` time series from pre-split pods can remain visible until their query
+    windows age out. Dashboards that compare synthetic and user traffic must filter on
+    `traffic_class` explicitly and should treat missing `traffic_class` as legacy/unknown data, not
+    as real-user evidence.
 
 ## Current Dashboard And Alert Gaps
 
