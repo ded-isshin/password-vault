@@ -64,6 +64,18 @@ jobs:
             --namespace password-vault \
             --set image.tag=ci \
             --set networkPolicy.enabled=true \
+            --set networkPolicy.http.allowAllIngress=false \
+            --set 'networkPolicy.http.ingressIPBlocks[0]=192.0.2.0/24' \
+            >/tmp/password-vault-networkpolicy-ipblock-rendered.yaml
+          grep -q 'cidr: "192.0.2.0/24"' /tmp/password-vault-networkpolicy-ipblock-rendered.yaml
+          grep -q 'port: http' /tmp/password-vault-networkpolicy-ipblock-rendered.yaml
+          ! grep -B 1 -A 3 'port: http' /tmp/password-vault-networkpolicy-ipblock-rendered.yaml \
+            | grep -q '^    - ports:$'
+          docker run --rm -v "$PWD":/workspace -w /workspace alpine/helm:3.19.0 \
+            template password-vault deploy/helm/password-vault \
+            --namespace password-vault \
+            --set image.tag=ci \
+            --set networkPolicy.enabled=true \
             --set-string 'networkPolicy.database.podSelectorOverride.matchLabels.cnpg\.io/cluster=password-vault-cnpg' \
             >/tmp/password-vault-networkpolicy-cnpg-rendered.yaml
           grep -q 'cnpg.io/cluster: password-vault-cnpg' /tmp/password-vault-networkpolicy-cnpg-rendered.yaml

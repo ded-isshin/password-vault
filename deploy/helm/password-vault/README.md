@@ -117,6 +117,36 @@ allow that component.
 Do not point cleanup at real user domains. Do not treat cleanup logs as synthetic monitoring proof:
 scheduled synthetic pass/fail metrics are a separate acceptance gate.
 
+## API NetworkPolicy
+
+When `networkPolicy.enabled=true`, the chart emits an API `NetworkPolicy` for the API pod selector.
+The default chart behavior keeps browser/API HTTP ingress source-open for compatibility:
+
+```yaml
+networkPolicy:
+  http:
+    allowAllIngress: true
+    ingressIPBlocks: []
+```
+
+Production-like environments can set `networkPolicy.http.ingressIPBlocks` and
+`allowAllIngress=false` to remove the source-open HTTP ingress rule:
+
+```yaml
+networkPolicy:
+  http:
+    allowAllIngress: false
+    ingressIPBlocks:
+      - <redacted-node-cidr>
+```
+
+Use this only when the runtime source addresses are understood and verified. With Kubernetes
+`LoadBalancer` Services using `externalTrafficPolicy: Cluster`, external traffic can be source NATed
+to a node address before it reaches the pod, so an interim allow-list may need to cover the node
+CIDR rather than the original browser or edge proxy IP. This reduces exposure compared with an open
+rule, but it is not an edge-only security boundary. A future in-cluster ingress or proxy path should
+prefer namespace/pod-selector-based ingress rules.
+
 ## Synthetic Journey
 
 The chart can schedule the full protected-user browser/API synthetic journey with

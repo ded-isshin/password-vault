@@ -18,7 +18,16 @@ spec:
     - Ingress
     - Egress
   ingress:
-    {{- if .Values.networkPolicy.http.allowAllIngress }}
+    {{- if .Values.networkPolicy.http.ingressIPBlocks }}
+    - from:
+        {{- range .Values.networkPolicy.http.ingressIPBlocks }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: http
+    {{- else if .Values.networkPolicy.http.allowAllIngress }}
     - ports:
         - protocol: TCP
           port: http

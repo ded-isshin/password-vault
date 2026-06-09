@@ -189,6 +189,10 @@ networkPolicy:
     # Setting this to false also blocks kubelet HTTP probes unless a replacement
     # in-cluster ingress/probe allow-list is designed and tested.
     allowAllIngress: true
+    # Optional interim allow-list for environments where external LoadBalancer
+    # traffic is SNATed to a known node CIDR. Prefer a pod/namespace selector
+    # based edge path when the architecture supports it.
+    ingressIPBlocks: []
   metrics:
     namespaceSelector:
       matchLabels:
