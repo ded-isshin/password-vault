@@ -41,9 +41,11 @@ Current implementation status, 2026-06-09:
   return login, login-time TOTP, vault unlock, encrypted item create, sync, MAC/head validation, and
   item decryption. It also verifies recovery-code login into an `mfa_recovery` session, confirms
   that recovery sessions cannot access vault APIs, and re-enrolls TOTP. It is wired into PR
-  container smoke and the manual `load-smoke` workflow. A live edge run after the CNPG cutover
-  succeeded on 2026-06-08; future deployed changes still need a fresh live edge run before their
-  browser path can be treated as proven end-to-end.
+  container smoke and the manual `load-smoke` workflow. A one-off live-edge run after the
+  ingress-backed edge-route change succeeded on 2026-06-09 through registration, TOTP enrollment,
+  return login, vault unlock, encrypted item create/sync, recovery-code login, and forced TOTP
+  re-enrollment. Future deployed changes still need a fresh live-edge run before their browser path
+  can be treated as proven end-to-end.
 - The browser synthetic now has local self-tests that check AES-GCM rejection for tampered
   ciphertext, nonce, and authenticated metadata, local checkpoint rollback/fork guards, and the
   production `app.js` checkpoint storage helpers before any API account is created.
@@ -57,7 +59,8 @@ Current implementation status, 2026-06-09:
   login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
 - The live preview is reachable through the mini-PC HTTPS edge route with a self-signed certificate.
-  The in-cluster app service remains plain HTTP behind the edge proxy.
+  The edge proxy now routes Password Vault through the shared Kubernetes ingress controller using a
+  product-specific internal host, then the ingress forwards to the app service.
 - Grafana and Argo CD are also reachable through the mini-PC HTTPS edge route from the mini-PC.
   MacBook/browser reachability still needs a client-side check; use the mini-PC LAN edge address
   with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs. Current browser routes
@@ -68,8 +71,9 @@ Current implementation status, 2026-06-09:
 - A 2026-06-09 follow-up check confirmed that Argo CD, Grafana, and Password Vault return HTTP 200
   through the mini-PC LAN edge routes from the mini-PC. The Kubernetes/LXD `LoadBalancer` addresses
   remain internal service-routing details and should not be used as MacBook browser URLs. Direct
-  access to the Password Vault `LoadBalancer` route can time out after API NetworkPolicy hardening;
-  the supported browser path is the edge HTTPS listener.
+  access to the old dedicated Password Vault `LoadBalancer` route can time out after API
+  NetworkPolicy hardening; the supported browser path is the edge HTTPS listener through
+  ingress-nginx.
 - A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
   network and that NGINX listens on the reviewed mini-PC LAN address for the Password Vault, Grafana,
   and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
@@ -92,11 +96,9 @@ Current implementation status, 2026-06-09:
   API targets `3`, edge and internal black-box readiness success `1`, request rate data, p95 request
   latency data, CNPG targets `3`, streaming replicas `2`, replication lag `0`, scheduled synthetic
   journey success evidence, and backup availability `0`.
-- Observability is currently usable but has one stability defect: the Grafana Deployment has
-  repeatedly rolled during platform syncs even while it ends `Synced/Healthy`. Runtime evidence
-  points to the Grafana Helm chart rendering a generated admin Secret/checksum instead of using a
-  stable externally managed Secret. This is not a browser-access blocker, but it should be fixed
-  through GitOps before treating observability as quiet and stable.
+- Observability is usable after the stable Grafana admin Secret GitOps correction. Current remaining
+  observability blockers are not dashboard rendering: Alertmanager delivery is not smoke-tested, the
+  CNPG backup gate is red, and trusted edge TLS/client-side LAN reachability still need proof.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
   changes, sync requests, and build information are merged, published, deployed, and covered by a
   low-cardinality metrics test. Live checks verified `password_vault_build_info`,
@@ -137,8 +139,8 @@ MVP dependable:
 4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
    object-store backed base backups, WAL/PITR, restore drills, and failover gates. Do not accept real
    secrets before this is complete.
-5. Stabilize observability operations: configure Grafana to use a stable runtime admin Secret rather
-   than a Helm-generated secret checksum that can trigger repeated Grafana rollouts during Argo syncs.
+5. Keep observability quiet by preserving the stable Grafana runtime admin Secret pattern and routing
+   all new alerting through smoke-tested Alertmanager receivers.
 6. Keep the full synthetic browser/API journey running in CI and on the live edge route:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
    Add a custom pass/fail metric only if Kubernetes Job status is not sufficient for alerting and
@@ -150,8 +152,8 @@ MVP dependable:
    mode first, and only enable confirmed deletion after the aggregate match count is understood.
 9. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
    migration Job only after the rollback window and backup/restore evidence are recorded.
-10. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
-   listener before real-user use.
+10. After a short observation window, remove the legacy dedicated Password Vault `LoadBalancer`
+   rollback path and any now-unneeded broad API HTTP ingress allowances.
 11. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability further to database health, backup freshness, and security aggregate
    metrics.

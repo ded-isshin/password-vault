@@ -424,11 +424,26 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
     Alertmanager did not yet have a real Telegram runtime Secret/receiver;
   - legacy preview PostgreSQL PVC and database Secrets remained as rollback debt pending
     backup/restore evidence.
-- The same check found Grafana usable but noisy: the live Grafana Deployment was available and
-  healthy, but had repeatedly rolled to new ReplicaSets during recent platform syncs. The likely
-  cause is the Grafana Helm chart rendering a generated admin Secret/checksum because no stable
-  `grafana.admin.existingSecret` is configured in the infrastructure values. Fixing this is a
-  stability task, not evidence that the dashboard itself is broken.
+- A later 2026-06-09 edge-route correction moved Password Vault browser traffic from the old
+  dedicated application `LoadBalancer` path to the shared ingress-nginx controller using a
+  product-specific internal host. After the edge NGINX rollout:
+  - Password Vault `/readyz`, Grafana `/api/health`, and Argo CD `/healthz` returned HTTP 200 through
+    the mini-PC LAN edge paths from the mini-PC.
+  - Argo CD applications `prod-root`, `password-vault`, and `observability-vm-stack` were
+    `Synced/Healthy`.
+  - The live Password Vault `Ingress` was owned by class `nginx` and routed the product-specific
+    internal host to the `password-vault-api` service.
+  - NetworkPolicy allowed ingress-nginx controller pods to reach the API HTTP port without opening
+    source-wide ingress.
+  - The scheduled synthetic journey remained unsuspended, and a one-off live-edge Job completed the
+    full protected journey through recovery-code login and forced TOTP re-enrollment.
+  - Grafana MCP returned dashboard UID `password-vault-overview` with 36 panels and a 30-second
+    refresh.
+  - Live PromQL checks returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, synthetic
+    registration traffic in the current hour, and backup availability `0`.
+  - The real-secret readiness preflight still failed because backup ObjectStore/ScheduledBackup/
+    credentials/Backup resources and a real Alertmanager Telegram runtime Secret/receiver are not
+    complete.
 
 ## Current Dashboard And Alert Gaps
 
@@ -438,9 +453,9 @@ Do not mark these complete without runtime evidence:
   return data; PNG rendering is not available because the Grafana Image Renderer plugin is not
   installed.
 - No current verification in this document proves Alertmanager delivers notifications.
-- Grafana currently works through the LAN edge route and the Grafana API, but repeated Grafana
-  rollouts during Argo syncs can create temporary `Progressing` noise. The observability stack
-  should use a stable runtime Grafana admin Secret before it is considered quiet and stable.
+- Grafana currently works through the LAN edge route and the Grafana API. The earlier repeated
+  Grafana rollout noise was corrected through the stable runtime admin Secret pattern; keep that
+  pattern as an operational invariant.
 - No SLO or error-budget dashboard is documented as verified.
 - Multi-window, multi-burn-rate rules exist for the candidate API availability SLO, but alert
   delivery and low-traffic behavior still need operational proof.
