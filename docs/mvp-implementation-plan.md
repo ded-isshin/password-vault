@@ -65,6 +65,11 @@ Current implementation status, 2026-06-09:
   `https://<mini-pc-lan-ip>:3000/` for Grafana, and `https://<mini-pc-lan-ip>:9443/` for Argo CD.
   The expected temporary browser behavior is a self-signed certificate warning until the trusted
   TLS/local CA path is implemented.
+- A 2026-06-09 follow-up check confirmed that Argo CD, Grafana, and Password Vault return HTTP 200
+  through the mini-PC LAN edge routes from the mini-PC. The Kubernetes/LXD `LoadBalancer` addresses
+  remain internal service-routing details and should not be used as MacBook browser URLs. Direct
+  access to the Password Vault `LoadBalancer` route can time out after API NetworkPolicy hardening;
+  the supported browser path is the edge HTTPS listener.
 - A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
   network and that NGINX listens on the reviewed mini-PC LAN address for the Password Vault, Grafana,
   and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
@@ -87,6 +92,11 @@ Current implementation status, 2026-06-09:
   API targets `3`, edge and internal black-box readiness success `1`, request rate data, p95 request
   latency data, CNPG targets `3`, streaming replicas `2`, replication lag `0`, scheduled synthetic
   journey success evidence, and backup availability `0`.
+- Observability is currently usable but has one stability defect: the Grafana Deployment has
+  repeatedly rolled during platform syncs even while it ends `Synced/Healthy`. Runtime evidence
+  points to the Grafana Helm chart rendering a generated admin Secret/checksum instead of using a
+  stable externally managed Secret. This is not a browser-access blocker, but it should be fixed
+  through GitOps before treating observability as quiet and stable.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
   changes, sync requests, and build information are merged, published, deployed, and covered by a
   low-cardinality metrics test. Live checks verified `password_vault_build_info`,
@@ -127,23 +137,25 @@ MVP dependable:
 4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
    object-store backed base backups, WAL/PITR, restore drills, and failover gates. Do not accept real
    secrets before this is complete.
-5. Keep the full synthetic browser/API journey running in CI and on the live edge route:
+5. Stabilize observability operations: configure Grafana to use a stable runtime admin Secret rather
+   than a Helm-generated secret checksum that can trigger repeated Grafana rollouts during Argo syncs.
+6. Keep the full synthetic browser/API journey running in CI and on the live edge route:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
    Add a custom pass/fail metric only if Kubernetes Job status is not sufficient for alerting and
    dashboard triage.
-6. Keep browser crypto and freshness tests non-negotiable: keep the local tamper/checkpoint
+7. Keep browser crypto and freshness tests non-negotiable: keep the local tamper/checkpoint
    self-tests and add future test vectors only when they directly protect the accepted crypto,
    browser storage, or sync-freshness format.
-7. Keep live synthetic data bounded: use reserved `.invalid` handles, schedule cleanup in dry-run
+8. Keep live synthetic data bounded: use reserved `.invalid` handles, schedule cleanup in dry-run
    mode first, and only enable confirmed deletion after the aggregate match count is understood.
-8. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
+9. Remove the legacy preview PostgreSQL PVC, legacy preview database Secrets, and old completed
    migration Job only after the rollback window and backup/restore evidence are recorded.
-9. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
+10. Restrict internal API and `/metrics` access with NetworkPolicy or a separate internal metrics
    listener before real-user use.
-10. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
+11. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability further to database health, backup freshness, and security aggregate
    metrics.
-11. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
+12. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
    stale bootstrap claims do not become false work items.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.

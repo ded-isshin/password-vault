@@ -411,6 +411,24 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
     windows age out. Dashboards that compare synthetic and user traffic must filter on
     `traffic_class` explicitly and should treat missing `traffic_class` as legacy/unknown data, not
     as real-user evidence.
+- A 2026-06-09 follow-up readiness check returned:
+  - Argo CD applications `prod-root`, `password-vault`, `observability-vm-stack`,
+    `data-cloudnative-pg`, and `data-plugin-barman-cloud` were `Synced/Healthy`;
+  - `password-vault-api` had `3/3` ready replicas;
+  - `password-vault-cnpg` had three ready instances and a healthy phase;
+  - the scheduled synthetic journey CronJob was unsuspended and had a recorded last schedule time;
+  - API NetworkPolicy had no source-open ingress rules and metrics ingress remained restricted to
+    the observability scraper selector;
+  - the real-secret readiness preflight still failed because the CNPG `ObjectStore`,
+    `ScheduledBackup`, backup credential Secret, and `Backup` resource were missing, and because
+    Alertmanager did not yet have a real Telegram runtime Secret/receiver;
+  - legacy preview PostgreSQL PVC and database Secrets remained as rollback debt pending
+    backup/restore evidence.
+- The same check found Grafana usable but noisy: the live Grafana Deployment was available and
+  healthy, but had repeatedly rolled to new ReplicaSets during recent platform syncs. The likely
+  cause is the Grafana Helm chart rendering a generated admin Secret/checksum because no stable
+  `grafana.admin.existingSecret` is configured in the infrastructure values. Fixing this is a
+  stability task, not evidence that the dashboard itself is broken.
 
 ## Current Dashboard And Alert Gaps
 
@@ -420,6 +438,9 @@ Do not mark these complete without runtime evidence:
   return data; PNG rendering is not available because the Grafana Image Renderer plugin is not
   installed.
 - No current verification in this document proves Alertmanager delivers notifications.
+- Grafana currently works through the LAN edge route and the Grafana API, but repeated Grafana
+  rollouts during Argo syncs can create temporary `Progressing` noise. The observability stack
+  should use a stable runtime Grafana admin Secret before it is considered quiet and stable.
 - No SLO or error-budget dashboard is documented as verified.
 - Multi-window, multi-burn-rate rules exist for the candidate API availability SLO, but alert
   delivery and low-traffic behavior still need operational proof.
@@ -457,16 +478,18 @@ Prioritized next observability work:
    replace or trust the self-signed certificate model before real secrets.
 3. Complete the database durability track: object-store base backups, WAL/PITR, restore drill, and
    failover drill must be observable before real secrets.
-4. Expose one low-cardinality synthetic pass/fail metric only if Kubernetes Job status is not enough
+4. Stabilize Grafana deployment churn by configuring the chart to use a stable externally managed
+   admin Secret instead of a generated secret checksum that can change across GitOps renders.
+5. Expose one low-cardinality synthetic pass/fail metric only if Kubernetes Job status is not enough
    for dashboard and alerting needs; avoid per-step metric volume until it answers a real triage
    question.
-5. Promote existing product counters into derived SLIs for protected activation, returning access,
+6. Promote existing product counters into derived SLIs for protected activation, returning access,
    vault write+sync success, and recovery success.
-6. Keep the current multi-window burn-rate alerts, but verify their low-traffic behavior with
+7. Keep the current multi-window burn-rate alerts, but verify their low-traffic behavior with
    synthetic traffic and Alertmanager delivery.
-7. Add broader DB pool wait and DB error metrics only for user-critical DB-backed operations with
+8. Add broader DB pool wait and DB error metrics only for user-critical DB-backed operations with
    stable low-cardinality operation names.
-8. Add edge exposure monitoring after the access model is decided: LAN/VPN-only reachability should
+9. Add edge exposure monitoring after the access model is decided: LAN/VPN-only reachability should
    be verified separately from service readiness.
 
 ## Alerting Policy
