@@ -30,6 +30,21 @@ The chart expects Kubernetes Secrets created outside this public repository:
 
 Do not commit real secret values.
 
+## Service Publishing
+
+The chart defaults to an internal `ClusterIP` API service. Production-like GitOps environments that
+publish the API through a fixed edge proxy may set:
+
+```yaml
+service:
+  type: LoadBalancer
+  loadBalancerIP: <redacted-ip>
+```
+
+Only set `loadBalancerIP` when the cluster load-balancer implementation supports a reserved address
+and the edge proxy upstream is managed from the same reviewed infrastructure intent. Leaving the
+field empty keeps the default portable chart behavior.
+
 ## Migration Policy
 
 Application pods do not run migrations by default. `config.runMigrationsOnStartup` should stay

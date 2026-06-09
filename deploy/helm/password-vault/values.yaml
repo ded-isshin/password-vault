@@ -13,6 +13,7 @@ replicaCount: 3
 
 service:
   type: ClusterIP
+  loadBalancerIP: ""
   port: 8080
   metricsPort: 9090
 
