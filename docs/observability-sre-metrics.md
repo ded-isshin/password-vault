@@ -369,9 +369,10 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   - Grafana `/api/health` and Argo CD `/healthz` returned HTTP 200 through the mini-PC LAN edge
     paths from the mini-PC;
   - the correct MacBook/browser routes are the mini-PC LAN edge URLs:
-    `https://192.168.0.10:11443/` for Password Vault, `https://192.168.0.10:3000/` for Grafana, and
-    `https://192.168.0.10:9443/` for Argo CD; the `192.168.10.x` addresses are not expected to be
-    directly reachable from the MacBook;
+    `https://<mini-pc-lan-ip>:11443/` for Password Vault,
+    `https://<mini-pc-lan-ip>:3000/` for Grafana, and `https://<mini-pc-lan-ip>:9443/` for Argo CD;
+    the `<lxd-kubernetes-ip-range>` addresses are not expected to be directly reachable from the
+    MacBook;
   - dashboard UID `password-vault-overview` existed with 36 provisioned panels;
   - live datasource queries returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, request
     rate about `0.47` requests/second during the check window, p95 request latency about `0.005`

@@ -61,9 +61,10 @@ Current implementation status, 2026-06-09:
 - Grafana and Argo CD are also reachable through the mini-PC HTTPS edge route from the mini-PC.
   MacBook/browser reachability still needs a client-side check; use the mini-PC LAN edge address
   with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs. Current browser routes
-  are `https://192.168.0.10:11443/` for Password Vault, `https://192.168.0.10:3000/` for Grafana,
-  and `https://192.168.0.10:9443/` for Argo CD. The expected temporary browser behavior is a
-  self-signed certificate warning until the trusted TLS/local CA path is implemented.
+  are `https://<mini-pc-lan-ip>:11443/` for Password Vault,
+  `https://<mini-pc-lan-ip>:3000/` for Grafana, and `https://<mini-pc-lan-ip>:9443/` for Argo CD.
+  The expected temporary browser behavior is a self-signed certificate warning until the trusted
+  TLS/local CA path is implemented.
 - A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
   network and that NGINX listens on the reviewed mini-PC LAN address for the Password Vault, Grafana,
   and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
@@ -75,8 +76,8 @@ Current implementation status, 2026-06-09:
   responses from the mini-PC for Password Vault, Grafana, and Argo CD. This is still not a substitute
   for a MacBook-side browser or `curl -k` check.
 - A 2026-06-09 re-check confirmed the same edge model: the mini-PC LAN address serves the browser
-  paths, while Kubernetes `192.168.10.x` `LoadBalancer` addresses are internal LXD/Kubernetes
-  routing details and should not be handed to the MacBook as direct browser URLs.
+  paths, while Kubernetes `<lxd-kubernetes-ip-range>` `LoadBalancer` addresses are internal
+  LXD/Kubernetes routing details and should not be handed to the MacBook as direct browser URLs.
 - The edge publishing layer currently uses a self-signed certificate and LAN-bound host listeners.
   Before real user secrets, edge exposure must be locked down to intended LAN/VPN paths and verified
   from a client-equivalent route.
