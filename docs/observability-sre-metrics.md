@@ -457,6 +457,9 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
     create/sync, recovery-code login, and forced TOTP re-enrollment.
   - Live PromQL checks returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, synthetic
     registration traffic in the current 30-minute window, and backup availability `0`.
+  - A light live-edge k6 smoke ran `register_start` and `login_start` at 2 rps for 15 seconds each
+    with 100% checks passing and 0% HTTP failures. Follow-up PromQL returned non-health request rate
+    data, 5xx ratio `0`, p95 request duration about `0.017` seconds, and API targets `3`.
 
 ## Current Dashboard And Alert Gaps
 

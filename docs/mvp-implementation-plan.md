@@ -103,6 +103,10 @@ Current implementation status, 2026-06-09:
   `password-vault-synthetic-journey-clusterip-031330` succeeded through the edge route, and
   VictoriaMetrics returned API targets `3`, `edge-readyz=1`, `internal-readyz=1`, synthetic
   registration traffic, and backup availability `0`.
+- A light live-edge k6 smoke after the same rollout ran `register_start` and `login_start` at 2 rps
+  for 15 seconds each with 100% checks passing and 0% HTTP failures. Post-run PromQL returned API
+  targets `3`, non-health request rate data, 5xx ratio `0`, and p95 request duration about
+  `0.017` seconds during the checked low-traffic window.
 - Observability is usable after the stable Grafana admin Secret GitOps correction. Current remaining
   observability blockers are not dashboard rendering: Alertmanager delivery is not smoke-tested, the
   CNPG backup gate is red, and trusted edge TLS/client-side LAN reachability still need proof.
