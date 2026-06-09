@@ -121,6 +121,10 @@ Current implementation status, 2026-06-09:
   18.4 instances spread across the three worker nodes. The API is cut over to the CNPG application
   Secret. Real password data remains blocked until backup availability, WAL/PITR evidence, restore
   drills, failover drills, alert delivery, and scheduled synthetic monitoring gates are complete.
+- The current home-lab HA boundary is worker/pod/process level inside one physical mini-PC. Three
+  CNPG instances, three API replicas, and worker anti-affinity improve resilience to pod, container,
+  and single worker-node failures, but they do not protect against full mini-PC loss. Real-secret
+  readiness therefore still depends on off-node/off-host backup, restore, and failover evidence.
 - A controlled migration runner is merged, published, and deployed: the API image supports a
   `password-vault-api migrate` command, startup migrations remain disabled in production values, and
   generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
@@ -145,8 +149,9 @@ MVP dependable:
    path for Password Vault, Grafana, and Argo CD; replace or trust the self-signed certificate model;
    and keep Argo CD/Grafana off unintended public paths.
 3. Finish alert delivery before adding broader alert volume: the current rules include candidate
-   availability burn-rate and durability alerts, but Alertmanager delivery still needs a controlled
-   smoke test.
+   availability burn-rate and durability alerts, but Alertmanager still needs a real receiver and a
+   controlled delivery smoke test. Until that passes, alerts can be evaluated without notifying a
+   human.
 4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
    object-store backed base backups, WAL/PITR, restore drills, and failover gates. Do not accept real
    secrets before this is complete.

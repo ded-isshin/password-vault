@@ -264,6 +264,10 @@ scrape for the API database. It is not yet SRE-ready: alert delivery, trusted ed
 object-store base backups, PITR restore, and failover evidence remain open. The live deployment
 level must be re-evaluated after each GitOps rollout.
 
+Alert evaluation is not the same as alert delivery. Until Alertmanager has a real receiver and a
+smoke-tested notification path, Password Vault alert rules are useful dashboard and rule-evaluation
+signals but should not be described as paging or notifying a human.
+
 Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up checks:
 
 - Grafana dashboard UID `password-vault-overview` is provisioned.
