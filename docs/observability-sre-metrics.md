@@ -116,15 +116,15 @@ still needs to be verified per deployment.
 | `axum_http_requests_total` | counter | route/method/status labels from the metrics layer | traffic/errors | Request rate and HTTP error ratio. |
 | `axum_http_requests_duration_seconds_bucket` | histogram | route/method/status labels from the metrics layer | latency | p50/p95/p99 request latency. |
 | `axum_http_requests_pending` | gauge | route/method labels from the metrics layer | saturation | In-flight request pressure. |
-| `password_vault_registration_events_total` | counter | `event`, `outcome` | product traffic/errors | Registration and first-run setup events. |
-| `password_vault_accounts_created_total` | counter | `outcome` | product traffic/errors | Account creation success/failure trend. |
-| `password_vault_login_starts_total` | counter | `outcome` | product traffic/errors | Login challenge issuance demand. |
-| `password_vault_login_attempts_total` | counter | `outcome`, `failure_class` | product/security errors | Login proof success and coarse failure classes. |
-| `password_vault_rate_limited_requests_total` | counter | `policy`, `flow` | security errors/saturation | Abuse absorbed by rate limits. |
-| `password_vault_session_events_total` | counter | `event`, `outcome` | product/security | Session creation and MFA upgrade outcomes. |
-| `password_vault_mfa_events_total` | counter | `event`, `outcome` | security/product | TOTP enrollment, verification, recovery-code login, and re-enrollment outcomes. |
-| `password_vault_vault_item_changes_total` | counter | `operation`, `outcome` | product errors/traffic | Encrypted item create/update/delete behavior. |
-| `password_vault_sync_requests_total` | counter | `outcome`, `page` | product errors/traffic | Vault delta-sync success, conflict, and pagination. |
+| `password_vault_registration_events_total` | counter | `event`, `outcome`, `traffic_class` | product traffic/errors | Registration and first-run setup events. |
+| `password_vault_accounts_created_total` | counter | `outcome`, `traffic_class` | product traffic/errors | Account creation success/failure trend. |
+| `password_vault_login_starts_total` | counter | `outcome`, `traffic_class` | product traffic/errors | Login challenge issuance demand. |
+| `password_vault_login_attempts_total` | counter | `outcome`, `failure_class`, `traffic_class` | product/security errors | Login proof success and coarse failure classes. |
+| `password_vault_rate_limited_requests_total` | counter | `policy`, `flow`, `traffic_class` | security errors/saturation | Abuse absorbed by rate limits. |
+| `password_vault_session_events_total` | counter | `event`, `outcome`, `traffic_class` | product/security | Session creation and MFA upgrade outcomes. |
+| `password_vault_mfa_events_total` | counter | `event`, `outcome`, `traffic_class` | security/product | TOTP enrollment, verification, recovery-code login, and re-enrollment outcomes. |
+| `password_vault_vault_item_changes_total` | counter | `operation`, `outcome`, `traffic_class` | product errors/traffic | Encrypted item create/update/delete behavior. |
+| `password_vault_sync_requests_total` | counter | `outcome`, `page`, `traffic_class` | product errors/traffic | Vault delta-sync success, conflict, and pagination. |
 | `password_vault_db_pool_connections` | gauge | `state="idle|used|max"` | saturation | Pool pressure visible at scrape time. |
 | `password_vault_db_pool_wait_duration_seconds` | histogram | `operation`, `outcome` | saturation/latency | Connection-pool wait latency for readiness DB checks. |
 | `password_vault_db_query_duration_seconds` | histogram | `operation`, `outcome` | latency | Database `SELECT 1` latency for readiness DB checks. |
@@ -133,6 +133,12 @@ still needs to be verified per deployment.
 Guardrails:
 
 - Unmatched routes must collapse to a bounded label such as `/<unmatched>`.
+- Product/business counters use `traffic_class` with the bounded values `user`, `synthetic`, or
+  `unknown`. The scheduled synthetic journey sends `X-Password-Vault-Traffic-Class: synthetic`.
+  This header is an observability classifier, not an authentication or authorization control. Before
+  real-user onboarding, the edge path must either strip/override this header for normal browser
+  traffic or route synthetic checks through a controlled path so users cannot accidentally pollute
+  real-user SLI queries.
 - If the scrape pipeline renames an application label, dashboards must use the label name verified
   in the target datasource. Previous deployments have used `exported_endpoint` where a scrape label
   already consumed `endpoint`.
@@ -196,6 +202,9 @@ Synthetic and load work must follow these rules:
 - Use only reserved `.invalid` login handles and fake vault data.
 - Do not print account secret keys, TOTP seeds, TOTP codes, recovery codes, cookies, plaintext item
   secrets, account IDs, vault IDs, item IDs, or device IDs.
+- Scheduled synthetic requests must set the bounded traffic-class header so product and business
+  counters can be queried separately from future real-user traffic. Do not add login handles,
+  account IDs, vault IDs, item IDs, IPs, or run IDs as metric labels.
 - Do not run scheduled live-edge probes until the target route, cleanup lifecycle, alert routing,
   and rate limits are explicitly configured.
 - Scheduled journey pass/fail is initially observable through Kubernetes CronJob/Job status and
@@ -396,12 +405,13 @@ Do not mark these complete without runtime evidence:
 - Multi-window, multi-burn-rate rules exist for the candidate API availability SLO, but alert
   delivery and low-traffic behavior still need operational proof.
 - Scheduled external browser/API probes are enabled and visible through Kubernetes CronJob/Job
-  status. Custom application-level synthetic pass/fail, step duration, and cleanup metrics are still
-  planned.
+  status. Product/business counters now expose bounded `traffic_class` labels for synthetic versus
+  non-synthetic traffic. Custom application-level synthetic pass/fail, step duration, and cleanup
+  metrics are still planned.
 - DB query latency, DB errors, DB pool wait, and auth/MFA step duration metrics are planned.
 - Business/product panels currently use aggregate counters. Next maturity should add derived
   product SLIs for protected activation, returning access, vault write+sync success, recovery
-  success, and scheduled synthetic pass/fail results.
+  success, and scheduled synthetic pass/fail results, with explicit `traffic_class` filters.
 - Use `or vector(0)` only where an explicit zero is the intended dashboard fallback. For gate
   panels, alerts, and telemetry-existence checks, missing data must remain distinguishable from a
   healthy zero.

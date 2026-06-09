@@ -1,4 +1,42 @@
-use std::time::Duration;
+use std::{future::Future, time::Duration};
+
+use axum::http::HeaderMap;
+
+pub(crate) const TRAFFIC_CLASS_HEADER: &str = "x-password-vault-traffic-class";
+const TRAFFIC_CLASS_SYNTHETIC: &str = "synthetic";
+const TRAFFIC_CLASS_USER: &str = "user";
+const TRAFFIC_CLASS_UNKNOWN: &str = "unknown";
+
+tokio::task_local! {
+    static REQUEST_TRAFFIC_CLASS: &'static str;
+}
+
+pub(crate) fn traffic_class_from_headers(headers: &HeaderMap) -> &'static str {
+    match headers
+        .get(TRAFFIC_CLASS_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+    {
+        Some(TRAFFIC_CLASS_SYNTHETIC) => TRAFFIC_CLASS_SYNTHETIC,
+        _ => TRAFFIC_CLASS_USER,
+    }
+}
+
+pub(crate) async fn scope_request_traffic_class<F>(
+    traffic_class: &'static str,
+    future: F,
+) -> F::Output
+where
+    F: Future,
+{
+    REQUEST_TRAFFIC_CLASS.scope(traffic_class, future).await
+}
+
+fn current_traffic_class() -> &'static str {
+    REQUEST_TRAFFIC_CLASS
+        .try_with(|traffic_class| *traffic_class)
+        .unwrap_or(TRAFFIC_CLASS_UNKNOWN)
+}
 
 pub(crate) fn record_build_info() {
     metrics::gauge!(
@@ -14,6 +52,7 @@ pub(crate) fn registration_event(event: &'static str, outcome: &'static str) {
         "password_vault_registration_events_total",
         "event" => event,
         "outcome" => outcome,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -22,6 +61,7 @@ pub(crate) fn account_created(outcome: &'static str) {
     metrics::counter!(
         "password_vault_accounts_created_total",
         "outcome" => outcome,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -30,6 +70,7 @@ pub(crate) fn login_start(outcome: &'static str) {
     metrics::counter!(
         "password_vault_login_starts_total",
         "outcome" => outcome,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -39,6 +80,7 @@ pub(crate) fn login_attempt(outcome: &'static str, failure_class: &'static str) 
         "password_vault_login_attempts_total",
         "outcome" => outcome,
         "failure_class" => failure_class,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -48,6 +90,7 @@ pub(crate) fn rate_limited_request(policy: &'static str, flow: &'static str) {
         "password_vault_rate_limited_requests_total",
         "policy" => policy,
         "flow" => flow,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -57,6 +100,7 @@ pub(crate) fn session_event(event: &'static str, outcome: &'static str) {
         "password_vault_session_events_total",
         "event" => event,
         "outcome" => outcome,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -109,6 +153,7 @@ pub(crate) fn mfa_event(event: &'static str, outcome: &'static str) {
         "password_vault_mfa_events_total",
         "event" => event,
         "outcome" => outcome,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -118,6 +163,7 @@ pub(crate) fn sync_request(outcome: &'static str, page: &'static str) {
         "password_vault_sync_requests_total",
         "outcome" => outcome,
         "page" => page,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
@@ -127,6 +173,7 @@ pub(crate) fn vault_item_change(operation: &'static str, outcome: &'static str) 
         "password_vault_vault_item_changes_total",
         "operation" => operation,
         "outcome" => outcome,
+        "traffic_class" => current_traffic_class(),
     )
     .increment(1);
 }
