@@ -134,11 +134,11 @@ Guardrails:
 
 - Unmatched routes must collapse to a bounded label such as `/<unmatched>`.
 - Product/business counters use `traffic_class` with the bounded values `user`, `synthetic`, or
-  `unknown`. The scheduled synthetic journey sends `X-Password-Vault-Traffic-Class: synthetic`.
-  This header is an observability classifier, not an authentication or authorization control. Before
-  real-user onboarding, the edge path must either strip/override this header for normal browser
-  traffic or route synthetic checks through a controlled path so users cannot accidentally pollute
-  real-user SLI queries.
+  `unknown`. The scheduled synthetic journey and k6 JSON requests send
+  `X-Password-Vault-Traffic-Class: synthetic`. This header is an observability classifier, not an
+  authentication or authorization control. Before real-user onboarding, the edge path must either
+  strip/override this header for normal browser traffic or route synthetic checks through a
+  controlled path so users cannot accidentally pollute real-user SLI queries.
 - If the scrape pipeline renames an application label, dashboards must use the label name verified
   in the target datasource. Previous deployments have used `exported_endpoint` where a scrape label
   already consumed `endpoint`.
@@ -460,6 +460,12 @@ Verified runtime evidence from the 2026-06-08 GitOps rollout and follow-up check
   - A light live-edge k6 smoke ran `register_start` and `login_start` at 2 rps for 15 seconds each
     with 100% checks passing and 0% HTTP failures. Follow-up PromQL returned non-health request rate
     data, 5xx ratio `0`, p95 request duration about `0.017` seconds, and API targets `3`.
+- A follow-up load-harness check added the synthetic traffic-class header to k6 JSON requests. A
+  live-edge k6 `register_start` and `login_start` smoke at 2 rps for 15 seconds each still passed
+  with 100% checks and 0% HTTP failures. Two-minute PromQL checks showed new k6 registration and
+  login-start traffic under `traffic_class="synthetic"` with `traffic_class="user"` at `0` for the
+  checked short window. Wider windows can still include earlier unclassified or user-classified k6
+  runs until those samples age out.
 
 ## Current Dashboard And Alert Gaps
 

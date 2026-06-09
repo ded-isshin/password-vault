@@ -17,6 +17,7 @@ export function jsonHeaders() {
   return {
     'Content-Type': 'application/json',
     Accept: 'application/json',
+    'X-Password-Vault-Traffic-Class': 'synthetic',
   };
 }
 

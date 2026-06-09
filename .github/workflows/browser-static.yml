@@ -36,5 +36,8 @@ jobs:
           node --check crates/api/static/app.js
           node --check load/synthetic/browser-api-journey.mjs
           node --check load/synthetic/browser-checkpoint-self-test.mjs
+          grep -Fq \
+            "X-Password-Vault-Traffic-Class': 'synthetic'" \
+            load/k6/lib/data.js
           SYNTHETIC_SELF_TEST_ONLY=true node load/synthetic/browser-api-journey.mjs
           node load/synthetic/browser-checkpoint-self-test.mjs
