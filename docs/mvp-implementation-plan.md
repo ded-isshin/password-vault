@@ -2,7 +2,7 @@
 
 Status: draft. Created for milestone `v0.2-working-mvp`.
 
-Current implementation status, 2026-06-08:
+Current implementation status, 2026-06-09:
 
 - Deployed browser preview, health/readiness/metrics, active CloudNativePG preview PostgreSQL,
   Helm/GitOps, and Grafana dashboard exist.
@@ -51,8 +51,8 @@ Current implementation status, 2026-06-08:
   accounts. The Helm chart can render a disabled-by-default Kubernetes CronJob for this command, so
   production values can enable dry-run scheduling before allowing confirmed deletion.
 - The Helm chart can render a disabled-by-default full browser/API synthetic journey CronJob using
-  the same dependency-free Node script as CI. This is chart support only until production GitOps
-  enables it against the LAN edge route and verifies CronJob/Job pass/fail telemetry.
+  the same dependency-free Node script as CI. Production GitOps currently enables it against the LAN
+  edge route, and one-off journey smoke evidence plus CronJob/Job telemetry have been verified.
 - Recovery-code verification is implemented for the MVP preview. It can only be used after primary
   login proof succeeds, consumes one unused recovery code, creates an `mfa_recovery` session without
   vault access, and requires TOTP re-enrollment before vault APIs are available again.
@@ -60,7 +60,11 @@ Current implementation status, 2026-06-08:
   The in-cluster app service remains plain HTTP behind the edge proxy.
 - Grafana and Argo CD are also reachable through the mini-PC HTTPS edge route from the mini-PC.
   MacBook/browser reachability still needs a client-side check; use the mini-PC LAN edge address
-  with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs.
+  with `https`, not Kubernetes/LXD `LoadBalancer` addresses, as MacBook URLs. Current browser routes
+  are `https://<mini-pc-lan-ip>:11443/` for Password Vault,
+  `https://<mini-pc-lan-ip>:3000/` for Grafana, and `https://<mini-pc-lan-ip>:9443/` for Argo CD.
+  The expected temporary browser behavior is a self-signed certificate warning until the trusted
+  TLS/local CA path is implemented.
 - A 2026-06-08 read-only edge check confirmed that the mini-PC has a LAN address on the normal home
   network and that NGINX listens on the reviewed mini-PC LAN address for the Password Vault, Grafana,
   and Argo CD edge ports. The Kubernetes `LoadBalancer` addresses remain internal LXD/Kubernetes
@@ -71,11 +75,18 @@ Current implementation status, 2026-06-08:
   read-only cluster verification. The same check confirmed the LAN-bound edge listeners and HTTP 200
   responses from the mini-PC for Password Vault, Grafana, and Argo CD. This is still not a substitute
   for a MacBook-side browser or `curl -k` check.
+- A 2026-06-09 re-check confirmed the same edge model: the mini-PC LAN address serves the browser
+  paths, while Kubernetes `<lxd-kubernetes-ip-range>` `LoadBalancer` addresses are internal
+  LXD/Kubernetes routing details and should not be handed to the MacBook as direct browser URLs.
 - The edge publishing layer currently uses a self-signed certificate and LAN-bound host listeners.
   Before real user secrets, edge exposure must be locked down to intended LAN/VPN paths and verified
   from a client-equivalent route.
 - Grafana `Password Vault Overview` is deployed and live queries return API scrape health, request
   rate, p95 latency, 5xx ratio, pending requests, and unmatched 404 rate data.
+- Grafana `Password Vault Overview` currently has 36 provisioned panels. Live PromQL checks returned
+  API targets `3`, edge and internal black-box readiness success `1`, request rate data, p95 request
+  latency data, CNPG targets `3`, streaming replicas `2`, replication lag `0`, scheduled synthetic
+  journey success evidence, and backup availability `0`.
 - Product-specific observability counters for registration, login, MFA, sessions, vault item
   changes, sync requests, and build information are merged, published, deployed, and covered by a
   low-cardinality metrics test. Live checks verified `password_vault_build_info`,
@@ -90,6 +101,9 @@ Current implementation status, 2026-06-08:
 - A controlled migration runner is merged, published, and deployed: the API image supports a
   `password-vault-api migrate` command, startup migrations remain disabled in production values, and
   generated-name Argo CD `PreSync` migration hooks have completed successfully during rollout.
+- The migration policy for stabilization is schema freeze by default, not no migrations. New SQL
+  migrations should be accepted only for P0/security/core-MVP data-contract reasons, and after real
+  users they must be forward-only with an expand/contract rollout plan.
 - GitHub `main` is protected by an active ruleset requiring PRs, squash merges, resolved
   conversations, linear history, non-fast-forward protection, branch deletion protection, and the
   always-running `docs` and `public-safety` checks. Repository security features for vulnerability
@@ -113,8 +127,10 @@ MVP dependable:
 4. Complete the database durability track: keep the active CloudNativePG cluster healthy, add
    object-store backed base backups, WAL/PITR, restore drills, and failover gates. Do not accept real
    secrets before this is complete.
-5. Run the full synthetic browser/API journey in CI and against the live edge route:
+5. Keep the full synthetic browser/API journey running in CI and on the live edge route:
    `register -> confirm TOTP -> logout -> login -> verify TOTP -> unlock -> create item -> sync -> read/decrypt`.
+   Add a custom pass/fail metric only if Kubernetes Job status is not sufficient for alerting and
+   dashboard triage.
 6. Keep browser crypto and freshness tests non-negotiable: keep the local tamper/checkpoint
    self-tests and add future test vectors only when they directly protect the accepted crypto,
    browser storage, or sync-freshness format.
@@ -127,10 +143,7 @@ MVP dependable:
 10. Verify the auth/MFA/session/vault/sync product metrics through the full synthetic journey, then
    expand observability further to database health, backup freshness, and security aggregate
    metrics.
-11. Enable the chart-managed full synthetic journey CronJob from a client-equivalent edge path,
-   verify its Kubernetes Job pass/fail telemetry through kube-state-metrics, and then decide whether
-   a custom low-cardinality synthetic success timestamp/counter is warranted.
-12. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
+11. Consolidate current-state documentation before creating new agent reports or GitHub issues, so
    stale bootstrap claims do not become false work items.
 
 Anything outside this queue should be deferred unless it directly reduces risk for these gates.

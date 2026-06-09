@@ -17,16 +17,19 @@ Inputs inspected:
 - `migrations/*.sql`
 - `deploy/helm/password-vault`
 
-Official sources checked on 2026-06-08:
+Official sources checked on 2026-06-08 and refreshed on 2026-06-09:
 
 - CloudNativePG 1.29 backup documentation: <https://cloudnative-pg.io/docs/1.29/backup/>
 - CloudNativePG 1.29 recovery documentation: <https://cloudnative-pg.io/docs/1.29/recovery/>
 - CloudNativePG 1.29 replication documentation: <https://cloudnative-pg.io/docs/1.29/replication/>
-- CloudNativePG Barman Cloud Plugin introduction:
-  <https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/>
+- CloudNativePG Barman Cloud Plugin 0.12.0 usage:
+  <https://cloudnative-pg.io/plugin-barman-cloud/docs/usage/>
+- PostgreSQL versioning policy: <https://www.postgresql.org/support/versioning/>
 - PostgreSQL 18 table modification documentation: <https://www.postgresql.org/docs/18/ddl-alter.html>
 - PostgreSQL 18 `ALTER TABLE` reference:
   <https://www.postgresql.org/docs/18/sql-altertable.html>
+- PostgreSQL 18 `CREATE INDEX` reference:
+  <https://www.postgresql.org/docs/18/sql-createindex.html>
 
 Runtime state verified after the 2026-06-08 cutover:
 
@@ -53,6 +56,20 @@ Runtime state verified after the 2026-06-08 cutover:
 - The current `hiringtrace` PostgreSQL deployment, if present, is a separate product runtime and
   must not be reused as a `password-vault` database, schema, credential source, PVC, or backup
   target.
+
+Additional runtime state refreshed on 2026-06-09:
+
+- CloudNativePG operator version is `1.29.1`, and the Barman Cloud Plugin deployment version is
+  `0.12.0`.
+- `password-vault-cnpg` still reports three ready instances and a healthy phase.
+- Live PostgreSQL state reports `synchronous_commit=on`,
+  `synchronous_standby_names=ANY 1 (...)`, and both standbys in `streaming` / `quorum` state.
+- No `ObjectStore`, `Backup`, or `ScheduledBackup` exists in the `password-vault` namespace.
+- No backup/S3/Barman credential Secret exists in the `password-vault` namespace.
+- The cluster API does not expose volume snapshot resources, so object-store backup through the
+  Barman Cloud Plugin is the practical durability path for this environment.
+- Grafana/VictoriaMetrics reported CNPG targets `3`, streaming replicas `2`, replication lag `0`,
+  and backup availability `0`.
 
 This brief is a product decision document. It does not change code, Helm manifests, infrastructure,
 Kubernetes resources, or runtime secrets.
@@ -339,6 +356,12 @@ migrations unless they directly support a required security invariant, recovery/
 MVP user journey, or live-rollout safety fix. PostgreSQL minor-version maintenance remains a
 platform/database patching concern and should not be confused with product schema churn.
 
+This answers the common concern that "stable PostgreSQL should mean no migrations." Stable
+PostgreSQL gives a supported engine and predictable operational behavior. It does not freeze the
+application data contract. Password Vault still needs a versioned schema for authentication state,
+MFA state, sessions, encrypted vault metadata, item revision chains, constraints, and indexes. The
+anti-waste rule is to keep migrations rare and intentional, not to remove the migration system.
+
 This means "rare migrations", not "no migrations". No-migration policy would force manual schema
 drift or oversized up-front schema guesses. Frequent speculative migrations would create review and
 rollback noise. The stable target is a short, immutable, reviewed migration chain with CI proof and
@@ -405,6 +428,8 @@ Operational rules:
   introduces the new code path;
 - do not combine irreversible schema change with a new unproven application behavior;
 - keep migration logs free of connection strings and secret values.
+- treat a migration that only supports a speculative future feature as backlog waste until the
+  feature becomes part of the accepted MVP scope.
 
 PostgreSQL DDL can take locks. Some `ALTER TABLE` forms acquire strong locks, and normal index
 creation can block writes. This is why online-compatible migrations must be reviewed as operational
@@ -452,7 +477,7 @@ Official documentation:
 - https://cloudnative-pg.io/docs/1.29/replication/
 - https://cloudnative-pg.io/docs/1.29/backup/
 - https://cloudnative-pg.io/docs/1.29/recovery/
-- https://cloudnative-pg.io/plugin-barman-cloud/docs/intro/
+- https://cloudnative-pg.io/plugin-barman-cloud/docs/usage/
 - https://www.postgresql.org/support/versioning/
 - https://www.postgresql.org/docs/current/sql-altertable.html
 - https://www.postgresql.org/docs/current/sql-createindex.html
