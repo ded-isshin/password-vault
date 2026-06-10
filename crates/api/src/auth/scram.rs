@@ -1,4 +1,4 @@
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -163,7 +163,8 @@ fn validate_salt(salt: &[u8]) -> Result<(), ScramError> {
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; KEY_LEN] {
-    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts keys of any length");
+    let mut mac =
+        <HmacSha256 as KeyInit>::new_from_slice(key).expect("HMAC accepts keys of any length");
     mac.update(data);
     mac.finalize().into_bytes().into()
 }

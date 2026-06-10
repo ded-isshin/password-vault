@@ -11,8 +11,8 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
     aead::{Aead, KeyInit as AeadKeyInit, Payload},
 };
-use hmac::{Hmac, Mac};
-use rand::{RngCore, rngs::OsRng};
+use hmac::{Hmac, KeyInit, Mac};
+use rand::{TryRngCore, rngs::OsRng};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -2919,7 +2919,7 @@ fn synthetic_bytes(
     domain: &str,
     login_handle_normalized: &str,
 ) -> [u8; 32] {
-    let mut mac = <HmacSha256 as Mac>::new_from_slice(synthetic_metadata_key)
+    let mut mac = <HmacSha256 as KeyInit>::new_from_slice(synthetic_metadata_key)
         .expect("HMAC accepts any key length");
     mac.update(domain.as_bytes());
     mac.update(&[0]);
@@ -2938,7 +2938,9 @@ fn default_kdf_profile() -> Value {
 
 fn random_bytes<const N: usize>() -> [u8; N] {
     let mut output = [0u8; N];
-    OsRng.fill_bytes(&mut output);
+    OsRng
+        .try_fill_bytes(&mut output)
+        .expect("OS random generator must be available for auth secrets");
     output
 }
 
