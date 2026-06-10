@@ -1,0 +1,72 @@
+name: base-image-mirrors
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 4 * * 1"
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/base-image-mirrors.yml
+      - .github/workflows/container.yml
+      - .github/workflows/load.yml
+      - Dockerfile
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: base-image-mirrors
+  cancel-in-progress: false
+
+env:
+  GHCR_OWNER: ded-isshin
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Log in to GHCR
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_TOKEN" \
+            | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Mirror reviewed base and CI images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mirror_image() {
+            local source="$1"
+            local target="$2"
+
+            echo "::group::${target}"
+            docker buildx imagetools inspect "$source" >/dev/null
+            docker buildx imagetools create --tag "$target" "$source"
+            docker buildx imagetools inspect "$target" >/dev/null
+            echo "Mirrored ${source} -> ${target}"
+            echo "::endgroup::"
+          }
+
+          mirror_image \
+            "docker.io/library/rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460" \
+            "ghcr.io/${GHCR_OWNER}/password-vault-base-rust:1.96.0-bookworm-sha256-13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460"
+
+          mirror_image \
+            "docker.io/library/debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb" \
+            "ghcr.io/${GHCR_OWNER}/password-vault-base-debian:bookworm-slim-sha256-0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb"
+
+          mirror_image \
+            "docker.io/library/node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732" \
+            "ghcr.io/${GHCR_OWNER}/password-vault-ci-node:22-bookworm-slim-sha256-7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732"
+
+          mirror_image \
+            "docker.io/grafana/k6:2.0.0@sha256:a33a0cfdc4d2483d6b7a3a22e726a499ff2831a671a49239104cd34a9937523c" \
+            "ghcr.io/${GHCR_OWNER}/password-vault-ci-k6:2.0.0-sha256-a33a0cfdc4d2483d6b7a3a22e726a499ff2831a671a49239104cd34a9937523c"
+

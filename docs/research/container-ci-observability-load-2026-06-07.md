@@ -68,9 +68,9 @@ deployment.
 - Use pinned image tags plus immutable digests and avoid `latest` in CI/load/chart validation.
 - Treat digest pinning as integrity and drift control, not as a complete Docker Hub availability
   control. Digest pulls still depend on the upstream registry and its token endpoint.
-- If Docker Hub availability repeatedly blocks release builds, mirror reviewed base/test images into
-  GHCR, authenticate to Docker Hub in CI, or add pull retry/backoff where workflows support it.
-  Update the Dockerfile/workflows to consume any mirrors by digest.
+- Docker Hub availability has blocked a release build once. The accepted follow-up is to mirror
+  reviewed base/test images into GHCR and have release workflows prefer those mirrors while retaining
+  pinned upstream digests as a bootstrap/fork fallback.
 - Split container CI into a read-only PR smoke job and a separate publish job with `packages`,
   `id-token`, and `attestations` permissions.
 - Add GitHub artifact attestation bound to the pushed image digest. Inline BuildKit SBOM/provenance
@@ -130,8 +130,7 @@ deployment.
 
 - After the first GHCR image is published, the infrastructure PR must pin the production deployment by
   digest.
-- #98 tracks the follow-up decision on whether Docker Hub base/test image mirrors, Docker Hub
-  authentication, or explicit pull retries are worth operating.
+- #98 tracks the follow-up rollout and verification for GHCR base/test image mirrors.
 - Production migration job shape still needs a runbook before live user data.
 - Password Vault dashboard can be rendered now, but real panel data cannot be verified until the app
   is deployed and scraped.
