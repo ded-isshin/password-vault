@@ -1,11 +1,13 @@
-use rand::{RngCore, rngs::OsRng};
+use rand::{TryRngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 
 pub const TOKEN_LEN: usize = 32;
 
 pub fn random_token() -> [u8; TOKEN_LEN] {
     let mut token = [0u8; TOKEN_LEN];
-    OsRng.fill_bytes(&mut token);
+    OsRng
+        .try_fill_bytes(&mut token)
+        .expect("OS random generator must be available for session tokens");
     token
 }
 
