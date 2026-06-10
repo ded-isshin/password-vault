@@ -1,7 +1,9 @@
 # ADR 0003: Auth And Crypto Direction
 
-Status: accepted for MVP planning. The implementation details still require issue-specific specs and
-tests before product code.
+Status: accepted for MVP planning and implemented by the current browser preview. Detailed
+implementation behavior is tracked in [Crypto V1 Design Note](../security/crypto-design-draft.md),
+[Auth Protocol V1](../security/auth-protocol-v1.md), and
+[Vault Revision Freshness And Rollback Resistance](../security/revision-freshness.md).
 
 ## Context
 

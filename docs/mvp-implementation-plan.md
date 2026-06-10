@@ -266,13 +266,18 @@ Build a deployed MVP where a personal user can:
 - Delivery milestone: `v0.2-working-mvp`
 - Delivery epic: #11
 
-Existing blockers:
+Original foundation blockers:
 
 - #2 Auth/login and key-derivation protocol ADR.
 - #3 Browser KDF and crypto v1 format ADR.
 - #4 TOTP seed custody and MFA hardening.
 - #5 PostgreSQL HA, backup, and restore ADR.
 - #9 Multi-device client and browser extension roadmap.
+
+Current status: #2, #3, #4, #7, #9, and the core MVP implementation issues are resolved for the
+browser preview. #5, #23, #73, and their infrastructure counterparts remain open because real-secret
+readiness still needs backup/PITR/restore/failover, Alertmanager delivery, trusted TLS, and scheduled
+edge synthetic evidence.
 
 Recently resolved control-plane gate:
 
@@ -325,21 +330,22 @@ Threat model and foundation docs
   -> deployed smoke test
 ```
 
-Parallel tracks:
+Historical parallel tracks:
 
 - #7 GitHub branch ruleset and public-safety gates can proceed while auth/crypto research runs.
 - #5 PostgreSQL HA/backup can proceed while product scaffolding starts.
-- #26 Rust build environment can proceed while #24/#2/#3 are still open.
-- Backend health/readiness scaffold can start before final crypto implementation, but it must not
-  implement security-sensitive auth until #2, #3, #4, and #24 are resolved.
-- Frontend layout can start after the API contract draft exists, but crypto and login behavior must
-  wait for accepted security decisions.
+- #26 Rust build environment could proceed while #24/#2/#3 were open.
+- Backend health/readiness scaffold could start before final crypto implementation, but
+  security-sensitive auth waited for accepted decisions.
+- Frontend layout could start after the API contract draft existed; crypto and login behavior waited
+  for accepted security decisions.
 
 ## Recommended MVP Stack
 
 - Backend: Rust, Axum, Tokio, SQLx.
 - Frontend: TypeScript, React, Vite.
-- Browser crypto: WebCrypto for AES-GCM/HKDF; Argon2id via reviewed WASM only after #3/#24.
+- Browser crypto: WebCrypto for PBKDF2/HKDF/HMAC/SHA-256/AES-GCM in the MVP; Argon2id via reviewed
+  WASM remains future hardening, not a silent fallback.
 - Authentication direction: derived-auth-key remains the documented MVP default unless #24 proves
   OPAQUE is practical for the selected Rust/browser stack. OPAQUE is preferred security direction,
   but it must not become an indefinite blocker or an untested protocol dependency.
@@ -365,7 +371,8 @@ Issue #2 must decide:
 
 ### Browser Crypto
 
-Issue #3 must decide:
+Issue #3 is resolved for the browser MVP by
+[Crypto V1 Design Note](security/crypto-design-draft.md). It records:
 
 - KDF and parameters;
 - browser/WASM dependency choice and supply-chain review;
@@ -375,11 +382,11 @@ Issue #3 must decide:
 - associated data;
 - test vectors.
 
-Issue #3 and #13 must also define rollback/freshness protection for encrypted item sync. Binding an
-item payload to `revision_id` in AAD proves the ciphertext belongs to a revision; it does not prove
-that the server returned the latest revision. The MVP needs an explicit design for stale revision
-replay, such as a per-vault monotonic counter, client-verifiable hash chain, or another accepted
-freshness signal.
+Issue #13 and [Vault Revision Freshness And Rollback Resistance](security/revision-freshness.md)
+define the implemented rollback/freshness protection for encrypted item sync. Binding an item
+payload to `revision_id` in AAD proves the ciphertext belongs to a revision; the client-keyed
+hash-chain and origin-local checkpoint detect stale revision replay for browser origins that already
+have a newer checkpoint.
 
 ### TOTP MFA
 
