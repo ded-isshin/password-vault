@@ -199,6 +199,13 @@ Kubernetes Services or Argo CD.
 Current edge constraints:
 
 - the preview edge certificate is self-signed, so browser warnings are expected;
+- the application intentionally does not emit `Strict-Transport-Security` while the edge uses a
+  self-signed certificate, because HSTS can make browser certificate-error bypass impossible for the
+  host after it is cached;
+- the browser app should emit restrictive security headers on `/`, `/assets/app.css`, and
+  `/assets/app.js`: CSP without `unsafe-inline`/`unsafe-eval`, `Cache-Control: no-store`,
+  `X-Content-Type-Options: nosniff`, frame denial, no-referrer policy, and Permissions-Policy
+  restrictions for unused device APIs;
 - the edge black-box probe may intentionally skip certificate verification until a trusted local CA
   or real certificate path exists;
 - the edge listener check proves that the host accepts connections on the expected local ports, but

@@ -3,9 +3,9 @@ use std::{env, net::SocketAddr, sync::OnceLock};
 use axum::{
     Json, Router,
     extract::{Request, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
     middleware::{self, Next},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     routing::get,
 };
 use axum_prometheus::{
@@ -23,6 +23,32 @@ pub(crate) mod telemetry;
 pub mod vault;
 
 const MIN_SYNTHETIC_TRAFFIC_TOKEN_BYTES: usize = 32;
+const BROWSER_APP_CONTENT_SECURITY_POLICY: &str = concat!(
+    "default-src 'none'; ",
+    "base-uri 'none'; ",
+    "connect-src 'self'; ",
+    "font-src 'none'; ",
+    "form-action 'self'; ",
+    "frame-ancestors 'none'; ",
+    "frame-src 'none'; ",
+    "img-src 'self' data:; ",
+    "manifest-src 'self'; ",
+    "media-src 'none'; ",
+    "object-src 'none'; ",
+    "script-src 'self'; ",
+    "style-src 'self'; ",
+    "worker-src 'none'"
+);
+const BROWSER_APP_PERMISSIONS_POLICY: &str = concat!(
+    "camera=(), ",
+    "microphone=(), ",
+    "geolocation=(), ",
+    "payment=(), ",
+    "usb=(), ",
+    "serial=(), ",
+    "hid=(), ",
+    "bluetooth=()"
+);
 
 #[derive(Clone)]
 pub struct ApiConfig {
@@ -344,25 +370,61 @@ async fn scope_request_traffic_class(
     telemetry::scope_request_traffic_class(traffic_class, next.run(request)).await
 }
 
-async fn index() -> Html<&'static str> {
-    Html(include_str!("../static/index.html"))
+async fn index() -> impl IntoResponse {
+    browser_app_response(
+        "text/html; charset=utf-8",
+        include_str!("../static/index.html"),
+    )
 }
 
 async fn app_css() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
-        include_str!("../static/app.css"),
-    )
+    browser_app_response("text/css; charset=utf-8", include_str!("../static/app.css"))
 }
 
 async fn app_js() -> impl IntoResponse {
-    (
-        [(
-            header::CONTENT_TYPE,
-            "application/javascript; charset=utf-8",
-        )],
+    browser_app_response(
+        "application/javascript; charset=utf-8",
         include_str!("../static/app.js"),
     )
+}
+
+fn browser_app_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
+    let mut headers = browser_app_headers();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    (headers, body)
+}
+
+fn browser_app_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, max-age=0"),
+    );
+    headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    headers.insert(header::EXPIRES, HeaderValue::from_static("0"));
+    insert_static_header(
+        &mut headers,
+        "content-security-policy",
+        BROWSER_APP_CONTENT_SECURITY_POLICY,
+    );
+    insert_static_header(&mut headers, "x-content-type-options", "nosniff");
+    insert_static_header(&mut headers, "x-frame-options", "DENY");
+    insert_static_header(&mut headers, "referrer-policy", "no-referrer");
+    insert_static_header(
+        &mut headers,
+        "permissions-policy",
+        BROWSER_APP_PERMISSIONS_POLICY,
+    );
+    insert_static_header(&mut headers, "cross-origin-opener-policy", "same-origin");
+    insert_static_header(&mut headers, "cross-origin-resource-policy", "same-origin");
+    headers
+}
+
+fn insert_static_header(headers: &mut HeaderMap, name: &'static str, value: &'static str) {
+    headers.insert(
+        HeaderName::from_static(name),
+        HeaderValue::from_static(value),
+    );
 }
 
 #[derive(Serialize)]
@@ -895,6 +957,14 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(index_response.status(), 200);
+        assert_browser_security_headers(index_response.headers());
+        assert_eq!(
+            index_response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("text/html; charset=utf-8")
+        );
         let index_body = to_bytes(index_response.into_body(), 1024 * 1024)
             .await
             .unwrap();
@@ -915,6 +985,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(css_response.status(), 200);
+        assert_browser_security_headers(css_response.headers());
         assert_eq!(
             css_response
                 .headers()
@@ -933,6 +1004,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(js_response.status(), 200);
+        assert_browser_security_headers(js_response.headers());
         assert_eq!(
             js_response
                 .headers()
@@ -946,6 +1018,69 @@ mod tests {
         let js_body = String::from_utf8(js_body.to_vec()).unwrap();
         assert!(js_body.contains("ITEM_ENVELOPE_CRYPTO_VERSION"));
         assert!(js_body.contains("unlockVaultWithKey"));
+    }
+
+    fn assert_browser_security_headers(headers: &axum::http::HeaderMap) {
+        assert_eq!(
+            headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok()),
+            Some("no-store, max-age=0")
+        );
+        assert_eq!(
+            headers.get("pragma").and_then(|value| value.to_str().ok()),
+            Some("no-cache")
+        );
+        assert_eq!(
+            headers.get("expires").and_then(|value| value.to_str().ok()),
+            Some("0")
+        );
+        let csp = headers
+            .get("content-security-policy")
+            .and_then(|value| value.to_str().ok())
+            .expect("browser assets set a content security policy");
+        assert!(csp.contains("default-src 'none'"));
+        assert!(csp.contains("connect-src 'self'"));
+        assert!(csp.contains("script-src 'self'"));
+        assert!(csp.contains("style-src 'self'"));
+        assert!(csp.contains("frame-ancestors 'none'"));
+        assert!(!csp.contains("unsafe-inline"));
+        assert!(!csp.contains("unsafe-eval"));
+        assert_eq!(
+            headers
+                .get("x-content-type-options")
+                .and_then(|value| value.to_str().ok()),
+            Some("nosniff")
+        );
+        assert_eq!(
+            headers
+                .get("x-frame-options")
+                .and_then(|value| value.to_str().ok()),
+            Some("DENY")
+        );
+        assert_eq!(
+            headers
+                .get("referrer-policy")
+                .and_then(|value| value.to_str().ok()),
+            Some("no-referrer")
+        );
+        assert!(headers.get("permissions-policy").is_some());
+        assert_eq!(
+            headers
+                .get("cross-origin-opener-policy")
+                .and_then(|value| value.to_str().ok()),
+            Some("same-origin")
+        );
+        assert_eq!(
+            headers
+                .get("cross-origin-resource-policy")
+                .and_then(|value| value.to_str().ok()),
+            Some("same-origin")
+        );
+        assert!(
+            headers.get("strict-transport-security").is_none(),
+            "HSTS stays disabled until the edge has a trusted TLS model"
+        );
     }
 
     #[tokio::test]

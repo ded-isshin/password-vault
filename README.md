@@ -31,8 +31,8 @@ documentation, logs, and CI output as public.
   enrollment, login finish, login-time TOTP verification, browser vault unlock, encrypted item
   CRUD/sync, self-service recovery-code login into TOTP re-enrollment, GHCR image publishing,
   Helm/GitOps, a Grafana dashboard, CI/local and scheduled live-edge browser API synthetic journeys,
-  and an active three-instance CloudNativePG preview database are implemented for the current
-  preview.
+  browser security headers/cache policy, and an active three-instance CloudNativePG preview database
+  are implemented for the current preview.
 
 ## MVP Scope
 
