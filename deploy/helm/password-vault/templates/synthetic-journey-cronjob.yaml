@@ -1,4 +1,12 @@
 {{- if .Values.syntheticJourney.cronJob.enabled }}
+{{- $syntheticTraffic := default dict .Values.syntheticTraffic }}
+{{- $syntheticTrafficTokenSecret := default dict $syntheticTraffic.tokenSecret }}
+{{- $syntheticTrafficTokenEnabled := default false $syntheticTrafficTokenSecret.enabled }}
+{{- $syntheticTrafficTokenName := default "" $syntheticTrafficTokenSecret.name }}
+{{- $syntheticTrafficTokenKey := default "" $syntheticTrafficTokenSecret.key }}
+{{- if and .Values.syntheticJourney.cronJob.checkMetrics (not $syntheticTrafficTokenEnabled) }}
+{{- fail "syntheticJourney.cronJob.checkMetrics=true requires syntheticTraffic.tokenSecret.enabled=true so synthetic metric assertions use trusted synthetic traffic" }}
+{{- end }}
 {{- $baseUrl := required "syntheticJourney.cronJob.baseUrl is required when syntheticJourney.cronJob.enabled=true" .Values.syntheticJourney.cronJob.baseUrl }}
 apiVersion: batch/v1
 kind: CronJob
@@ -74,6 +82,13 @@ spec:
                   value: {{ .Values.syntheticJourney.cronJob.loginPrefix | quote }}
                 - name: SYNTHETIC_EMAIL_DOMAIN
                   value: {{ .Values.syntheticJourney.cronJob.emailDomain | quote }}
+                {{- if $syntheticTrafficTokenEnabled }}
+                - name: SYNTHETIC_TRAFFIC_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ required "syntheticTraffic.tokenSecret.name is required when syntheticTraffic.tokenSecret.enabled=true" $syntheticTrafficTokenName }}
+                      key: {{ required "syntheticTraffic.tokenSecret.key is required when syntheticTraffic.tokenSecret.enabled=true" $syntheticTrafficTokenKey }}
+                {{- end }}
               resources:
                 {{- toYaml .Values.syntheticJourney.cronJob.resources | nindent 16 }}
               volumeMounts:

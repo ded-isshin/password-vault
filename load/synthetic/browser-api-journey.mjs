@@ -94,6 +94,7 @@ function loadConfig() {
     baseUrl,
     metricsBaseUrl,
     checkMetrics,
+    syntheticTrafficToken: process.env.SYNTHETIC_TRAFFIC_TOKEN || "",
     runId,
     loginHandle: `${prefix}-${runId}-${base64Url(randomBytes(6))}@${domain}`,
     masterPassword: `Synthetic-${runId}-${base64Url(randomBytes(18))}-A1!`,
@@ -522,11 +523,15 @@ async function requestText(config, path, options = {}) {
 
 async function requestRaw(config, path, options = {}) {
   const url = new URL(path, options.baseUrl || config.baseUrl);
+  const includeSyntheticClassifier = options.includeSyntheticClassifier !== false;
   const headers = {
     Accept: options.accept || "application/json",
-    "X-Password-Vault-Traffic-Class": "synthetic",
     ...(options.headers || {}),
+    ...(includeSyntheticClassifier ? { "X-Password-Vault-Traffic-Class": "synthetic" } : {}),
   };
+  if (includeSyntheticClassifier && config.syntheticTrafficToken) {
+    headers["X-Password-Vault-Synthetic-Token"] = config.syntheticTrafficToken;
+  }
   const method = options.method || "GET";
   const jar = options.jar;
 
@@ -1289,6 +1294,7 @@ async function assertMetrics(config) {
     accept: "text/plain",
     expectStatus: 404,
     expectNoStore: false,
+    includeSyntheticClassifier: false,
     label: "public API metrics denial",
   });
 
@@ -1296,6 +1302,7 @@ async function assertMetrics(config) {
     accept: "text/plain",
     baseUrl: config.metricsBaseUrl,
     expectNoStore: false,
+    includeSyntheticClassifier: false,
     label: "metrics",
   });
   const requiredSeries = [

@@ -135,10 +135,13 @@ Guardrails:
 - Unmatched routes must collapse to a bounded label such as `/<unmatched>`.
 - Product/business counters use `traffic_class` with the bounded values `user`, `synthetic`, or
   `unknown`. The scheduled synthetic journey and k6 JSON requests send
-  `X-Password-Vault-Traffic-Class: synthetic`. This header is an observability classifier, not an
-  authentication or authorization control. Before real-user onboarding, the edge path must either
-  strip/override this header for normal browser traffic or route synthetic checks through a
-  controlled path so users cannot accidentally pollute real-user SLI queries.
+  `X-Password-Vault-Traffic-Class: synthetic`. The API only honors that classifier when the request
+  also sends `X-Password-Vault-Synthetic-Token` matching the runtime
+  `PV_SYNTHETIC_TRAFFIC_TOKEN` secret. Without a matching token, the request is counted as `user`.
+  This token is an observability trust boundary, not application authorization, and must stay out of
+  Git. Generate it with at least 32 bytes of entropy and roll the API plus synthetic runner together;
+  otherwise synthetic journeys can temporarily succeed while being counted as `traffic_class="user"`.
+  Metrics fetches must not send the classifier token because `/metrics` does not need it.
 - If the scrape pipeline renames an application label, dashboards must use the label name verified
   in the target datasource. Previous deployments have used `exported_endpoint` where a scrape label
   already consumed `endpoint`.

@@ -14,11 +14,15 @@ export function clientNonce(label) {
 }
 
 export function jsonHeaders() {
-  return {
+  const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
     'X-Password-Vault-Traffic-Class': 'synthetic',
   };
+  if (__ENV.SYNTHETIC_TRAFFIC_TOKEN) {
+    headers['X-Password-Vault-Synthetic-Token'] = __ENV.SYNTHETIC_TRAFFIC_TOKEN;
+  }
+  return headers;
 }
 
 function fixedLength(value, length) {

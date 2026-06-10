@@ -170,6 +170,12 @@ vendored `browser-api-journey.mjs` script from a read-only ConfigMap. The journe
 Required production-like value:
 
 ```yaml
+syntheticTraffic:
+  tokenSecret:
+    enabled: true
+    name: password-vault-auth
+    key: synthetic-traffic-token
+
 syntheticJourney:
   cronJob:
     enabled: true
@@ -183,6 +189,20 @@ syntheticJourney:
 so the synthetic detects edge routing failures, not only in-cluster service health. Keep real LAN
 addresses out of public product documentation and use placeholders unless disclosure is explicitly
 approved.
+
+When `syntheticTraffic.tokenSecret.enabled=true`, the API reads `PV_SYNTHETIC_TRAFFIC_TOKEN` and the
+synthetic CronJob reads the same Secret as `SYNTHETIC_TRAFFIC_TOKEN`. The API only records
+`traffic_class="synthetic"` when both the bounded traffic-class header and the matching token are
+present. This prevents ordinary browser clients from spoofing synthetic traffic in product and SLO
+queries. Keep the token runtime-only, generate at least 32 bytes of entropy, and do not commit it to
+Git.
+
+Upgrade note: order matters. Add the `synthetic-traffic-token` key to the runtime Secret before enabling
+`syntheticTraffic.tokenSecret.enabled=true`, and roll out the API Deployment and synthetic CronJob
+together. If a new API image runs without `PV_SYNTHETIC_TRAFFIC_TOKEN`, synthetic requests will still
+complete but will be counted as `traffic_class="user"` until the token wiring is present. The chart
+fails rendering when `syntheticJourney.cronJob.checkMetrics=true` but the synthetic traffic token
+Secret is disabled.
 
 The script refuses non-local base URLs unless `allowNonLocalBaseUrl=true`, rejects non-`.invalid`
 synthetic email domains, prints no account secret keys, TOTP seeds, OTP codes, recovery codes,

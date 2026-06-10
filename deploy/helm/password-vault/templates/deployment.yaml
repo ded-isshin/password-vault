@@ -1,3 +1,8 @@
+{{- $syntheticTraffic := default dict .Values.syntheticTraffic }}
+{{- $syntheticTrafficTokenSecret := default dict $syntheticTraffic.tokenSecret }}
+{{- $syntheticTrafficTokenEnabled := default false $syntheticTrafficTokenSecret.enabled }}
+{{- $syntheticTrafficTokenName := default "" $syntheticTrafficTokenSecret.name }}
+{{- $syntheticTrafficTokenKey := default "" $syntheticTrafficTokenSecret.key }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -92,6 +97,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.syntheticMetadata.keySecret.name }}
                   key: {{ .Values.syntheticMetadata.keySecret.key }}
+            {{- if $syntheticTrafficTokenEnabled }}
+            - name: PV_SYNTHETIC_TRAFFIC_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "syntheticTraffic.tokenSecret.name is required when syntheticTraffic.tokenSecret.enabled=true" $syntheticTrafficTokenName }}
+                  key: {{ required "syntheticTraffic.tokenSecret.key is required when syntheticTraffic.tokenSecret.enabled=true" $syntheticTrafficTokenKey }}
+            {{- end }}
             - name: PV_TOTP_SEED_KEY_B64
               valueFrom:
                 secretKeyRef:

@@ -20,9 +20,11 @@ decryption.
   cookies, plaintext item passwords, account IDs, vault IDs, item IDs, or device IDs.
 - Synthetic journey requests and k6 JSON requests send
   `X-Password-Vault-Traffic-Class: synthetic` so product/business counters can be separated from
-  future real-user traffic. This is an observability classifier, not an auth control; production edge
-  routing must still prevent normal browser traffic from spoofing or preserving that header before
-  real users are onboarded.
+  future real-user traffic. The API only honors that classifier when the request also sends
+  `X-Password-Vault-Synthetic-Token` matching the runtime `PV_SYNTHETIC_TRAFFIC_TOKEN` secret. Set
+  `SYNTHETIC_TRAFFIC_TOKEN` for trusted live synthetic and k6 runs; without it, the request still
+  works but is counted as `traffic_class="user"`. Use a runtime-only token with at least 32 bytes of
+  entropy. Metrics fetches do not send the classifier token because `/metrics` does not need it.
 - Do not run the synthetic journey automatically against a public or production endpoint. Live-edge
   runs must be explicit and paired with the cleanup lifecycle below.
 - Synthetic browser journey accounts must use login handles shaped as
