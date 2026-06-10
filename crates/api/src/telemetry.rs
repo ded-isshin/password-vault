@@ -1,8 +1,10 @@
 use std::{future::Future, time::Duration};
 
 use axum::http::HeaderMap;
+use subtle::ConstantTimeEq;
 
 pub(crate) const TRAFFIC_CLASS_HEADER: &str = "x-password-vault-traffic-class";
+pub(crate) const SYNTHETIC_TRAFFIC_TOKEN_HEADER: &str = "x-password-vault-synthetic-token";
 const TRAFFIC_CLASS_SYNTHETIC: &str = "synthetic";
 const TRAFFIC_CLASS_USER: &str = "user";
 const TRAFFIC_CLASS_UNKNOWN: &str = "unknown";
@@ -11,15 +13,40 @@ tokio::task_local! {
     static REQUEST_TRAFFIC_CLASS: &'static str;
 }
 
-pub(crate) fn traffic_class_from_headers(headers: &HeaderMap) -> &'static str {
-    match headers
+pub(crate) fn traffic_class_from_headers(
+    headers: &HeaderMap,
+    synthetic_traffic_token: Option<&str>,
+) -> &'static str {
+    let requested_class = headers
         .get(TRAFFIC_CLASS_HEADER)
         .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-    {
-        Some(TRAFFIC_CLASS_SYNTHETIC) => TRAFFIC_CLASS_SYNTHETIC,
-        _ => TRAFFIC_CLASS_USER,
+        .map(str::trim);
+    if requested_class != Some(TRAFFIC_CLASS_SYNTHETIC) {
+        return TRAFFIC_CLASS_USER;
     }
+
+    let Some(expected_token) = synthetic_traffic_token else {
+        return TRAFFIC_CLASS_USER;
+    };
+    let Some(provided_token) = headers
+        .get(SYNTHETIC_TRAFFIC_TOKEN_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+    else {
+        return TRAFFIC_CLASS_USER;
+    };
+
+    if constant_time_token_eq(provided_token, expected_token) {
+        TRAFFIC_CLASS_SYNTHETIC
+    } else {
+        TRAFFIC_CLASS_USER
+    }
+}
+
+fn constant_time_token_eq(provided: &str, expected: &str) -> bool {
+    let provided = provided.as_bytes();
+    let expected = expected.as_bytes();
+    provided.len() == expected.len() && provided.ct_eq(expected).into()
 }
 
 pub(crate) async fn scope_request_traffic_class<F>(
@@ -32,7 +59,7 @@ where
     REQUEST_TRAFFIC_CLASS.scope(traffic_class, future).await
 }
 
-fn current_traffic_class() -> &'static str {
+pub(crate) fn current_traffic_class() -> &'static str {
     REQUEST_TRAFFIC_CLASS
         .try_with(|traffic_class| *traffic_class)
         .unwrap_or(TRAFFIC_CLASS_UNKNOWN)

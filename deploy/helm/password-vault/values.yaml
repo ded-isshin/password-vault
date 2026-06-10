@@ -34,6 +34,12 @@ syntheticMetadata:
     name: password-vault-auth
     key: synthetic-metadata-key-b64
 
+syntheticTraffic:
+  tokenSecret:
+    enabled: false
+    name: password-vault-auth
+    key: synthetic-traffic-token
+
 totpSeed:
   keySecret:
     name: password-vault-auth

@@ -258,6 +258,34 @@
         }
       }
     },
+    "syntheticTraffic": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tokenSecret": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "enabled",
+            "name",
+            "key"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
     "syntheticJourney": {
       "type": "object",
       "additionalProperties": true,

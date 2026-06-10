@@ -22,12 +22,15 @@ pub mod maintenance;
 pub(crate) mod telemetry;
 pub mod vault;
 
+const MIN_SYNTHETIC_TRAFFIC_TOKEN_BYTES: usize = 32;
+
 #[derive(Clone)]
 pub struct ApiConfig {
     pub bind_addr: SocketAddr,
     pub metrics_bind_addr: SocketAddr,
     database_url: Option<String>,
     synthetic_metadata_key: Option<[u8; 32]>,
+    synthetic_traffic_token: Option<String>,
     totp_seed_key: Option<[u8; 32]>,
     pub require_database: bool,
     pub run_migrations_on_startup: bool,
@@ -56,6 +59,11 @@ impl ApiConfig {
             .map(|value| auth::encoding::decode_base64url_array::<32>(&value))
             .transpose()
             .map_err(|_| ConfigError::InvalidSyntheticMetadataKey)?;
+        let synthetic_traffic_token = env::var("PV_SYNTHETIC_TRAFFIC_TOKEN")
+            .ok()
+            .and_then(nonempty_string)
+            .map(validate_synthetic_traffic_token)
+            .transpose()?;
         let totp_seed_key = env::var("PV_TOTP_SEED_KEY_B64")
             .ok()
             .and_then(nonempty_string)
@@ -73,6 +81,7 @@ impl ApiConfig {
             metrics_bind_addr,
             database_url: database_url_present,
             synthetic_metadata_key,
+            synthetic_traffic_token,
             totp_seed_key,
             require_database,
             run_migrations_on_startup,
@@ -90,6 +99,7 @@ impl ApiConfig {
             database_url: database_url_present
                 .then(|| "postgres://test:test@127.0.0.1:5432/test".to_string()),
             synthetic_metadata_key: None,
+            synthetic_traffic_token: None,
             totp_seed_key: None,
             require_database,
             run_migrations_on_startup: false,
@@ -106,6 +116,10 @@ impl ApiConfig {
 
     fn synthetic_metadata_key(&self) -> Option<&[u8; 32]> {
         self.synthetic_metadata_key.as_ref()
+    }
+
+    fn synthetic_traffic_token(&self) -> Option<&str> {
+        self.synthetic_traffic_token.as_deref()
     }
 
     fn totp_seed_key(&self) -> Option<&[u8; 32]> {
@@ -128,6 +142,10 @@ impl std::fmt::Debug for ApiConfig {
                 &self.synthetic_metadata_key.as_ref().map(|_| "<redacted>"),
             )
             .field(
+                "synthetic_traffic_token",
+                &self.synthetic_traffic_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
                 "totp_seed_key",
                 &self.totp_seed_key.as_ref().map(|_| "<redacted>"),
             )
@@ -144,6 +162,7 @@ pub enum ConfigError {
     InvalidRequireDatabase,
     InvalidRunMigrationsOnStartup,
     InvalidSyntheticMetadataKey,
+    InvalidSyntheticTrafficToken,
     InvalidTotpSeedKey,
 }
 
@@ -167,6 +186,12 @@ impl std::fmt::Display for ConfigError {
                 write!(
                     formatter,
                     "PV_SYNTHETIC_METADATA_KEY_B64 must be 32 bytes encoded as base64url without padding"
+                )
+            }
+            Self::InvalidSyntheticTrafficToken => {
+                write!(
+                    formatter,
+                    "PV_SYNTHETIC_TRAFFIC_TOKEN must be at least {MIN_SYNTHETIC_TRAFFIC_TOKEN_BYTES} bytes after trimming"
                 )
             }
             Self::InvalidTotpSeedKey => {
@@ -286,6 +311,10 @@ async fn build_state(config: ApiConfig) -> Result<AppState, ApiInitError> {
 
 fn router(state: AppState) -> Router {
     let (metrics_layer, _) = metrics_layer_and_handle();
+    let synthetic_traffic_token = state
+        .config
+        .synthetic_traffic_token()
+        .map(ToOwned::to_owned);
 
     Router::new()
         .route("/", get(index))
@@ -296,12 +325,22 @@ fn router(state: AppState) -> Router {
         .merge(auth::routes::router())
         .merge(vault::router())
         .with_state(state)
-        .layer(middleware::from_fn(scope_request_traffic_class))
+        .layer(middleware::from_fn_with_state(
+            synthetic_traffic_token,
+            scope_request_traffic_class,
+        ))
         .layer(metrics_layer)
 }
 
-async fn scope_request_traffic_class(request: Request, next: Next) -> Response {
-    let traffic_class = telemetry::traffic_class_from_headers(request.headers());
+async fn scope_request_traffic_class(
+    State(synthetic_traffic_token): State<Option<String>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let traffic_class = telemetry::traffic_class_from_headers(
+        request.headers(),
+        synthetic_traffic_token.as_deref(),
+    );
     telemetry::scope_request_traffic_class(traffic_class, next.run(request)).await
 }
 
@@ -467,6 +506,15 @@ fn nonempty_string(value: String) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
+fn validate_synthetic_traffic_token(value: String) -> Result<String, ConfigError> {
+    let value = value.trim().to_string();
+    if value.len() < MIN_SYNTHETIC_TRAFFIC_TOKEN_BYTES {
+        Err(ConfigError::InvalidSyntheticTrafficToken)
+    } else {
+        Ok(value)
+    }
+}
+
 pub fn init_tracing() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "password_vault_api=info".into()))
@@ -519,7 +567,7 @@ fn unmatched_endpoint_label(_: &str) -> String {
 mod tests {
     use std::{sync::OnceLock, time::Duration as StdDuration};
 
-    use axum::{body::Body, body::to_bytes, http::Request};
+    use axum::{Router, body::Body, body::to_bytes, http::Request, middleware, routing::get};
     use serde_json::Value;
     use time::{Duration, OffsetDateTime};
     use tokio::sync::{Mutex, MutexGuard};
@@ -537,7 +585,10 @@ mod tests {
         db, maintenance,
     };
 
-    use super::{ApiConfig, app, build_app, metrics_app};
+    use super::{
+        ApiConfig, app, build_app, metrics_app, scope_request_traffic_class,
+        validate_synthetic_traffic_token,
+    };
 
     static DB_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -733,11 +784,50 @@ mod tests {
         assert!(!body.contains("item_id"));
     }
 
+    #[tokio::test]
+    async fn router_middleware_requires_matching_synthetic_traffic_token() {
+        async fn current_traffic_class_probe() -> &'static str {
+            crate::telemetry::current_traffic_class()
+        }
+
+        async fn probe(router: Router, token: Option<&str>) -> String {
+            let mut request = Request::builder()
+                .uri("/probe")
+                .header(crate::telemetry::TRAFFIC_CLASS_HEADER, "synthetic");
+            if let Some(token) = token {
+                request = request.header(crate::telemetry::SYNTHETIC_TRAFFIC_TOKEN_HEADER, token);
+            }
+
+            let response = router
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .expect("traffic class probe returns a response");
+            assert_eq!(response.status(), http::StatusCode::OK);
+            let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+            String::from_utf8(body.to_vec()).unwrap()
+        }
+
+        let expected_token = "0123456789abcdef0123456789abcdef";
+        let router = Router::new()
+            .route("/probe", get(current_traffic_class_probe))
+            .layer(middleware::from_fn_with_state(
+                Some(expected_token.to_string()),
+                scope_request_traffic_class,
+            ));
+
+        assert_eq!(probe(router.clone(), None).await, "user");
+        assert_eq!(probe(router.clone(), Some("wrong-token")).await, "user");
+        assert_eq!(
+            probe(router, Some("0123456789abcdef0123456789abcdef")).await,
+            "synthetic"
+        );
+    }
+
     #[test]
     fn traffic_class_header_is_low_cardinality() {
         let mut headers = axum::http::HeaderMap::new();
         assert_eq!(
-            crate::telemetry::traffic_class_from_headers(&headers),
+            crate::telemetry::traffic_class_from_headers(&headers, Some("test-token")),
             "user"
         );
 
@@ -746,7 +836,29 @@ mod tests {
             axum::http::HeaderValue::from_static("synthetic"),
         );
         assert_eq!(
-            crate::telemetry::traffic_class_from_headers(&headers),
+            crate::telemetry::traffic_class_from_headers(&headers, None),
+            "user"
+        );
+        assert_eq!(
+            crate::telemetry::traffic_class_from_headers(&headers, Some("test-token")),
+            "user"
+        );
+
+        headers.insert(
+            crate::telemetry::SYNTHETIC_TRAFFIC_TOKEN_HEADER,
+            axum::http::HeaderValue::from_static("wrong-token"),
+        );
+        assert_eq!(
+            crate::telemetry::traffic_class_from_headers(&headers, Some("test-token")),
+            "user"
+        );
+
+        headers.insert(
+            crate::telemetry::SYNTHETIC_TRAFFIC_TOKEN_HEADER,
+            axum::http::HeaderValue::from_static(" test-token "),
+        );
+        assert_eq!(
+            crate::telemetry::traffic_class_from_headers(&headers, Some("test-token")),
             "synthetic"
         );
 
@@ -755,8 +867,21 @@ mod tests {
             axum::http::HeaderValue::from_static("user@example.com"),
         );
         assert_eq!(
-            crate::telemetry::traffic_class_from_headers(&headers),
+            crate::telemetry::traffic_class_from_headers(&headers, Some("test-token")),
             "user"
+        );
+    }
+
+    #[test]
+    fn synthetic_traffic_token_requires_minimum_strength() {
+        let too_short = "x".repeat(super::MIN_SYNTHETIC_TRAFFIC_TOKEN_BYTES - 1);
+        let strong = "x".repeat(super::MIN_SYNTHETIC_TRAFFIC_TOKEN_BYTES);
+        let padded_strong = format!("  {strong}\n");
+
+        assert!(validate_synthetic_traffic_token(too_short).is_err());
+        assert_eq!(
+            validate_synthetic_traffic_token(padded_strong).unwrap(),
+            strong
         );
     }
 
@@ -891,6 +1016,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some("postgres://test:test@127.0.0.1:1/test".to_string()),
             synthetic_metadata_key: None,
+            synthetic_traffic_token: None,
             totp_seed_key: None,
             require_database: true,
             run_migrations_on_startup: false,
@@ -1126,6 +1252,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -1262,6 +1389,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -1385,6 +1513,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -1595,6 +1724,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -1783,6 +1913,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -2014,6 +2145,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -2085,6 +2217,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: None,
             require_database: true,
             run_migrations_on_startup: false,
@@ -2234,6 +2367,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -2498,6 +2632,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
@@ -2671,6 +2806,7 @@ mod tests {
                 .expect("hard-coded test socket address is valid"),
             database_url: Some(database_url.clone()),
             synthetic_metadata_key: Some([9u8; 32]),
+            synthetic_traffic_token: None,
             totp_seed_key: Some([8u8; 32]),
             require_database: true,
             run_migrations_on_startup: false,
