@@ -181,7 +181,9 @@ Refresh Docker Hub image digests as dependency changes, not as incidental featur
   digest-pinned `node:22-bookworm-slim` Docker Hub image and no npm dependencies.
 - #98 tracks hardening container builds after a Docker Hub token endpoint `504` affected a main image
   publish. Current mitigation pins Dockerfile, PostgreSQL service, Node synthetic, and k6 images by
-  digest. This is a supply-chain drift mitigation, not a full availability fix. Future mitigation
-  may mirror reviewed base images into GHCR, authenticate to Docker Hub in CI, or add pull
-  retry/backoff if upstream availability keeps affecting release builds.
+  digest. Current CI also prefers GHCR mirrors for the Rust build image, Debian runtime image, Node
+  synthetic image, and k6 image when those mirrors exist. If a mirror is not yet available, workflows
+  fall back to the reviewed upstream digest. This reduces Docker Hub release-build exposure without
+  adding a local mini-PC build dependency. See
+  `docs/decision-briefs/2026-06-10-ghcr-base-image-mirrors.md`.
 - #24 must run its OPAQUE proof-of-concept in this selected build environment.

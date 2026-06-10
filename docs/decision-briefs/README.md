@@ -10,6 +10,7 @@ They are used to explain tradeoffs in plain engineering terms before implementat
 - [Auth and crypto MVP](2026-06-07-auth-crypto-mvp.md)
 - [Client and multi-device roadmap](2026-06-07-client-roadmap.md)
 - [GitHub workflow](2026-06-07-github-workflow.md)
+- [GHCR mirrors for reviewed base and CI images](2026-06-10-ghcr-base-image-mirrors.md)
 - [PostgreSQL HA, migrations, and stability](2026-06-08-postgresql-ha-migrations-stability.md)
 - [Web UI design direction](2026-06-07-web-ui-design-direction.md)
 

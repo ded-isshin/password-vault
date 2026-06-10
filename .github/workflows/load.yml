@@ -22,10 +22,17 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
-  NODE_SYNTHETIC_IMAGE: node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
-  K6_IMAGE: grafana/k6:2.0.0@sha256:a33a0cfdc4d2483d6b7a3a22e726a499ff2831a671a49239104cd34a9937523c
+  RUST_IMAGE_UPSTREAM: docker.io/library/rust:1.96.0-bookworm@sha256:13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460
+  RUST_IMAGE_MIRROR: ghcr.io/ded-isshin/password-vault-base-rust:1.96.0-bookworm-sha256-13c186980fa33cc12759b429662a1322939dbe697484b7c33b47dd2698d28460
+  RUNTIME_IMAGE_UPSTREAM: docker.io/library/debian:bookworm-slim@sha256:0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb
+  RUNTIME_IMAGE_MIRROR: ghcr.io/ded-isshin/password-vault-base-debian:bookworm-slim-sha256-0104b334637a5f19aa9c983a91b54c89887c0984081f2068983107a6f6c21eeb
+  NODE_SYNTHETIC_IMAGE_UPSTREAM: docker.io/library/node:22-bookworm-slim@sha256:7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
+  NODE_SYNTHETIC_IMAGE_MIRROR: ghcr.io/ded-isshin/password-vault-ci-node:22-bookworm-slim-sha256-7af03b14a13c8cdd38e45058fd957bf00a72bbe17feac43b1c15a689c029c732
+  K6_IMAGE_UPSTREAM: docker.io/grafana/k6:2.0.0@sha256:a33a0cfdc4d2483d6b7a3a22e726a499ff2831a671a49239104cd34a9937523c
+  K6_IMAGE_MIRROR: ghcr.io/ded-isshin/password-vault-ci-k6:2.0.0-sha256-a33a0cfdc4d2483d6b7a3a22e726a499ff2831a671a49239104cd34a9937523c
   TEST_SYNTHETIC_METADATA_KEY_B64: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
   TEST_SYNTHETIC_TRAFFIC_TOKEN: ci-synthetic-token-0123456789abcdef
   TEST_TOTP_SEED_KEY_B64: YmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWE
@@ -51,10 +58,43 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Prefer GHCR image mirrors
+        id: images
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GITHUB_TOKEN" \
+            | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin \
+              >/dev/null 2>&1 || true
+
+          choose_image() {
+            local output_name="$1"
+            local mirror="$2"
+            local upstream="$3"
+
+            if docker buildx imagetools inspect "$mirror" >/dev/null 2>&1; then
+              echo "${output_name}=${mirror}" >>"$GITHUB_OUTPUT"
+              echo "Using GHCR mirror for ${output_name}: ${mirror}"
+            else
+              echo "${output_name}=${upstream}" >>"$GITHUB_OUTPUT"
+              echo "Mirror unavailable for ${output_name}; using pinned upstream ${upstream}"
+            fi
+          }
+
+          choose_image rust_image "$RUST_IMAGE_MIRROR" "$RUST_IMAGE_UPSTREAM"
+          choose_image runtime_image "$RUNTIME_IMAGE_MIRROR" "$RUNTIME_IMAGE_UPSTREAM"
+          choose_image node_synthetic_image \
+            "$NODE_SYNTHETIC_IMAGE_MIRROR" "$NODE_SYNTHETIC_IMAGE_UPSTREAM"
+          choose_image k6_image "$K6_IMAGE_MIRROR" "$K6_IMAGE_UPSTREAM"
+
       - name: Build local image
         run: |
           docker build \
             --build-arg BUILD_REVISION="${GITHUB_SHA}" \
+            --build-arg RUST_IMAGE="${{ steps.images.outputs.rust_image }}" \
+            --build-arg RUNTIME_IMAGE="${{ steps.images.outputs.runtime_image }}" \
             -t password-vault-api:load-smoke .
 
       - name: Run API
@@ -102,7 +142,8 @@ jobs:
             -e METRICS_BASE_URL=http://127.0.0.1:9090 \
             -e RUN_ID=manual-${{ github.run_id }}-${{ github.run_attempt }} \
             -e SYNTHETIC_TIMEOUT_MS=120000 \
-            "$NODE_SYNTHETIC_IMAGE" node --check load/synthetic/browser-api-journey.mjs
+            "${{ steps.images.outputs.node_synthetic_image }}" \
+            node --check load/synthetic/browser-api-journey.mjs
           docker run --rm --network host \
             -v "$PWD:/workspace:ro" \
             -w /workspace \
@@ -111,7 +152,8 @@ jobs:
             -e RUN_ID=manual-${{ github.run_id }}-${{ github.run_attempt }} \
             -e SYNTHETIC_TRAFFIC_TOKEN="${TEST_SYNTHETIC_TRAFFIC_TOKEN}" \
             -e SYNTHETIC_TIMEOUT_MS=120000 \
-            "$NODE_SYNTHETIC_IMAGE" node load/synthetic/browser-api-journey.mjs
+            "${{ steps.images.outputs.node_synthetic_image }}" \
+            node load/synthetic/browser-api-journey.mjs
 
       - name: Run k6 scenario
         shell: bash
@@ -137,7 +179,7 @@ jobs:
             -e SYNTHETIC_TRAFFIC_TOKEN="${TEST_SYNTHETIC_TRAFFIC_TOKEN}" \
             -e LOAD_RATE="$LOAD_RATE" \
             -e LOAD_DURATION="$LOAD_DURATION" \
-            "$K6_IMAGE" run "scenarios/$SCENARIO"
+            "${{ steps.images.outputs.k6_image }}" run "scenarios/$SCENARIO"
 
       - name: Stop API
         if: always()
