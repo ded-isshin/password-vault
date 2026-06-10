@@ -358,10 +358,10 @@ code or images are trusted for real secrets.
 
 - #16: Exact `pv-scram-sha-256-v1` transcript encoding and test vectors.
 - #16: Implementation of session, CSRF, rate-limit, and lockout behavior from ADR 0005.
-- #3: Browser KDF, crypto payload format, nonce/rekey policy, and dependency review.
-- #3: Revision rollback protection, AAD fields, key hierarchy, and crypto payload versioning.
-- #3: Browser bundle integrity, service-worker/cache policy, and WASM dependency gates before real
-  secrets.
+- Browser crypto v1: #3 is resolved for the browser MVP by `docs/security/crypto-design-draft.md`.
+  Remaining hardening is explicit: browser KDF vectors, HKDF vectors, stronger nonce/key-budget
+  tests, backend decrypt-negative tests, bundle integrity strategy, and Argon2id/WASM review if that
+  future migration is adopted.
 - Runtime operations: TOTP seed-protection-key backup, restore, and rotation drill before real users.
 - #5: PostgreSQL HA, backup target, restore drill, and failover plan.
 - #5: Kubernetes namespace/RBAC/NetworkPolicy/ingress assumptions and CloudNativePG operator risk.

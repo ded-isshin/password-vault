@@ -96,7 +96,7 @@ Canonical product docs:
 - [docs/lock-unlock-state.md](docs/lock-unlock-state.md)
 - [docs/threat-model.md](docs/threat-model.md)
 - [docs/security/auth-protocol-v1.md](docs/security/auth-protocol-v1.md)
-- [docs/security/crypto-design-draft.md](docs/security/crypto-design-draft.md)
+- [docs/security/crypto-design-draft.md](docs/security/crypto-design-draft.md) - Crypto v1 design note
 - [docs/security/revision-freshness.md](docs/security/revision-freshness.md)
 
 Current operational docs:
