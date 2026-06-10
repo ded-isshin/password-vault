@@ -148,7 +148,9 @@ publicly exposed.
 
 The manual GitHub Actions workflow `load-smoke` builds a local image on a GitHub-hosted runner,
 starts disposable PostgreSQL, optionally runs the full browser API journey, and executes the selected
-k6 scenario.
+k6 scenario. It configures the API, full browser journey, and k6 with the same CI-only synthetic
+traffic token so manual load traffic is counted as `traffic_class="synthetic"` instead of future
+real-user traffic.
 
 ## Scenarios
 

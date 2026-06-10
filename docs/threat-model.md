@@ -281,6 +281,13 @@ This is accepted for the web MVP only if minimum gates are defined before real s
 reviewed WASM, dependency review, no third-party scripts on auth/unlock pages, service-worker/cache
 policy, security headers, public-safety CI, and independent review for auth/crypto changes.
 
+Current browser-preview responses serve HTML, CSS, and JavaScript with a restrictive same-origin CSP,
+`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, frame denial, no-referrer policy,
+Permissions-Policy restrictions for unused device APIs, and cross-origin isolation headers that do
+not require `SharedArrayBuffer`. HSTS is intentionally not emitted by the application while the
+preview edge still uses a self-signed certificate; enable HSTS only after the edge has a trusted TLS
+model where browsers should not bypass certificate errors.
+
 CSP and SRI are partial controls. They do not fully protect against a same-origin server that can
 replace both HTML and bundle hashes. Reproducible or signed builds, dependency review, and future code
 transparency are stronger deferred controls. Future extension, desktop, and mobile clients can reduce

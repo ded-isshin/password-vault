@@ -2,7 +2,7 @@
 
 Status: draft. Created for milestone `v0.2-working-mvp`.
 
-Current implementation status, 2026-06-09:
+Current implementation status, 2026-06-10:
 
 - Deployed browser preview, health/readiness/metrics, active CloudNativePG preview PostgreSQL,
   Helm/GitOps, and Grafana dashboard exist.
@@ -31,6 +31,11 @@ Current implementation status, 2026-06-09:
   encrypted item create/update/delete, and sync on top of the deployed vault API.
 - The browser vault workflow is merged, published, rolled out, and visible through the mini-PC edge
   route.
+- The browser app is served without third-party scripts or CDN dependencies and now has explicit
+  browser-response hardening for the HTML/CSS/JS assets: restrictive same-origin CSP without
+  `unsafe-inline`/`unsafe-eval`, `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
+  frame denial, no-referrer policy, Permissions-Policy restrictions for unused device APIs, and
+  cross-origin opener/resource policies. HSTS remains deferred until the edge TLS model is trusted.
 - The browser MVP persists append-only per-vault local checkpoint records in origin-scoped
   `localStorage` after verified sync/write operations. On later unlocks from the same origin, the
   client rejects server heads that are older than or inconsistent with the stored checkpoint and
@@ -52,6 +57,9 @@ Current implementation status, 2026-06-09:
 - A dry-run-first `cleanup-synthetic` maintenance command exists for old reserved-domain synthetic
   accounts. The Helm chart can render a disabled-by-default Kubernetes CronJob for this command, so
   production values can enable dry-run scheduling before allowing confirmed deletion.
+- The current production-like preview has the synthetic cleanup CronJob enabled in confirmed-delete
+  mode with `.invalid` account-domain and bounded-delete guardrails. This keeps scheduled synthetic
+  data bounded, but it is operational hygiene, not backup or synthetic-monitoring proof.
 - The Helm chart can render a disabled-by-default full browser/API synthetic journey CronJob using
   the same dependency-free Node script as CI. Production GitOps currently enables it against the LAN
   edge route, and one-off journey smoke evidence plus CronJob/Job telemetry have been verified.
