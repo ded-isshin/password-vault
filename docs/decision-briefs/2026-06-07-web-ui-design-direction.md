@@ -120,8 +120,14 @@ coordination expensive. The design tokens and visual system should port without 
   items to the server.
 - Never put secrets in URLs, logs, local storage, screenshots, or telemetry.
 - Keep decrypted vault data in memory only and clear it on lock, logout, and idle expiry.
+- Clear copied secrets from the clipboard after a short timeout where browser APIs allow it, and
+  clear in-memory decrypted state on lock and logout.
+- Gate reveal, copy, fill, and export actions on local vault unlock; later production hardening
+  should add local reauthentication for high-risk reveal/export actions.
 - Use generic auth failure copy for login, MFA, and rate-limit cases.
-- Display TOTP seeds and recovery codes as one-time secrets.
+- Display account-MFA TOTP seeds and recovery codes as one-time secrets.
+- Keep account-MFA TOTP separate from any future in-vault site-TOTP feature. Site-TOTP seeds for
+  third-party accounts must live only inside the client-encrypted vault item payload.
 - Do not weaken the `Secure`, `HttpOnly`, `SameSite=Strict` session cookie contract for HTTP
   preview convenience.
 - Surface the HTTP preview limitation clearly when a browser flow depends on `Secure` cookie
@@ -176,4 +182,7 @@ Deferred suggestions:
 - Browser crypto is the critical path for a real zero-knowledge register/login/unlock UX.
 - HTTPS ingress is needed before browser session persistence can be fully validated.
 - Vault conflict UX must be designed before item sync can be treated as production-ready.
+- Master password change requires a reviewed key re-wrap flow before it can be offered safely.
+- Compromised-password checks require a privacy review because external breach lookups can leak
+  metadata unless they are opt-in, client-side, and privacy-preserving.
 - Public screenshots and examples must use placeholder handles and no private host details.

@@ -99,6 +99,11 @@ The account secret key is generated in the browser and must not be persisted ser
 plaintext. Losing it can mean losing vault access unless a future zero-knowledge recovery or trusted
 device-enrollment design is approved.
 
+Changing the master password is not a profile-only operation. A production design must derive new
+auth/unlock material locally and re-wrap the account keyset and vault keys without sending plaintext
+keys to the server. Do not expose a master-password-change UI until that key re-wrap flow, rollback
+behavior, and test vectors are documented.
+
 ## Pre-Login Metadata
 
 The browser needs KDF metadata before deriving auth material. `login/start` therefore uses
@@ -181,6 +186,10 @@ vault encryption keys and must never decrypt user vault data.
 The MVP stores pending and confirmed TOTP seeds encrypted with application-level AEAD under a runtime
 server key. This is an interim server-owned secret custody path. Vault/OpenBao Transit or another KMS
 path may replace it later, but that future system must stay separate from user-vault decrypt keys.
+
+This section covers account-login MFA TOTP only. A future in-vault site-TOTP feature for third-party
+accounts must store those site seeds inside the client-encrypted vault item payload, never in the
+server-owned account-MFA TOTP custody path.
 
 ## Recovery
 
