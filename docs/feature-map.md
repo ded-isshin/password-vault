@@ -18,6 +18,8 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 | Items | Login item | Type stored inside encrypted payload. |
 | Items | Secure note | Type stored inside encrypted payload. |
 | Items | Item revisions | Immutable encrypted revisions. |
+| Items | Local item history | Use immutable encrypted revisions; no new storage model required. |
+| Security UX | Clipboard/reveal hardening | Clear copied secrets where feasible; reveal/copy requires local unlock. |
 | Sync | Delta pull by cursor | Server-visible cursor, encrypted payloads. |
 | Sync | Optimistic concurrency | Stale base revision returns conflict. |
 | API | Versioned `/v1` product API | Contracts documented before security-sensitive implementation. |
@@ -33,8 +35,10 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 | --- | --- | --- |
 | Devices | Strong device enrollment | Requires final key hierarchy and WebAuthn/passkey decisions. |
 | Recovery | Zero-knowledge recovery key | Must be designed before making recovery promises. |
+| Account | Master password change | Requires account keyset and vault key re-wrap design before production use. |
 | Identity | Email verification | Useful but not core to vault crypto. |
 | Auth | WebAuthn/passkeys | Stronger MFA, but TOTP is first. |
+| Items | In-vault site TOTP | Third-party site TOTP seeds must be client-encrypted item data, not account-MFA secrets. |
 | Organizations | Org accounts and memberships | Requires sharing, groups, and key wrapping. |
 | Sharing | Shared vaults or collections | Requires per-member key distribution. |
 | Clients | Browser extension | Should reuse the same sync and crypto model; autofill threat model required. |
@@ -62,3 +66,7 @@ This document maps product capabilities to MVP, post-MVP, and explicit non-goals
 - Multi-device unlock and key delivery are not yet specified.
 - Browser JavaScript delivery is a residual risk for a web-only zero-knowledge MVP.
 - Plaintext metadata decisions can leak account behavior even when item payloads are encrypted.
+- Master password change is not just profile editing; it requires safe local re-wrap of key
+  material.
+- Account-MFA TOTP and future in-vault site TOTP are separate security domains and must not share
+  custody paths.
